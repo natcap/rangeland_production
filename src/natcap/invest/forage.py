@@ -3,18 +3,7 @@
 InVEST Forage model developed from this design doc:
 https://docs.google.com/document/d/10oJo43buEdJkFTZ0wYaW00EagSzs1oM7g_lBUc8URMI/edit#
 """
-from __future__ import absolute_import
-
-import os
-import logging
-
-from osgeo import gdal
-from osgeo import ogr
-import numpy
-
-import pygeoprocessing
-from . import utils
-from . import validation
+import logger
 
 LOGGER = logging.getLogger('natcap.invest.forage')
 

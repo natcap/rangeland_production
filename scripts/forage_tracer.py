@@ -1,4 +1,6 @@
 """Tracer code for Forage model development."""
+import os
+
 import natcap.invest.forage
 import logging
 
@@ -23,7 +25,7 @@ LOGGER.info("found %s", BASE_DROPBOX_DIR)
 def main():
     """Entry point."""
     args = {
-        'workspace_dir': 'frorage_tracer_workspace',
+        'workspace_dir': 'forage_tracer_workspace',
         'starting_year': '2016',
         'starting_month': '5',
         'n_months': '24',
