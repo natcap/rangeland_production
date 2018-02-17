@@ -26,7 +26,7 @@ def main():
     """Entry point."""
     args = {
         'workspace_dir': 'forage_tracer_workspace',
-        'starting_year': '2016',
+        'starting_year': '1998',
         'starting_month': '5',
         'n_months': '29',
         'aoi_path': None,

@@ -8,6 +8,8 @@ import logging
 
 LOGGER = logging.getLogger('natcap.invest.forage')
 
+# we only have these types of soils
+SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
 
 def execute(args):
     """InVEST Forage Model.
@@ -67,3 +69,13 @@ def execute(args):
             "Couldn't find the following precipitation paths given the " +
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
             "\n\t".join(missing_path_list))
+
+    # lookup to provide path to soil percent given soil type
+    soil_path_type_map = {}
+    for soil_type in SOIL_TYPE_LIST:
+        soil_path_type_map[soil_type] = args['%s_percent_path' % soil_type]
+        if not os.path.exists(soil_path_type_map[soil_type]):
+            raise ValueError(
+                "Couldn't find %s for %s" % (
+                    soil_path_type_map[soil_type], soil_type))
+
