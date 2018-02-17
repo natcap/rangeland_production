@@ -28,8 +28,21 @@ def main():
         'workspace_dir': 'forage_tracer_workspace',
         'starting_year': '2016',
         'starting_month': '5',
-        'n_months': '24',
+        'n_months': '29',
         'aoi_path': None,
+        'clay_percent_path': os.path.join(
+            BASE_DROPBOX_DIR, 'forage_model_development_data',
+            'sample_dev_inputs', 'clyppt_sl3.tif'),
+        'silt_percent_path': os.path.join(
+            BASE_DROPBOX_DIR, 'forage_model_development_data',
+            'sample_dev_inputs', 'sltppt_sl3.tif'),
+        'sand_percent_path': os.path.join(
+            BASE_DROPBOX_DIR, 'forage_model_development_data',
+            'sample_dev_inputs', 'sndppt_sl3.tif'),
+        'soil_texture_path': os.path.join(BASE_DROPBOX_DIR),
+        'monthly_precip_path_pattern': os.path.join(
+            BASE_DROPBOX_DIR, 'forage_model_development_data',
+            'sample_dev_inputs', 'chirps-v2.0.<year>.<month>.tif')
     }
     LOGGER.info('launching forage model')
     natcap.invest.forage.execute(args)

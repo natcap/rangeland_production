@@ -3,7 +3,8 @@
 InVEST Forage model developed from this design doc:
 https://docs.google.com/document/d/10oJo43buEdJkFTZ0wYaW00EagSzs1oM7g_lBUc8URMI/edit#
 """
-import logger
+import os
+import logging
 
 LOGGER = logging.getLogger('natcap.invest.forage')
 
@@ -25,8 +26,44 @@ def execute(args):
             desired spatial extent of the model. This has the effect of
             clipping the computational area of the input datasets to be the
             area intersected by this polygon.
+        args['clay_percent_path'] (string): path to raster representing per-pixel
+            percent of soil component that is clay
+        args['silt_percent_path'] (string): path to raster representing per-pixel
+            percent of soil component that is silt
+        args['sand_percent_path'] (string): path to raster representing per-pixel
+            percent of soil component that is sand
+        args['monthly_precip_path_pattern'] (string): path to the monthly
+            precipitation path pattern. where the string <month> and <year>
+            can be replaced with the number 1..12 for the month and integer
+            year.  Example: if this value is given as:
+            `./precip_dir/chirps-v2.0.<year>.<month>.tif, `starting_year` as
+            2016, `starting_month` as 5, and `n_months` is 29, the model will
+            expect to find files named
+                 "./precip_dir/chirps-v2.0.2016.05.tif" to
+                 "./precip_dir/chirps-v2.0.2018.09.tif"
 
     Returns:
         None.
     """
     LOGGER.info("model execute: %s", args)
+    starting_month = int(args['starting_month'])
+    starting_year = int(args['starting_year'])
+    # this will be used to look up precip path given the model's month
+    # timestep index that starts at 0
+    precip_path_list = []
+    # we'll use this to report any missing paths
+    missing_path_list = []
+    # build the list of
+    for month_index in xrange(int(args['n_months'])):
+        month_i = (starting_month + month_index - 1) % 12 + 1
+        year = starting_year +  (starting_month + month_index - 1) // 12
+        precip_path = args['monthly_precip_path_pattern'].replace(
+            '<year>', str(year)).replace('<month>', '%.2d' % month_i)
+        precip_path_list.append(precip_path)
+        if not os.path.exists(precip_path):
+            missing_path_list.append(precip_path)
+    if missing_path_list:
+        raise ValueError(
+            "Couldn't find the following precipitation paths given the " +
+            "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
+            "\n\t".join(missing_path_list))
