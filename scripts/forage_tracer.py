@@ -29,7 +29,9 @@ def main():
         'starting_year': '1998',
         'starting_month': '5',
         'n_months': '29',
-        'aoi_path': None,
+        'aoi_path': os.path.join(
+            BASE_DROPBOX_DIR, 'forage_model_development_data',
+            'sample_dev_inputs', 'soums_monitoring_area_dissolve.shp'),
         'clay_percent_path': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
             'sample_dev_inputs', 'clyppt_sl3.tif'),
@@ -45,7 +47,7 @@ def main():
             'sample_dev_inputs', 'chirps-v2.0.<year>.<month>.tif'),
         'monthly_temperature_path_pattern': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
-            'sample_dev_inputs', 'wc2.0_30s_tma_<month>.tif')
+            'sample_dev_inputs', 'wc2.0_30s_tmax_<month>.tif')
     }
     LOGGER.info('launching forage model')
     natcap.invest.forage.execute(args)

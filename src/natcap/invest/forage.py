@@ -63,6 +63,10 @@ def execute(args):
     # the mwith temperature later
     temperature_month_set = set()
 
+    if not os.path.exists(args['aoi_path']):
+        raise ValueError(
+            "Couldn't find a valid AOI vector at: %s" % args['aoi_path'])
+
     # build the list of
     for month_index in xrange(int(args['n_months'])):
         month_i = (starting_month + month_index - 1) % 12 + 1
