@@ -43,6 +43,10 @@ def execute(args):
             expect to find files named
                  "./precip_dir/chirps-v2.0.2016.05.tif" to
                  "./precip_dir/chirps-v2.0.2018.09.tif"
+        args['monthly_temperature_path_pattern'] (string): path to monthly
+            temperature data pattern where <month> can be replaced with the
+            number 1..12 when the simultation needs a monthly temperature
+            input
 
     Returns:
         None.
@@ -55,9 +59,14 @@ def execute(args):
     precip_path_list = []
     # we'll use this to report any missing paths
     missing_path_list = []
+    # this set will build up the integer months that are used so we can index
+    # the mwith temperature later
+    temperature_month_set = set()
+
     # build the list of
     for month_index in xrange(int(args['n_months'])):
         month_i = (starting_month + month_index - 1) % 12 + 1
+        temperature_month_set.add(month_i)
         year = starting_year +  (starting_month + month_index - 1) // 12
         precip_path = args['monthly_precip_path_pattern'].replace(
             '<year>', str(year)).replace('<month>', '%.2d' % month_i)
@@ -69,6 +78,24 @@ def execute(args):
             "Couldn't find the following precipitation paths given the " +
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
             "\n\t".join(missing_path_list))
+
+    # this will map the month integer (1..12) to a corresponding temperature
+    # rasters
+    temperature_path_month_map = {}
+    # this list will be used to record any expected files that are not found
+    missing_temperature_path_list = []
+    for month_i in temperature_month_set:
+        temp_path = args['monthly_temperature_path_pattern'].replace(
+            '<month>', '%.2d' % month_i)
+        temperature_path_month_map[month_i] = temp_path
+        if not os.path.exists(temp_path):
+            missing_temperature_path_list.append(temp_path)
+
+    if missing_temperature_path_list:
+        raise ValueError(
+            "Couldn't find the following temperature raster paths given the " +
+            "pattern: %s\n\t" % args['monthly_temperature_path_pattern'] +
+            "\n\t".join(missing_temperature_path_list))
 
     # lookup to provide path to soil percent given soil type
     soil_path_type_map = {}

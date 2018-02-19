@@ -42,7 +42,10 @@ def main():
         'soil_texture_path': os.path.join(BASE_DROPBOX_DIR),
         'monthly_precip_path_pattern': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
-            'sample_dev_inputs', 'chirps-v2.0.<year>.<month>.tif')
+            'sample_dev_inputs', 'chirps-v2.0.<year>.<month>.tif'),
+        'monthly_temperature_path_pattern': os.path.join(
+            BASE_DROPBOX_DIR, 'forage_model_development_data',
+            'sample_dev_inputs', 'wc2.0_30s_tma_<month>.tif')
     }
     LOGGER.info('launching forage model')
     natcap.invest.forage.execute(args)
