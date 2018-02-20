@@ -6,10 +6,13 @@ https://docs.google.com/document/d/10oJo43buEdJkFTZ0wYaW00EagSzs1oM7g_lBUc8URMI/
 import os
 import logging
 
+import pygeoprocessing
+
 LOGGER = logging.getLogger('natcap.invest.forage')
 
 # we only have these types of soils
 SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
+
 
 def execute(args):
     """InVEST Forage Model.
@@ -28,12 +31,13 @@ def execute(args):
             desired spatial extent of the model. This has the effect of
             clipping the computational area of the input datasets to be the
             area intersected by this polygon.
-        args['clay_percent_path'] (string): path to raster representing per-pixel
-            percent of soil component that is clay
-        args['silt_percent_path'] (string): path to raster representing per-pixel
-            percent of soil component that is silt
-        args['sand_percent_path'] (string): path to raster representing per-pixel
-            percent of soil component that is sand
+        args['bulk_density_path'] (string): path to bulk density raster.
+        args['clay_percent_path'] (string): path to raster representing
+            per-pixel percent of soil component that is clay
+        args['silt_percent_path'] (string): path to raster representing
+            per-pixel percent of soil component that is silt
+        args['sand_percent_path'] (string): path to raster representing
+            per-pixel percent of soil component that is sand
         args['monthly_precip_path_pattern'] (string): path to the monthly
             precipitation path pattern. where the string <month> and <year>
             can be replaced with the number 1..12 for the month and integer
@@ -47,6 +51,13 @@ def execute(args):
             temperature data pattern where <month> can be replaced with the
             number 1..12 when the simultation needs a monthly temperature
             input
+        args['veg_spatial_composition_path'] (string): path to vegetation
+            spatial composition raster. AT THE MOMENT I DON'T KNOW WHAT THE
+            EXPECTED VALUES/UNITS OF THIS RASTER ARE.
+        args['animal_inputs_path'] (string): path to animal vector inputs.
+            Should have the following fields:
+                'density': WHAT ARE THE UNITS
+                ANY MORE FIELDS?
 
     Returns:
         None.
@@ -63,10 +74,10 @@ def execute(args):
     # the mwith temperature later
     temperature_month_set = set()
 
-    if not os.path.exists(args['aoi_path']):
-        raise ValueError(
-            "Couldn't find a valid AOI vector at: %s" % args['aoi_path'])
-
+    # this dict will be used to build the set of input rasters associated with
+    # a reasonable lookup ID so we can have a nice dataset to align for raster
+    # stack operations
+    base_align_raster_path_id_map = {}
     # build the list of
     for month_index in xrange(int(args['n_months'])):
         month_i = (starting_month + month_index - 1) % 12 + 1
@@ -74,6 +85,7 @@ def execute(args):
         year = starting_year +  (starting_month + month_index - 1) // 12
         precip_path = args['monthly_precip_path_pattern'].replace(
             '<year>', str(year)).replace('<month>', '%.2d' % month_i)
+        base_align_raster_path_id_map['precip_%d' % month_i] = precip_path
         precip_path_list.append(precip_path)
         if not os.path.exists(precip_path):
             missing_path_list.append(precip_path)
@@ -83,15 +95,12 @@ def execute(args):
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
             "\n\t".join(missing_path_list))
 
-    # this will map the month integer (1..12) to a corresponding temperature
-    # rasters
-    temperature_path_month_map = {}
     # this list will be used to record any expected files that are not found
     missing_temperature_path_list = []
     for month_i in temperature_month_set:
         temp_path = args['monthly_temperature_path_pattern'].replace(
             '<month>', '%.2d' % month_i)
-        temperature_path_month_map[month_i] = temp_path
+        base_align_raster_path_id_map['temp_%d' % month_i] = temp_path
         if not os.path.exists(temp_path):
             missing_temperature_path_list.append(temp_path)
 
@@ -102,11 +111,36 @@ def execute(args):
             "\n\t".join(missing_temperature_path_list))
 
     # lookup to provide path to soil percent given soil type
-    soil_path_type_map = {}
     for soil_type in SOIL_TYPE_LIST:
-        soil_path_type_map[soil_type] = args['%s_percent_path' % soil_type]
-        if not os.path.exists(soil_path_type_map[soil_type]):
+        base_align_raster_path_id_map[soil_type] = (
+            args['%s_percent_path' % soil_type])
+        if not os.path.exists(base_align_raster_path_id_map[soil_type]):
             raise ValueError(
                 "Couldn't find %s for %s" % (
-                    soil_path_type_map[soil_type], soil_type))
+                    base_align_raster_path_id_map[soil_type], soil_type))
 
+    # find the smallest target_pixel_size
+    target_pixel_size = min(*[
+        pygeoprocessing.get_raster_info(path)['pixel_size']
+        for path in base_align_raster_path_id_map.values()],
+        key=lambda x: (abs(x[0]), abs(x[1])))
+    LOGGER.info(
+        "smallest pixel size of all raster inputs: %s", target_pixel_size)
+
+    # set up a dictionary that uses the same keys as
+    # 'base_align_raster_path_id_map' to point to the clipped/resampled
+    # rasters to be used in raster calculations for the model.
+    aligned_raster_dir = os.path.join(
+        args['workspace_dir'], 'aligned_raster_dir')
+    aligned_raster_path_id_map = dict([(key, os.path.join(
+        aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
+        for key, path in base_align_raster_path_id_map.iteritems()])
+
+    # align all the base inputs to be the minimum known pixel size and to
+    # only extend over their combined intersections
+    LOGGER.info("aligning base raster inputs")
+    pygeoprocessing.align_and_resize_raster_stack(
+        [path for path in sorted(base_align_raster_path_id_map.itervalues())],
+        [path for path in sorted(aligned_raster_path_id_map.itervalues())],
+        ['nearest'] * len(aligned_raster_path_id_map),
+        target_pixel_size, 'intersection')
