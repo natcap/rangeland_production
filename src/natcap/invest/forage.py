@@ -84,7 +84,7 @@ def execute(args):
         year = starting_year +  (starting_month + month_index - 1) // 12
         precip_path = args['monthly_precip_path_pattern'].replace(
             '<year>', str(year)).replace('<month>', '%.2d' % month_i)
-        base_align_raster_path_id_map['precip_%d' % month_i] = precip_path
+        base_align_raster_path_id_map['precip_%d' % month_index] = precip_path
         precip_path_list.append(precip_path)
         if not os.path.exists(precip_path):
             missing_path_list.append(precip_path)
