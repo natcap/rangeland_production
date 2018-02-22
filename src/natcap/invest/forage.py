@@ -68,8 +68,6 @@ def execute(args):
     # this will be used to look up precip path given the model's month
     # timestep index that starts at 0
     precip_path_list = []
-    # we'll use this to report any missing paths
-    missing_path_list = []
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
     temperature_month_set = set()
@@ -78,6 +76,8 @@ def execute(args):
     # a reasonable lookup ID so we can have a nice dataset to align for raster
     # stack operations
     base_align_raster_path_id_map = {}
+    # we'll use this to report any missing paths
+    missing_precip_path_list = []
     for month_index in xrange(int(args['n_months'])):
         month_i = (starting_month + month_index - 1) % 12 + 1
         temperature_month_set.add(month_i)
@@ -87,12 +87,12 @@ def execute(args):
         base_align_raster_path_id_map['precip_%d' % month_index] = precip_path
         precip_path_list.append(precip_path)
         if not os.path.exists(precip_path):
-            missing_path_list.append(precip_path)
-    if missing_path_list:
+            missing_precip_path_list.append(precip_path)
+    if missing_precip_path_list:
         raise ValueError(
             "Couldn't find the following precipitation paths given the " +
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
-            "\n\t".join(missing_path_list))
+            "\n\t".join(missing_precip_path_list))
 
     # this list will be used to record any expected files that are not found
     missing_temperature_path_list = []
