@@ -35,13 +35,13 @@ def main():
         'bulk_density_path': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
             'sample_dev_inputs', 'bldfie_sl3.tif'),
-        'clay_percent_path': os.path.join(
+        'clay_proportion_path': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
             'sample_dev_inputs', 'clyppt_sl3.tif'),
-        'silt_percent_path': os.path.join(
+        'silt_proportion_path': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
             'sample_dev_inputs', 'sltppt_sl3.tif'),
-        'sand_percent_path': os.path.join(
+        'sand_proportion_path': os.path.join(
             BASE_DROPBOX_DIR, 'forage_model_development_data',
             'sample_dev_inputs', 'sndppt_sl3.tif'),
         'monthly_precip_path_pattern': os.path.join(

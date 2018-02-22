@@ -32,12 +32,12 @@ def execute(args):
             clipping the computational area of the input datasets to be the
             area intersected by this polygon.
         args['bulk_density_path'] (string): path to bulk density raster.
-        args['clay_percent_path'] (string): path to raster representing
-            per-pixel percent of soil component that is clay
-        args['silt_percent_path'] (string): path to raster representing
-            per-pixel percent of soil component that is silt
-        args['sand_percent_path'] (string): path to raster representing
-            per-pixel percent of soil component that is sand
+        args['clay_proportion_path'] (string): path to raster representing
+            per-pixel proportion of soil component that is clay
+        args['silt_proportion_path'] (string): path to raster representing
+            per-pixel proportion of soil component that is silt
+        args['sand_proportion_path'] (string): path to raster representing
+            per-pixel proportion of soil component that is sand
         args['monthly_precip_path_pattern'] (string): path to the monthly
             precipitation path pattern. where the string <month> and <year>
             can be replaced with the number 1..12 for the month and integer
