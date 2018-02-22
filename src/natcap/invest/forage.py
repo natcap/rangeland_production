@@ -78,7 +78,6 @@ def execute(args):
     # a reasonable lookup ID so we can have a nice dataset to align for raster
     # stack operations
     base_align_raster_path_id_map = {}
-    # build the list of
     for month_index in xrange(int(args['n_months'])):
         month_i = (starting_month + month_index - 1) % 12 + 1
         temperature_month_set.add(month_i)
