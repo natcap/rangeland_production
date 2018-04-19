@@ -47,7 +47,11 @@ def execute(args):
         args['monthly_precip_path_pattern'] (string): path to the monthly
             precipitation path pattern. where the string <month> and <year>
             can be replaced with the number 1..12 for the month and integer
-            year.  Example: if this value is given as:
+            year. The model expects to find a precipitation file input for
+            every month of the simulation, so there should be as many
+            precipitation input files as `n_months`. The <month> value in
+            input files must be two digits.
+            Example: if this value is given as:
             `./precip_dir/chirps-v2.0.<year>.<month>.tif, `starting_year` as
             2016, `starting_month` as 5, and `n_months` is 29, the model will
             expect to find files named
@@ -55,12 +59,22 @@ def execute(args):
                  "./precip_dir/chirps-v2.0.2018.09.tif"
         args['monthly_min_temperature_path_pattern'] (string): path to monthly
             temperature data pattern where <month> can be replaced with the
-            number 1..12 when the simultation needs a monthly temperature
-            input
+            number 1..12 when the simulation needs a monthly temperature
+            input. The model expects to find only one minimum temperature
+            file input for each month of the year, so the number of minimum
+            temperature input files could be less than `n_months`. The
+            <month> value in input files must be two digits.
+            Example: if this value is given as 
+            `./temperature/min_temperature_<month>.tif', `starting_month` as
+            5, and `n_months` is 29, the model will expect to find files
+            named
+                "./temperature/min_temperature_01.tif to
+                "./temperature/min_temperature_12.tif"
         args['monthly_max_temperature_path_pattern'] (string): path to monthly
             temperature data pattern where <month> can be replaced with the
-            number 1..12 when the simultation needs a monthly temperature
-            input
+            number 1..12 when the simulation needs a monthly temperature
+            input. The <month> value in input files must be two digits.
+            Example:
         args['veg_trait_path'] (string): path to csv file giving vegetation
 			traits for each plant functional type available for grazing. This
 			file must be indexed by a unique integer field "PFT" that
