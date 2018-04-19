@@ -85,19 +85,52 @@ def execute(args):
                 "./temperature/max_temperature_12.tif"
         args['veg_trait_path'] (string): path to csv file giving vegetation
 			traits for each plant functional type available for grazing. This
-			file must be indexed by a unique integer field "PFT" that
-            corresponds to veg spatial composition rasters.            
-		args['veg_spatial_composition_path_pattern'] (string): path to
+			file must contain a column named "PFT" that contains unique
+            integers. These integer values correspond to PFT identifiers of
+            veg spatial composition rasters. Other required fields for this
+            table are vegetation input parameters from the Century model, for
+            example maximum intrinsic growth rate, optimum temperature for
+            production, minimum C/N ratio, etc. NOT TOTALLY SURE YET WHICH
+            PARAMETERS WE'LL DROP, SO AT THE MOMENT SAMPLE INPUTS INCLUDE ALL
+            PARAMETERS FROM THE CENTURY CROP.100 FILE.
+        args['veg_spatial_composition_path_pattern'] (string): path to
 			vegetation rasters, one per plant functional type available for
 			grazing, where <PFT> can be replaced with an integer that is
 			indexed in the veg trait csv.
+            Example: if this value is given as `./vegetation/pft_<PFT>.tif`
+            and the directory `./vegetation/` contains these files:
+                "pft_1.tif"
+                "pft_12.tif"
+                "pft_50.tif",
+            then the "PFT" field in the vegetation trait table must contain
+            the values 1, 12, and 50.
         args['animal_trait_path'] string: path to csv file giving animal traits
-            for each animal type - number - duration combination, indexed to
-            the animal management layer by the unique integer field
-            "animal_id".
+            for each animal type - number - duration combination. This table
+            must contain a column named "animal_id" that contains unique
+            integers. These integer values correspond to features in the
+            animal management layer.
+            Other required fields in this table are:
+                type (allowable values: B_indicus, B_taurus,
+                    indicus_x_taurus, sheep, camelid, hindgut_fermenter)
+                sex (allowable values: entire_m, castrate, lac_female,
+                    nonlac_female)
+                age (days)
+                weight (kg)
+                SRW (standard reference weight, kg; the weight of a mature
+                    female in median condition)
+                SFW (standard fleece weight, kg; the average weight of fleece
+                    of a mature adult; for sheep only)
+                birth_weight (kg)
+                num_animals (number of animals grazing inside the polygon)
+                grz_months (a string of integers, separated by ','; months of
+                    the simulation when animals are present,
+                    relative to `starting_month`. For example, if `n_months`
+                    is 3, and animals are present during the entire simulation
+                    period, `grz_months` should be "1,2,3")
         args['animal_mgmt_layer_path'] (string): path to animal vector inputs
-            giving the location of grazing animals. Must be indexed by the
-            field "animal_id" that corresponds to the animal trait csv.
+            giving the location of grazing animals. Must have a field named
+            "animal_id", containing unique integers that correspond to the
+            values in the "animal_id" column of the animal trait csv.
 
     Returns:
         None.
