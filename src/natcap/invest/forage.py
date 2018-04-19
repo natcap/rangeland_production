@@ -201,7 +201,7 @@ def execute(args):
         args['veg_spatial_composition_path_pattern'])
     files = [f for f in os.listdir(pft_dir) if os.path.isfile(
              os.path.join(pft_dir, f))]
-    pft_files = [re.search((pft_basename.replace('<PFT>', '(.+?)'), f for
+    pft_files = [re.search(pft_basename.replace('<PFT>', '(.+?)'), f) for
                  f in files]
     pft_files = [match for match in pft_files if match is not None]
     pft_list = set([int(match.group(1)) for match in pft_files])
