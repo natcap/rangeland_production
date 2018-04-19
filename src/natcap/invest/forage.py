@@ -73,8 +73,16 @@ def execute(args):
         args['monthly_max_temperature_path_pattern'] (string): path to monthly
             temperature data pattern where <month> can be replaced with the
             number 1..12 when the simulation needs a monthly temperature
-            input. The <month> value in input files must be two digits.
-            Example:
+            input. The model expects to find only one maximum temperature
+            file input for each month of the year, so the number of maximum
+            temperature input files could be less than `n_months`. The
+            <month> value in input files must be two digits.
+            Example: if this value is given as 
+            `./temperature/max_temperature_<month>.tif', `starting_month` as
+            5, and `n_months` is 29, the model will expect to find files
+            named
+                "./temperature/max_temperature_01.tif to
+                "./temperature/max_temperature_12.tif"
         args['veg_trait_path'] (string): path to csv file giving vegetation
 			traits for each plant functional type available for grazing. This
 			file must be indexed by a unique integer field "PFT" that
