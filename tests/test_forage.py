@@ -46,9 +46,9 @@ class foragetests(unittest.TestCase):
                 'soil', 'sand.tif'),
             'monthly_precip_path_pattern': os.path.join(
                 SAMPLE_DATA, 'precip', 'chirps-v2.0.<year>.<month>.tif'),
-            'monthly_min_temperature_path_pattern': os.path.join(
+            'min_temp_path_pattern': os.path.join(
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmin_<month>.tif'),
-            'monthly_max_temperature_path_pattern': os.path.join(
+            'max_temp_path_pattern': os.path.join(
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmax_<month>.tif'),
             'veg_trait_path': os.path.join(SAMPLE_DATA, 'pft_trait.csv'),
             'veg_spatial_composition_path_pattern': os.path.join(

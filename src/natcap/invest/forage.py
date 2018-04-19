@@ -57,7 +57,7 @@ def execute(args):
             expect to find files named
                  "./precip_dir/chirps-v2.0.2016.05.tif" to
                  "./precip_dir/chirps-v2.0.2018.09.tif"
-        args['monthly_min_temperature_path_pattern'] (string): path to monthly
+        args['min_temp_path_pattern'] (string): path to monthly
             temperature data pattern where <month> can be replaced with the
             number 1..12 when the simulation needs a monthly temperature
             input. The model expects to find only one minimum temperature
@@ -70,7 +70,7 @@ def execute(args):
             named
                 "./temperature/min_temperature_01.tif to
                 "./temperature/min_temperature_12.tif"
-        args['monthly_max_temperature_path_pattern'] (string): path to monthly
+        args['max_temp_path_pattern'] (string): path to monthly
             temperature data pattern where <month> can be replaced with the
             number 1..12 when the simulation needs a monthly temperature
             input. The model expects to find only one maximum temperature
@@ -168,31 +168,21 @@ def execute(args):
             "\n\t".join(missing_precip_path_list))
 
     # this list will be used to record any expected files that are not found
-    missing_min_temperature_path_list = []
-    for month_i in temperature_month_set:
-        temp_path = args['monthly_min_temperature_path_pattern'].replace(
-            '<month>', '%.2d' % month_i)
-        base_align_raster_path_id_map['min_temp_%d' % month_i] = temp_path
-        if not os.path.exists(temp_path):
-            missing_min_temperature_path_list.append(temp_path)
-    if missing_min_temperature_path_list:
-        raise ValueError(
+    for substring in ['min', 'max']:
+        missing_temperature_path_list = []
+        for month_i in temperature_month_set:
+            monthly_temp_path = args[
+                '%s_temp_path_pattern' % substring].replace(
+                '<month>', '%.2d' % month_i)
+            base_align_raster_path_id_map['%s_temp_%d' \
+                % (substring, month_i)] = monthly_temp_path
+            if not os.path.exists(monthly_temp_path):
+                missing_min_temperature_path_list.append(monthly_temp_path)
+        if missing_temperature_path_list:
+            raise ValueError(
             "Couldn't find the following temperature raster paths given the " +
-            "pattern: %s\n\t" % args['monthly_min_temperature_path_pattern'] +
-            "\n\t".join(missing_min_temperature_path_list))
-    
-    missing_max_temperature_path_list = []
-    for month_i in temperature_month_set:
-        temp_path = args['monthly_max_temperature_path_pattern'].replace(
-            '<month>', '%.2d' % month_i)
-        base_align_raster_path_id_map['max_temp_%d' % month_i] = temp_path
-        if not os.path.exists(temp_path):
-            missing_max_temperature_path_list.append(temp_path)
-    if missing_max_temperature_path_list:
-        raise ValueError(
-            "Couldn't find the following temperature raster paths given the " +
-            "pattern: %s\n\t" % args['monthly_max_temperature_path_pattern'] +
-            "\n\t".join(missing_max_temperature_path_list))
+            "pattern: %s\n\t" % args['%s_temp_path_pattern' % substring] +
+            "\n\t".join(missing_temperature_path_list))
 
     # lookup to provide path to soil percent given soil type
     for soil_type in SOIL_TYPE_LIST:
