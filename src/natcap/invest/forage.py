@@ -201,17 +201,17 @@ def execute(args):
         args['veg_spatial_composition_path_pattern'])
     files = [f for f in os.listdir(pft_dir) if os.path.isfile(
              os.path.join(pft_dir, f))]
-    pft_files = [re.search(pft_basename.replace('<PFT>', '(.+?)'), f) for
-                 f in files]
-    pft_files = [match for match in pft_files if match is not None]
-    pft_list = set([int(match.group(1)) for match in pft_files])
-    for pft_i in pft_list:
+    pft_regex = re.compile(pft_basename.replace('<PFT>', '(\d+)'))
+    pft_matches = [
+        m for m in [pft_regex.search(f) for f in files] if m is not None]
+    pft_id_set = set([int(m.group(1)) for m in pft_matches])
+    for pft_i in pft_id_set:
         pft_path = args['veg_spatial_composition_path_pattern'].replace(
             '<PFT>', '%d' % pft_i)
         base_align_raster_path_id_map['pft_%d' % pft_i] = pft_path
     veg_trait_table = utils.build_lookup_from_csv(args['veg_trait_path'],
                                                   'PFT')
-    missing_pft_trait_list = set(pft_list).difference(
+    missing_pft_trait_list = pft_id_set.difference(
         set(veg_trait_table.keys()))
     if missing_pft_trait_list:
         raise ValueError(
