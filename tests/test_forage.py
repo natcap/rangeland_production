@@ -6,8 +6,6 @@ import shutil
 import os
 import sys
 
-sys.path.append(
- "C:/Users/ginge/Documents/Python/invest/src/natcap/invest")
 
 SAMPLE_DATA = "C:/Users/ginge/Documents/NatCap/sample_inputs"
 # REGRESSION_DATA = ????  TODO collect results to use as regression data
@@ -62,7 +60,7 @@ class foragetests(unittest.TestCase):
         
     def test_model_runs(self):
         """Launch forage model, ensure it runs!"""
-        import forage
+        from natcap.invest import forage
         
         if not os.path.exists(SAMPLE_DATA):
             self.fail(
@@ -70,6 +68,3 @@ class foragetests(unittest.TestCase):
                 
         args = foragetests.generate_base_args(self.workspace_dir)
         forage.execute(args)
-
-if __name__ == "__main__":
-    unittest.main()
