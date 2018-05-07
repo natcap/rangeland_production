@@ -9,6 +9,7 @@ import logging
 from osgeo import ogr
 from osgeo import gdal
 import re
+import numpy as np
 
 import pygeoprocessing
 from natcap.invest import utils
@@ -17,7 +18,78 @@ LOGGER = logging.getLogger('natcap.invest.forage')
 
 # we only have these types of soils
 SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
-
+# state variables that are updated at each monthly timestep
+# state variables property of the site
+_SITE_STATE_VARIABLE_FILES = {
+    'metabc_1_path': 'metabc_1.tif',
+    'metabc_2_path': 'metabc_2.tif',
+    'som1c_1_path': 'som1c_1.tif',
+    'som1c_2_path': 'som1c_2.tif',
+    'som2c_1_path': 'som2c_1.tif',
+    'som2c_2_path': 'som2c_2.tif',
+    'som3c_path': 'som3c.tif',
+    'strucc_1_path': 'strucc_1.tif',
+    'strucc_2_path': 'strucc_2.tif',
+    'metabe_1_1_path': 'metabe_1_1.tif',
+    'metabe_2_1_path': 'metabe_2_1.tif',
+    'minerl_1_1_path': 'minerl_1_1.tif',
+    'som1e_1_1_path': 'som1e_1_1.tif',
+    'som1e_2_1_path': 'som1e_2_1.tif',
+    'som2e_1_1_path': 'som2e_1_1.tif',
+    'som2e_2_1_path': 'som2e_2_1.tif',
+    'som3e_1_path': 'som3e_1.tif',
+    'struce_1_1_path': 'struce_1_1.tif',
+    'struce_2_1_path': 'struce_2_1.tif',
+    'metabe_1_2_path': 'metabe_1_2.tif',
+    'metabe_2_2_path': 'metabe_2_2.tif',
+    'plabil_path': 'plabil.tif',
+    'secndy_2_path': 'secndy_2.tif',
+    'som1e_1_2_path': 'som1e_1_2.tif',
+    'som1e_2_2_path': 'som1e_2_2.tif',
+    'som2e_1_2_path': 'som2e_1_2.tif',
+    'som2e_2_2_path': 'som2e_2_2.tif',
+    'som3e_1_path': 'som3e_1.tif',
+    'struce_1_2_path': 'struce_1_2.tif',
+    'struce_2_2_path': 'struce_2_2.tif',
+    'asmos_1_path': 'asmos_1.tif',
+    'asmos_2_path': 'asmos_2.tif',
+    'asmos_3_path': 'asmos_3.tif',
+    'asmos_4_path': 'asmos_4.tif',
+    'asmos_5_path': 'asmos_5.tif',
+    'asmos_6_path': 'asmos_6.tif',
+    'asmos_7_path': 'asmos_7.tif',
+    'asmos_8_path': 'asmos_8.tif',
+    'asmos_9_path': 'asmos_9.tif',
+    }
+# state variables property of PFT
+_PFT_STATE_VARIABLES = ['aglivc', 'bglivc', 'stdedc', 'aglive_1', 'bglive_1',
+    'stdede_1', 'aglive_2', 'bglive_2', 'stdede_2']
+# intermediate parameters that do not change between timesteps
+_PERSISTENT_PARAMS_FILES = {
+    'afiel_1_path': 'afiel_1.tif',
+    'afiel_2_path': 'afiel_2.tif',
+    'afiel_3_path': 'afiel_3.tif',
+    'afiel_4_path': 'afiel_4.tif',
+    'afiel_5_path': 'afiel_5.tif',
+    'afiel_6_path': 'afiel_6.tif',
+    'afiel_7_path': 'afiel_7.tif',
+    'afiel_8_path': 'afiel_8.tif',
+    'afiel_9_path': 'afiel_9.tif',
+    'awilt_1_path': 'awilt_1.tif',
+    'awilt_2_path': 'awilt_2.tif',
+    'awilt_3_path': 'awilt_3.tif',
+    'awilt_4_path': 'awilt_4.tif',
+    'awilt_5_path': 'awilt_5.tif',
+    'awilt_6_path': 'awilt_6.tif',
+    'awilt_7_path': 'awilt_7.tif',
+    'awilt_8_path': 'awilt_8.tif',
+    'awilt_9_path': 'awilt_9.tif',
+    'eftext_path': 'eftext.tif',
+    'p1co2_2_path': 'p1co2_2.tif',
+    'fps1s3_path': 'fps1s3.tif',
+    'orglch_path': 'orglch.tif',
+    'fps2s3_path': 'fps2s3.tif',
+    }
 
 def execute(args):
     """InVEST Forage Model.
@@ -26,6 +98,8 @@ def execute(args):
 
     Parameters:
         args['workspace_dir'] (string): path to target output workspace.
+        args['results_suffix'] (string): (optional) string to append to any
+            output file names
         args['starting_month'] (int): what month to start reporting where
             the range 1..12 is equivalent to Jan..Dec.
         args['starting_year'] (int): what year to start runs. this value is
@@ -83,6 +157,18 @@ def execute(args):
             named
                 "./temperature/max_temperature_01.tif to
                 "./temperature/max_temperature_12.tif"
+        args['site_param_table'] string: path to csv file giving site
+            parameters. This file must contain a column named "site" that
+            contains unique integers. These integer values correspond to site
+            type identifiers which are values in the site parameter spatial
+            index raster. Other required fields for this table are site and
+            "fixed" parameters from the Century model, i.e., the parameters
+            in the Century input files site.100 and fix.100.
+        args['site_param_spatial_index_path'] string: path to a raster file
+            that indexes site parameters, indicating which set of site
+            parameter values should apply at each pixel in the raster. The
+            raster should be composed of integers that correspond to values in
+            the field "site" in `site_param_table`.
         args['veg_trait_path'] (string): path to csv file giving vegetation
 			traits for each plant functional type available for grazing. This
 			file must contain a column named "PFT" that contains unique
@@ -90,9 +176,7 @@ def execute(args):
             veg spatial composition rasters. Other required fields for this
             table are vegetation input parameters from the Century model, for
             example maximum intrinsic growth rate, optimum temperature for
-            production, minimum C/N ratio, etc. NOT TOTALLY SURE YET WHICH
-            PARAMETERS WE'LL DROP, SO AT THE MOMENT SAMPLE INPUTS INCLUDE ALL
-            PARAMETERS FROM THE CENTURY CROP.100 FILE.
+            production, minimum C/N ratio, etc.
         args['veg_spatial_composition_path_pattern'] (string): path to
 			vegetation rasters, one per plant functional type available for
 			grazing, where <PFT> can be replaced with an integer that is
@@ -131,6 +215,17 @@ def execute(args):
             giving the location of grazing animals. Must have a field named
             "animal_id", containing unique integers that correspond to the
             values in the "animal_id" column of the animal trait csv.
+        args['initial_conditions_dir'] (string): optional path to directory
+            containing initial conditions. If supplied, this directory must
+            contain a series of rasters with initial values for each PFT and 
+            for the site.
+                Required rasters for each PFT:
+                    initial variables that are a property of PFT in the table
+                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+                    e.g., aglivc_<PFT>.tif
+                Required for the site:
+                    initial variables that are a property of site in the table
+                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 
     Returns:
         None.
@@ -195,6 +290,33 @@ def execute(args):
     base_align_raster_path_id_map['bulk_d'] = args['bulk_density_path']
     base_align_raster_path_id_map['ph'] = args['ph_path']
 
+    # make sure site parameters exist for each site type identifier
+    base_align_raster_path_id_map['site_index'] = \
+        args['site_param_spatial_index_path']
+    assert (pygeoprocessing.get_raster_info(
+        args['site_param_spatial_index_path'])['n_bands'] == 1), """Site
+        spatial index raster must contain only one band"""
+    assert (pygeoprocessing.get_raster_info(
+        args['site_param_spatial_index_path'])['datatype'] in
+        [1, 2, 3, 4, 5]), "Site spatial index raster must be integer type"
+    # get unique values in site param raster
+    site_index_set = set()
+    for offset_map, raster_block in pygeoprocessing.iterblocks(
+            args['site_param_spatial_index_path']):
+        site_index_set.update(np.unique(raster_block))
+    site_nodata = pygeoprocessing.get_raster_info(
+        args['site_param_spatial_index_path'])['nodata'][0]
+    if site_nodata in site_index_set:
+        site_index_set.remove(site_nodata)
+    site_param_table = utils.build_lookup_from_csv(args['site_param_table'],
+                                                  'site')
+    missing_site_index_list = list(site_index_set.difference(
+        set(site_param_table.keys())))
+    if missing_site_index_list:
+        raise ValueError(
+            "Couldn't find parameter values for the following site " +
+            "indices: %s\n\t" + ", ".join(missing_site_index_list))
+            
     # make sure veg traits exist for each pft raster
     pft_dir = os.path.dirname(args['veg_spatial_composition_path_pattern'])
     pft_basename = os.path.basename(
@@ -217,6 +339,13 @@ def execute(args):
         raise ValueError(
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
+    
+    # track separate state variable files for each PFT
+    pft_sv_dict = {}
+    for pft_index in pft_id_set:
+        for sv in _PFT_STATE_VARIABLES:
+            pft_sv_dict['{}_{}_path'.format(
+                sv, pft_index)] = '{}_{}.tif'.format(sv, pft_index)
             
     # make sure animal traits exist for each feature in animal management
     # layer
@@ -248,16 +377,104 @@ def execute(args):
     # 'base_align_raster_path_id_map' to point to the clipped/resampled
     # rasters to be used in raster calculations for the model.
     aligned_raster_dir = os.path.join(
-        args['workspace_dir'], 'aligned_raster_dir')
+        args['workspace_dir'], 'aligned_inputs')
     aligned_raster_path_id_map = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
         for key, path in base_align_raster_path_id_map.iteritems()])
 
     # align all the base inputs to be the minimum known pixel size and to
     # only extend over their combined intersections
+    source_path_list = [base_align_raster_path_id_map[k] for k in
+        sorted(base_align_raster_path_id_map.iterkeys())]
+    aligned_path_list = [aligned_raster_path_id_map[k] for k in
+        sorted(aligned_raster_path_id_map.iterkeys())]
     LOGGER.info("aligning base raster inputs")
     pygeoprocessing.align_and_resize_raster_stack(
-        [path for path in sorted(base_align_raster_path_id_map.itervalues())],
-        [path for path in sorted(aligned_raster_path_id_map.itervalues())],
+        source_path_list,aligned_path_list,
         ['nearest'] * len(aligned_raster_path_id_map),
         target_pixel_size, 'intersection')
+    
+    file_suffix = utils.make_suffix_string(args, 'results_suffix')
+    
+    # if initial conditions are supplied, use them to initialize all state
+    # variables
+    if args['initial_conditions_dir']:
+        LOGGER.info("setting initial conditions from this directory: %s",
+                    args['initial_conditions_dir'])
+        
+        # check that all necessary state variables are supplied, and align
+        # them to resampled inputs
+        missing_initial_values = []
+        resample_initial_path_map = {}
+        for sv in _SITE_STATE_VARIABLE_FILES.keys():
+            sv_path = os.path.join(args['initial_conditions_dir'],
+                _SITE_STATE_VARIABLE_FILES[sv])
+            resample_initial_path_map[sv] = sv_path
+            if not os.path.exists(sv_path):
+                missing_initial_values.append(sv_path)
+        for pft_index in pft_id_set:
+            for sv in _PFT_STATE_VARIABLES:
+                sv_key = '{}_{}'.format(sv, pft_index)
+                sv_path = os.path.join(args['initial_conditions_dir'],
+                    '{}_{}.tif'.format(sv, pft_index))
+                resample_initial_path_map[sv_key] = sv_path
+                if not os.path.exists(sv_path):
+                    missing_initial_values.append(sv_path)
+        if missing_initial_values:
+            raise ValueError(
+                "Couldn't find the following required initial values: " +
+                "\n\t".join(missing_initial_values))
+                    
+        # align and resample initialization rasters to match aligned inputs
+        sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
+        template_aligned_raster_path = [k for k in 
+            aligned_raster_path_id_map.itervalues()][0]
+        aligned_initial_path_map = dict([(key, os.path.join(sv_dir,
+            os.path.basename(path))) for key, path in
+            resample_initial_path_map.iteritems()])
+        initial_path_list = [resample_initial_path_map[k] for k in
+            sorted(resample_initial_path_map.iterkeys())]
+        aligned_initial_path_list = [aligned_initial_path_map[k] for k in
+            sorted(aligned_initial_path_map.iterkeys())]
+        # insert an aligned input to use as bounding box
+        initial_path_list.insert(0, template_aligned_raster_path)
+        aligned_initial_path_list.insert(0, os.path.join(sv_dir,
+            'align_template.tif'))
+        pygeoprocessing.align_and_resize_raster_stack(
+            initial_path_list, aligned_initial_path_list,
+            ['nearest'] * len(initial_path_list),
+            target_pixel_size, 'intersection', raster_align_index=0)
+
+    else:
+        LOGGER.info("initial conditions not supplied")
+        # TODO add spin-up or initialization with Burke's equations
+        raise ValueError("Initial conditions must be supplied")
+    
+    ## Initialization
+    # calculate persistent intermediate parameters that do not change during
+    # the simulation
+    # make folder for these persistent intermediate parameters
+    persist_param_dir = os.path.join(args['workspace_dir'], 
+        'intermediate_parameters')
+    utils.make_directories([persist_param_dir])
+    pp_reg = utils.build_file_registry(
+            [(_PERSISTENT_PARAMS_FILES, persist_param_dir)], file_suffix)
+    # TODO calculate persistent params
+    
+    ## Main simulation loop
+    # for each step in the simulation
+    for month_index in xrange(int(args['n_months'])):
+        # make new folders for state variables during this step
+        sv_dir = os.path.join(args['workspace_dir'],
+            'state_variables_m%d' % month_index)
+        utils.make_directories([sv_dir])
+        
+        # track state variables from previous step
+        # prev_sv = sv_reg
+        sv_reg = utils.build_file_registry(
+            [(_SITE_STATE_VARIABLE_FILES, sv_dir),
+            (pft_sv_dict, sv_dir)], file_suffix)
+        import pdb; pdb.set_trace()
+        # update state variables from previous month
+        LOGGER.info("Main simulation loop: month %d of %d" % (month_index,
+            int(args['n_months'])))
