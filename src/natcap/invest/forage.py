@@ -5,6 +5,8 @@ https://docs.google.com/document/d/10oJo43buEdJkFTZ0wYaW00EagSzs1oM7g_lBUc8URMI/
 """
 import os
 import logging
+import tempfile
+import shutil
 
 from osgeo import ogr
 from osgeo import gdal
@@ -90,6 +92,11 @@ _PERSISTENT_PARAMS_FILES = {
     'orglch_path': 'orglch.tif',
     'fps2s3_path': 'fps2s3.tif',
     }
+
+# Target nodata is for general rasters that are positive, and _IC_NODATA are
+# for rasters that are any range
+_TARGET_NODATA = -1.0
+_IC_NODATA = np.finfo('float32').min
 
 def execute(args):
     """InVEST Forage Model.
@@ -287,8 +294,8 @@ def execute(args):
             raise ValueError(
                 "Couldn't find %s for %s" % (
                     base_align_raster_path_id_map[soil_type], soil_type))
-    base_align_raster_path_id_map['bulk_d'] = args['bulk_density_path']
-    base_align_raster_path_id_map['ph'] = args['ph_path']
+    base_align_raster_path_id_map['bulk_d_path'] = args['bulk_density_path']
+    base_align_raster_path_id_map['ph_path'] = args['ph_path']
 
     # make sure site parameters exist for each site type identifier
     base_align_raster_path_id_map['site_index'] = \
@@ -378,21 +385,16 @@ def execute(args):
     # rasters to be used in raster calculations for the model.
     aligned_raster_dir = os.path.join(
         args['workspace_dir'], 'aligned_inputs')
-    aligned_raster_path_id_map = dict([(key, os.path.join(
+    aligned_inputs = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
         for key, path in base_align_raster_path_id_map.iteritems()])
 
     # align all the base inputs to be the minimum known pixel size and to
     # only extend over their combined intersections
-    source_path_list = [base_align_raster_path_id_map[k] for k in
+    source_input_path_list = [base_align_raster_path_id_map[k] for k in
         sorted(base_align_raster_path_id_map.iterkeys())]
-    aligned_path_list = [aligned_raster_path_id_map[k] for k in
-        sorted(aligned_raster_path_id_map.iterkeys())]
-    LOGGER.info("aligning base raster inputs")
-    pygeoprocessing.align_and_resize_raster_stack(
-        source_path_list,aligned_path_list,
-        ['nearest'] * len(aligned_raster_path_id_map),
-        target_pixel_size, 'intersection')
+    aligned_input_path_list = [aligned_inputs[k] for k in
+        sorted(aligned_inputs.iterkeys())]
     
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
     
@@ -425,21 +427,17 @@ def execute(args):
                 "Couldn't find the following required initial values: " +
                 "\n\t".join(missing_initial_values))
                     
-        # align and resample initialization rasters to match aligned inputs
+        # align and resample initialization rasters with inputs
         sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
-        template_aligned_raster_path = [k for k in 
-            aligned_raster_path_id_map.itervalues()][0]
         aligned_initial_path_map = dict([(key, os.path.join(sv_dir,
             os.path.basename(path))) for key, path in
             resample_initial_path_map.iteritems()])
-        initial_path_list = [resample_initial_path_map[k] for k in
-            sorted(resample_initial_path_map.iterkeys())]
-        aligned_initial_path_list = [aligned_initial_path_map[k] for k in
-            sorted(aligned_initial_path_map.iterkeys())]
-        # insert an aligned input to use as bounding box
-        initial_path_list.insert(0, template_aligned_raster_path)
-        aligned_initial_path_list.insert(0, os.path.join(sv_dir,
-            'align_template.tif'))
+        initial_path_list = ([resample_initial_path_map[k] for k in
+            sorted(resample_initial_path_map.iterkeys())] +
+            source_input_path_list)
+        aligned_initial_path_list = ([aligned_initial_path_map[k] for k in
+            sorted(aligned_initial_path_map.iterkeys())] + 
+            aligned_input_path_list)
         pygeoprocessing.align_and_resize_raster_stack(
             initial_path_list, aligned_initial_path_list,
             ['nearest'] * len(initial_path_list),
@@ -447,19 +445,31 @@ def execute(args):
         sv_reg = aligned_initial_path_map
     else:
         LOGGER.info("initial conditions not supplied")
+        LOGGER.info("aligning base raster inputs")
+        pygeoprocessing.align_and_resize_raster_stack(
+            source_input_path_list, aligned_input_path_list,
+            ['nearest'] * len(aligned_inputs),
+            target_pixel_size, 'intersection',
+            base_vector_path_list=[args['aoi_path']])
         # TODO add spin-up or initialization with Burke's equations
         raise ValueError("Initial conditions must be supplied")
     
     ## Initialization
     # calculate persistent intermediate parameters that do not change during
     # the simulation
-    # make folder for these persistent intermediate parameters
     persist_param_dir = os.path.join(args['workspace_dir'], 
         'intermediate_parameters')
     utils.make_directories([persist_param_dir])
     pp_reg = utils.build_file_registry(
-            [(_PERSISTENT_PARAMS_FILES, persist_param_dir)], file_suffix)
-    # TODO calculate persistent params
+        [(_PERSISTENT_PARAMS_FILES, persist_param_dir)], file_suffix)
+    LOGGER.info("Calculating preliminary persistent parameters")
+    
+    # calculate field capacity and wilting point
+    _afiel_awilt(
+        aligned_inputs['site_index'], site_param_table,
+        sv_reg['som1c_2_path'], sv_reg['som2c_2_path'], sv_reg['som3c_path'],
+        aligned_inputs['sand'], aligned_inputs['silt'],
+        aligned_inputs['clay'], aligned_inputs['bulk_d_path'], pp_reg)
     
     ## Main simulation loop
     # for each step in the simulation
@@ -478,3 +488,90 @@ def execute(args):
         # update state variables from previous month
         LOGGER.info("Main simulation loop: month %d of %d" % (month_index,
             int(args['n_months'])))
+            
+def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
+                 som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
+                 bulk_d_path, pp_reg):
+    """Calculate field capacity and wilting point for each soil layer.
+    Computations based on Gupta and Larson 1979, 'Estimating soil and water
+    retention characteristics from particle size distribution, organic 
+    matter percent and bulk density'. Water Resources Research 15:1633.
+    Field capacity is calculated for -0.33 bar; wilting point is
+    calculated for water content at -15 bars."""
+    
+    # temporary intermediate rasters for this calculation
+    temp_dir = tempfile.mkdtemp()
+    edepth_path = os.path.join(temp_dir, 'edepth.tif')
+    ompc_path = os.path.join(temp_dir, 'ompc.tif')
+    
+    def calc_ompc(som1c_2, som2c_2, som3c, bulkd, edepth):
+        """Calculate organic matter as the sum of soil organic matter,
+        weighted by bulk density. From line 222, Prelim.f"""
+        ompc = np.empty(som1c_2.shape)
+        ompc[:] = _TARGET_NODATA
+        valid_mask = ((som1c_2 > 0) & (som2c_2 > 0) & (som3c > 0) &
+            (bulkd > 0))
+        ompc[valid_mask] = (som1c_2[valid_mask] + som2c_2[valid_mask] +
+            som3c[valid_mask]) * 1.724 / (10000. * bulkd[valid_mask] *
+            edepth[valid_mask])
+        return ompc
+
+    def calc_afiel(sand, silt, clay, ompc, bulkd):
+        """Calculate field capacity."""
+        afiel = np.empty(sand.shape)
+        afiel[:] = _TARGET_NODATA
+        valid_mask = ompc != _TARGET_NODATA
+        afiel[valid_mask] = (0.3075 * sand[valid_mask] +
+            0.5886 * silt[valid_mask] + 0.8039 * clay[valid_mask] + 
+            2.208E-03 * ompc[valid_mask] + -0.1434 * bulkd[valid_mask])
+        return afiel
+    
+    def calc_awilt(sand, silt, clay, ompc, bulkd):
+        """Calculate wilting point."""
+        awilt = np.empty(sand.shape)
+        awilt[:] = _TARGET_NODATA
+        valid_mask = ompc != _TARGET_NODATA
+        awilt[valid_mask] = (-0.0059 * sand[valid_mask]
+            + 0.1142 * silt[valid_mask] + 0.5766 * clay[valid_mask] +
+            2.228E-03 * ompc[valid_mask] + 0.02671 * bulkd[valid_mask])
+        return awilt
+    
+    def decrement_ompc(ompc):
+        return ompc * 0.85
+    
+    # temporary raster from site parameter 'edepth'
+    site_to_edepth = dict(
+        [(site_code, float(table['edepth'])) for
+         (site_code, table) in site_param_table.items()])
+
+    pygeoprocessing.reclassify_raster(
+        (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
+        _TARGET_NODATA)
+    
+    # estimate total soil organic matter
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [som1c_2_path, som2c_2_path, som3c_path,
+            bulk_d_path, edepth_path]],
+        calc_ompc, ompc_path, gdal.GDT_Float32, _TARGET_NODATA)
+    
+    # calculate field capacity and wilting point for each soil layer,
+    # decreasing organic matter content by 85% with each layer
+    for lyr in xrange(1, 10):
+        afiel_path = pp_reg['afiel_{}_path'.format(lyr)]
+        awilt_path = pp_reg['awilt_{}_path'.format(lyr)]
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [sand_path, silt_path, clay_path,
+                ompc_path, bulk_d_path]],
+            calc_afiel, afiel_path, gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [sand_path, silt_path, clay_path,
+                ompc_path, bulk_d_path]],
+            calc_awilt, awilt_path, gdal.GDT_Float32, _TARGET_NODATA)
+        ompc_dec_path = os.path.join(temp_dir, 'ompc{}.tif'.format(lyr))
+        pygeoprocessing.raster_calculator(
+            [(ompc_path, 1)], decrement_ompc, ompc_dec_path, gdal.GDT_Float32,
+            _TARGET_NODATA)
+        ompc_path = ompc_dec_path
+    
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
