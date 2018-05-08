@@ -402,9 +402,9 @@ def execute(args):
         LOGGER.info("setting initial conditions from this directory: %s",
                     args['initial_conditions_dir'])
         
-        # check that all necessary state variables are supplied, and align
-        # them to resampled inputs
+        # check that all necessary state variables are supplied
         missing_initial_values = []
+        # align initial state variables to resampled inputs
         resample_initial_path_map = {}
         for sv in _SITE_STATE_VARIABLE_FILES.keys():
             sv_path = os.path.join(args['initial_conditions_dir'],
@@ -414,7 +414,7 @@ def execute(args):
                 missing_initial_values.append(sv_path)
         for pft_index in pft_id_set:
             for sv in _PFT_STATE_VARIABLES:
-                sv_key = '{}_{}'.format(sv, pft_index)
+                sv_key = '{}_{}_path'.format(sv, pft_index)
                 sv_path = os.path.join(args['initial_conditions_dir'],
                     '{}_{}.tif'.format(sv, pft_index))
                 resample_initial_path_map[sv_key] = sv_path
@@ -444,7 +444,7 @@ def execute(args):
             initial_path_list, aligned_initial_path_list,
             ['nearest'] * len(initial_path_list),
             target_pixel_size, 'intersection', raster_align_index=0)
-
+        sv_reg = aligned_initial_path_map
     else:
         LOGGER.info("initial conditions not supplied")
         # TODO add spin-up or initialization with Burke's equations
@@ -470,11 +470,11 @@ def execute(args):
         utils.make_directories([sv_dir])
         
         # track state variables from previous step
-        # prev_sv = sv_reg
+        prev_sv_reg = sv_reg
         sv_reg = utils.build_file_registry(
             [(_SITE_STATE_VARIABLE_FILES, sv_dir),
             (pft_sv_dict, sv_dir)], file_suffix)
-        import pdb; pdb.set_trace()
+        
         # update state variables from previous month
         LOGGER.info("Main simulation loop: month %d of %d" % (month_index,
             int(args['n_months'])))
