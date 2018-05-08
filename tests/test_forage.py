@@ -31,7 +31,7 @@ class foragetests(unittest.TestCase):
             'starting_year': 2016,
             'n_months': 22,
             'aoi_path': os.path.join(
-                SAMPLE_DATA, 'Manlai_soum.shp'),
+                SAMPLE_DATA, 'Manlai_soum_WGS84.shp'),
             'bulk_density_path': os.path.join(SAMPLE_DATA,
                 'soil', 'bulkd.tif'),
             'ph_path': os.path.join(SAMPLE_DATA,
@@ -59,7 +59,8 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_mgmt_layer_path': os.path.join(
-                SAMPLE_DATA, 'sheep_units_density_2016_monitoring_area.shp'),
+                SAMPLE_DATA,
+                'sheep_units_density_2016_monitoring_area_WGS84.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
         }
