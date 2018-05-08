@@ -462,15 +462,21 @@ def execute(args):
     utils.make_directories([persist_param_dir])
     pp_reg = utils.build_file_registry(
         [(_PERSISTENT_PARAMS_FILES, persist_param_dir)], file_suffix)
-    LOGGER.info("Calculating preliminary persistent parameters")
     
     # calculate field capacity and wilting point
+    LOGGER.info("Calculating field capacity and wilting point")
     _afiel_awilt(
         aligned_inputs['site_index'], site_param_table,
         sv_reg['som1c_2_path'], sv_reg['som2c_2_path'], sv_reg['som3c_path'],
         aligned_inputs['sand'], aligned_inputs['silt'],
         aligned_inputs['clay'], aligned_inputs['bulk_d_path'], pp_reg)
     
+    # calculate other persistent parameters
+    LOGGER.info("Calculating persistent parameters")
+    _persistent_params(
+        aligned_inputs['site_index'], site_param_table,
+        aligned_inputs['sand'], aligned_inputs['clay'], pp_reg)
+                       
     ## Main simulation loop
     # for each step in the simulation
     for month_index in xrange(int(args['n_months'])):
@@ -575,3 +581,101 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+def _persistent_params(site_index_path, site_param_table, sand_path,
+                       clay_path, pp_reg):
+    """Calculate persistent parameters that do not change over the course of
+    the simulation."""
+    
+    # temporary intermediate rasters for these calculations
+    temp_dir = tempfile.mkdtemp()
+    temp_val_dict = {}
+    for val in['peftxa', 'peftxb', 'p1co2a_2', 'p1co2b_2', 'ps1s3_1',
+               'ps1s3_2', 'ps2s3_1', 'ps2s3_2', 'omlech_1', 'omlech_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        temp_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+            (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
+            _TARGET_NODATA)
+    
+    def calc_eftext(peftxa, peftxb, sand):
+        """Calculate the effect of soil texture on soil microbe decomposition
+        rate. Line 359 Prelim.f"""
+        eftext = np.empty(sand.shape)
+        eftext[:] = _IC_NODATA
+        valid_mask = sand > 0
+        eftext[valid_mask] = peftxa[valid_mask] + (
+            peftxb[valid_mask] * sand[valid_mask])
+        return eftext
+    
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['peftxa'],
+            temp_val_dict['peftxb'], sand_path]],
+        calc_eftext, pp_reg['eftext_path'], gdal.GDT_Float32, _IC_NODATA)
+    
+    def calc_p1co2_2(p1co2a_2, p1co2b_2, sand):
+        """Calculate the fraction of C lost to CO2 during decomposition from
+        som1c_2. Line 366 Prelim.f"""
+        p1co2_2 = np.empty(sand.shape)
+        p1co2_2[:] = _IC_NODATA
+        valid_mask = sand > 0
+        p1co2_2[valid_mask] = p1co2a_2[valid_mask] + (
+            p1co2b_2[valid_mask] * sand[valid_mask])
+        return p1co2_2
+    
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['p1co2a_2'],
+            temp_val_dict['p1co2b_2'], sand_path]],
+        calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _IC_NODATA)
+        
+    def calc_fps1s3(ps1s3_1, ps1s3_2, clay):
+        """Calculate the effect of clay content on decomposition from
+        som1c_2.  Line 370 Prelim.f"""
+        fps1s3 = np.empty(clay.shape)
+        fps1s3[:] = _IC_NODATA
+        valid_mask = clay > 0
+        fps1s3[valid_mask] = ps1s3_1[valid_mask] + (
+            ps1s3_2[valid_mask] * clay[valid_mask])
+        return fps1s3
+    
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['ps1s3_1'],
+            temp_val_dict['ps1s3_2'], clay_path]],
+        calc_fps1s3, pp_reg['fps1s3_path'], gdal.GDT_Float32, _IC_NODATA)
+            
+    def calc_fps2s3(ps2s3_1, ps2s3_2, clay):
+        """Calculate the effect of clay content on decomposition from
+        som2c_2.  Line 371 Prelim.f"""
+        fps2s3 = np.empty(clay.shape)
+        fps2s3[:] = _IC_NODATA
+        valid_mask = clay > 0
+        fps2s3[valid_mask] = ps2s3_1[valid_mask] + (
+            ps2s3_2[valid_mask] * clay[valid_mask])
+        return fps2s3
+    
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['ps2s3_1'],
+            temp_val_dict['ps2s3_2'], clay_path]],
+        calc_fps2s3, pp_reg['fps2s3_path'], gdal.GDT_Float32, _IC_NODATA)
+    
+    def calc_orglch(omlech_1, omlech_2, sand):
+        """Calculate the effect of sand content on organic leaching from
+        soil.  Line 110 Predec.f"""
+        orglch = np.empty(sand.shape)
+        orglch[:] = _IC_NODATA
+        valid_mask = sand > 0
+        orglch[valid_mask] = omlech_1[valid_mask] + (
+            omlech_2[valid_mask] * sand[valid_mask])
+        return orglch
+    
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['omlech_1'],
+            temp_val_dict['omlech_2'], sand_path]],
+        calc_orglch, pp_reg['fps2s3_path'], gdal.GDT_Float32, _IC_NODATA)
+    
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+    
