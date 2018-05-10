@@ -738,7 +738,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         structural material into SOM1."""
         valid_mask = strucc_1 >= 0.
         cemicb1 = np.empty(strucc_1.shape)
-        cemicb1[:] = _IC_NODATA
+        cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (pcemic1_2[valid_mask] -
             pcemic1_1[valid_mask] / pcemic1_3[valid_mask])
         
@@ -755,7 +755,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         entering SOM1."""
         valid_mask = strucc_1 >= 0.
         cemicb2 = np.empty(strucc_1.shape)
-        cemicb2[:] = _IC_NODATA
+        cemicb2[:] = _TARGET_NODATA
         cemicb2[valid_mask] = (pcemic2_2[valid_mask] -
             pcemic2_1[valid_mask] / pcemic2_3[valid_mask])
         
@@ -763,7 +763,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             pcemic2_2, pcemic2_3, cemicb2)
         
         radds1 = np.empty(strucc_1.shape)
-        radds1[:] = _IC_NODATA
+        radds1[:] = _TARGET_NODATA
         radds1[valid_mask] = (rad1p_1[valid_mask] + rad1p_2[valid_mask] *
             (rnewas1[valid_mask] - pcemic1_2[valid_mask]))
         rnewas2[valid_mask] = rnewas1[valid_mask] + radds1[valid_mask]
@@ -781,7 +781,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
                 sv_reg['struce_1_{}_path'.format(iel)],
                 sv_reg['strucc_1_path']]],
             calc_rnewas_som1, pp_reg['rnewas_1_{}_path'.format(iel)],
-            gdal.GDT_Float32, _IC_NODATA)
+            gdal.GDT_Float32, _TARGET_NODATA)
         # calculate rnewas_iel_2 - aboveground material to SOM2
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
@@ -796,7 +796,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
                 temp_val_dict['pcemic1_2_{}'.format(iel)],
                 pp_reg['rnewas_1_{}_path'.format(iel)]]],
             calc_rnewas_som2, pp_reg['rnewas_2_{}_path'.format(iel)],
-            gdal.GDT_Float32, _IC_NODATA)
+            gdal.GDT_Float32, _TARGET_NODATA)
         # calculate rnewbs_iel_1 - belowground material to SOM1
         site_to_varat1_1 = dict([
             (site_code, float(table['varat1_1_{}'.format(iel)])) for
