@@ -136,10 +136,11 @@ def execute(args):
         args['monthly_precip_path_pattern'] (string): path to the monthly
             precipitation path pattern. where the string <month> and <year>
             can be replaced with the number 1..12 for the month and integer
-            year. The model expects to find a precipitation file input for
-            every month of the simulation, so there should be as many
-            precipitation input files as `n_months`. The <month> value in
-            input files must be two digits.
+            year. The model requires at least 12 months of precipitation and
+            expects to find a precipitation file input for
+            every month of the simulation, so the number of precipitation
+            files should be the maximum of 12 and `n_months`. The <month>
+            value in input files must be two digits.
             Example: if this value is given as:
             `./precip_dir/chirps-v2.0.<year>.<month>.tif, `starting_year` as
             2016, `starting_month` as 5, and `n_months` is 29, the model will
@@ -276,6 +277,23 @@ def execute(args):
             "Couldn't find the following precipitation paths given the " +
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
             "\n\t".join(missing_precip_path_list))
+    # the model requires 12 months of precipitation data to calculate
+    # atmospheric deposition of N and S from annual precipitation
+    n_precip_months = int(args['n_months'])
+    if n_precip_months < 12:
+        month_index = int(args['n_months'])
+        while month_index <= 12:
+            month_i = (starting_month + month_index - 1) % 12 + 1
+            year = starting_year +  (starting_month + month_index - 1) // 12
+            precip_path = args['monthly_precip_path_pattern'].replace(
+                '<year>', str(year)).replace('<month>', '%.2d' % month_i)
+            base_align_raster_path_id_map['precip_%d' % month_index] = precip_path
+            precip_path_list.append(precip_path)
+            if os.path.exists(precip_path):
+                n_precip_months = n_precip_months + 1
+            month_index = month_index + 1
+    if n_precip_months < 12:
+        raise ValueError("At least 12 months of precipitation data required")
 
     # this list will be used to record any expected files that are not found
     for substring in ['min', 'max']:
