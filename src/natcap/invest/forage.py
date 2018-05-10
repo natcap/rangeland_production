@@ -91,6 +91,14 @@ _PERSISTENT_PARAMS_FILES = {
     'fps1s3_path': 'fps1s3.tif',
     'orglch_path': 'orglch.tif',
     'fps2s3_path': 'fps2s3.tif',
+    'rnewas_1_1_path': 'rnewas_1_1.tif',
+    'rnewas_2_1_path': 'rnewas_2_1.tif',
+    'rnewas_1_2_path': 'rnewas_1_2.tif',
+    'rnewas_2_2_path': 'rnewas_2_2.tif',
+    'rnewbs_1_1_path': 'rnewbs_1_1.tif',
+    'rnewbs_1_2_path': 'rnewbs_1_2.tif',
+    'rnewbs_2_1_path': 'rnewbs_2_1.tif',
+    'rnewbs_2_2_path': 'rnewbs_2_2.tif',
     }
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
@@ -476,7 +484,11 @@ def execute(args):
     _persistent_params(
         aligned_inputs['site_index'], site_param_table,
         aligned_inputs['sand'], aligned_inputs['clay'], pp_reg)
-                       
+    
+    # calculate required ratios for decomposition of structural material
+    _structural_ratios(aligned_inputs['site_index'], site_param_table,
+        sv_reg, pp_reg)
+    
     ## Main simulation loop
     # for each step in the simulation
     for month_index in xrange(int(args['n_months'])):
@@ -675,6 +687,133 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         [(path, 1) for path in [temp_val_dict['omlech_1'],
             temp_val_dict['omlech_2'], sand_path]],
         calc_orglch, pp_reg['fps2s3_path'], gdal.GDT_Float32, _IC_NODATA)
+    
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
+    """General function to calculate C/<iel> ratios of decomposing
+    aboveground material. In general if these ratios are exceeeded, the
+    material cannot decompose. Agdrat.f
+    Inputs:
+        anps = N or P in the donor material
+        tca = total C in the donor material
+        pcemic = fixed parameters
+            pcemic_1 = maximum C/<iel> of new material
+            pcemic_2 = minimum C/<iel> of new material
+            pcemic_3 = minimum <iel> content of decomposing
+                       material that gives minimum C/<iel> of new material
+        cemicb = slope of the regression line for C/<iel>
+    Returns:
+        agdrat, the C/<iel> ratio of new material"""
+    
+    econt = np.where(tca > 0., anps / (tca * 2.5), 0.)
+    agdrat = np.where(econt > pcemic_3, pcemic_2, pcemic_1 + econt * cemicb)
+    return agdrat
+    
+def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
+    """Calculate maximum C/N and C/P ratios for decomposition of structural
+    material (i.e., material containing lignin). These ratios do not change
+    throughout the course of the simulation. Lines 31-77 Predec.f"""
+    
+    # temporary intermediate rasters for these calculations
+    temp_dir = tempfile.mkdtemp()
+    temp_val_dict = {}
+    for iel in [1, 2]:
+        for val in['pcemic1_2', 'pcemic1_1', 'pcemic1_3', 'pcemic2_2',
+                   'pcemic2_1', 'pcemic2_3', 'rad1p_1', 'rad1p_2',
+                   'rad1p_3', 'varat1_1', 'varat22_1']:
+            target_path = os.path.join(temp_dir, '{}_{}.tif'.format(val, iel))
+            temp_val_dict['{}_{}'.format(val, iel)] = target_path
+            site_to_val = dict(
+                [(site_code, float(table['{}_{}'.format(val, iel)])) for
+                (site_code, table) in site_param_table.items()])
+            pygeoprocessing.reclassify_raster(
+                (site_index_path, 1), site_to_val, target_path,
+                gdal.GDT_Float32, _TARGET_NODATA)
+    
+    def calc_rnewas_som1(pcemic1_2, pcemic1_1, pcemic1_3,
+                         struce_1, strucc_1):
+        """Calculate maximum ratios for decomposition of aboveground
+        structural material into SOM1."""
+        valid_mask = strucc_1 >= 0.
+        cemicb1 = np.empty(strucc_1.shape)
+        cemicb1[:] = _IC_NODATA
+        cemicb1[valid_mask] = (pcemic1_2[valid_mask] -
+            pcemic1_1[valid_mask] / pcemic1_3[valid_mask])
+        
+        rnewas1 = _aboveground_ratio(struce_1, strucc_1, pcemic1_1,
+            pcemic1_2, pcemic1_3, cemicb1)
+        return rnewas1
+
+    def calc_rnewas_som2(pcemic2_2, pcemic2_1, pcemic2_3,
+                         struce_1, strucc_1,
+                         rad1p_1, rad1p_2, rad1p_3,
+                         pcemic1_2, rnewas1):
+        """Calculate maximum ratios for decomposition of aboveground
+        structural material into SOM2, including a fraction of the ratios
+        entering SOM1."""
+        valid_mask = strucc_1 >= 0.
+        cemicb2 = np.empty(strucc_1.shape)
+        cemicb2[:] = _IC_NODATA
+        cemicb2[valid_mask] = (pcemic2_2[valid_mask] -
+            pcemic2_1[valid_mask] / pcemic2_3[valid_mask])
+        
+        rnewas2 = _aboveground_ratio(struce_1, strucc_1, pcemic2_1,
+            pcemic2_2, pcemic2_3, cemicb2)
+        
+        radds1 = np.empty(strucc_1.shape)
+        radds1[:] = _IC_NODATA
+        radds1[valid_mask] = (rad1p_1[valid_mask] + rad1p_2[valid_mask] *
+            (rnewas1[valid_mask] - pcemic1_2[valid_mask]))
+        rnewas2[valid_mask] = rnewas1[valid_mask] + radds1[valid_mask]
+        rnewas2[valid_mask] = np.maximum(rnewas2[valid_mask],
+            rad1p_3[valid_mask])
+        return rnewas2
+            
+    for iel in [1, 2]:
+        # calculate rnewas_iel_1 - aboveground material to SOM1
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['pcemic1_2_{}'.format(iel)],
+                temp_val_dict['pcemic1_1_{}'.format(iel)],
+                temp_val_dict['pcemic1_3_{}'.format(iel)],
+                sv_reg['struce_1_{}_path'.format(iel)],
+                sv_reg['strucc_1_path']]],
+            calc_rnewas_som1, pp_reg['rnewas_1_{}_path'.format(iel)],
+            gdal.GDT_Float32, _IC_NODATA)
+        # calculate rnewas_iel_2 - aboveground material to SOM2
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['pcemic2_2_{}'.format(iel)],
+                temp_val_dict['pcemic2_1_{}'.format(iel)],
+                temp_val_dict['pcemic2_3_{}'.format(iel)],
+                sv_reg['struce_1_{}_path'.format(iel)],
+                sv_reg['strucc_1_path'],
+                temp_val_dict['rad1p_1_{}'.format(iel)],
+                temp_val_dict['rad1p_2_{}'.format(iel)],
+                temp_val_dict['rad1p_3_{}'.format(iel)],
+                temp_val_dict['pcemic1_2_{}'.format(iel)],
+                pp_reg['rnewas_1_{}_path'.format(iel)]]],
+            calc_rnewas_som2, pp_reg['rnewas_2_{}_path'.format(iel)],
+            gdal.GDT_Float32, _IC_NODATA)
+        # calculate rnewbs_iel_1 - belowground material to SOM1
+        site_to_varat1_1 = dict([
+            (site_code, float(table['varat1_1_{}'.format(iel)])) for
+            (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_varat1_1,
+            pp_reg['rnewbs_{}_1_path'.format(iel)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        # calculate rnewbs_iel_2 - belowground material to SOM2
+        # rnewbs(iel,2) = varat22(1,iel)
+        site_to_varat22_1 = dict([
+            (site_code, float(table['varat22_1_{}'.format(iel)])) for
+            (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_varat22_1,
+            pp_reg['rnewbs_{}_2_path'.format(iel)],
+            gdal.GDT_Float32, _TARGET_NODATA)
     
     # clean up temporary files
     shutil.rmtree(temp_dir)
