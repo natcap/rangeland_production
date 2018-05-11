@@ -100,6 +100,10 @@ _PERSISTENT_PARAMS_FILES = {
     'rnewbs_2_1_path': 'rnewbs_2_1.tif',
     'rnewbs_2_2_path': 'rnewbs_2_2.tif',
     }
+# values that are updated once per year
+_YEARLY_FILES = {
+    'annual_precip_path': 'annual_precip.tif',
+    }
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -278,7 +282,7 @@ def execute(args):
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
             "\n\t".join(missing_precip_path_list))
     # the model requires 12 months of precipitation data to calculate
-    # atmospheric deposition of N and S from annual precipitation
+    # atmospheric N deposition and potential production from annual precip
     n_precip_months = int(args['n_months'])
     if n_precip_months < 12:
         month_index = int(args['n_months'])
@@ -507,9 +511,18 @@ def execute(args):
     _structural_ratios(aligned_inputs['site_index'], site_param_table,
         sv_reg, pp_reg)
     
+    # make yearly directory for values that are updated every twelve months
+    year_dir = tempfile.mkdtemp()
+    year_reg = dict([(key, os.path.join(year_dir, path)) for key, path in
+        _YEARLY_FILES.iteritems()])
+    
     ## Main simulation loop
     # for each step in the simulation
     for month_index in xrange(int(args['n_months'])):
+        if (month_index % 12) == 0:
+            # Update yearly quantities
+            _yearly_tasks(aligned_inputs, month_index, year_reg)
+            
         # make new folders for state variables during this step
         sv_dir = os.path.join(args['workspace_dir'],
             'state_variables_m%d' % month_index)
@@ -835,4 +848,45 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+def _yearly_tasks(aligned_inputs, month_index, year_reg): # , site params ???):
+    """Calculate annual precipitation and annual atmospheric N deposition.
+    Century also calculates non-symbiotic soil N fixation and atmospheric S
+    deposition once yearly, but here those were moved to monthly tasks.
+    Century uses precipitation in the future 12 months (prcgrw) to predict
+    root:shoot ratios, but here we use annual precipitation in 12 months
+    including the current one instead if data for 12 future months are not
+    available.
+    Lines 79-82 Eachyr.f"""
+    
+    # annual precipitation = precip in 12 months following this one, or
+    # in 12 months including months previous to this one if data for 12
+    # future months are not available
+    annual_precip_rasters = []
+    for precip_month in xrange(month_index, month_index + 12):
+        try:
+            annual_precip_rasters.append(
+                aligned_inputs['precip_%d' % precip_month])
+        except KeyError:
+            continue
+    offset = 1
+    while len(annual_precip_rasters) < 12:
+        precip_month = month_index - offset
+        try:
+            annual_precip_rasters.append(
+                    aligned_inputs['precip_%d' % precip_month])
+        except KeyError:
+            raise KeyError("Insufficient precipitation rasters were found")
+        offset = offset + 1
+    
+    # sum them
+    def raster_sum(*raster_list):
+        return np.sum(raster_list, axis=0)
+        
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in annual_precip_rasters],
+        raster_sum, year_reg['annual_precip_path'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    
+    
     
