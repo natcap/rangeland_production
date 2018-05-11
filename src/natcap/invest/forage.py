@@ -103,6 +103,7 @@ _PERSISTENT_PARAMS_FILES = {
 # values that are updated once per year
 _YEARLY_FILES = {
     'annual_precip_path': 'annual_precip.tif',
+    'baseNdep_path': 'baseNdep.tif',
     }
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
@@ -521,7 +522,8 @@ def execute(args):
     for month_index in xrange(int(args['n_months'])):
         if (month_index % 12) == 0:
             # Update yearly quantities
-            _yearly_tasks(aligned_inputs, month_index, year_reg)
+            _yearly_tasks(aligned_inputs['site_index'], site_param_table,
+                aligned_inputs, month_index, year_reg)
             
         # make new folders for state variables during this step
         sv_dir = os.path.join(args['workspace_dir'],
@@ -849,7 +851,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     # clean up temporary files
     shutil.rmtree(temp_dir)
 
-def _yearly_tasks(aligned_inputs, month_index, year_reg): # , site params ???):
+def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
+                  month_index, year_reg):
     """Calculate annual precipitation and annual atmospheric N deposition.
     Century also calculates non-symbiotic soil N fixation and atmospheric S
     deposition once yearly, but here those were moved to monthly tasks.
@@ -887,6 +890,39 @@ def _yearly_tasks(aligned_inputs, month_index, year_reg): # , site params ???):
         [(path, 1) for path in annual_precip_rasters],
         raster_sum, year_reg['annual_precip_path'],
         gdal.GDT_Float32, _TARGET_NODATA)
+    
+    # calculate base N deposition
+    # intermediate rasters for this operation
+    temp_dir = tempfile.mkdtemp()
+    temp_val_dict = {}
+    for val in['epnfa_1', 'epnfa_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        temp_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+            (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+    
+    def calc_base_N_dep(epnfa_1, epnfa_2, prcann):
+        # baseNdep = max(epnfa_1 + epnfa_2 * MIN(prcann, 80.0), 0.)
+        baseNdep = np.empty(prcann.shape)
+        baseNdep[:] = 0.
+        valid_mask = prcann >= 0.
+        baseNdep[valid_mask] = epnfa_1[valid_mask] + (epnfa_2[valid_mask] *
+            np.minimum(prcann[valid_mask], 80.))
+        baseNdep[baseNdep < 0] = 0.
+        return baseNdep
+    
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['epnfa_1'],
+            temp_val_dict['epnfa_2'], year_reg['annual_precip_path']]],
+        calc_base_N_dep, year_reg['baseNdep_path'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+    
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
     
     
     
