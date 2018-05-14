@@ -86,6 +86,7 @@ _PERSISTENT_PARAMS_FILES = {
     'awilt_7_path': 'awilt_7.tif',
     'awilt_8_path': 'awilt_8.tif',
     'awilt_9_path': 'awilt_9.tif',
+    'wc_path': 'wc.tif',
     'eftext_path': 'eftext.tif',
     'p1co2_2_path': 'p1co2_2.tif',
     'fps1s3_path': 'fps1s3.tif',
@@ -509,6 +510,7 @@ def execute(args):
         aligned_inputs['sand'], aligned_inputs['clay'], pp_reg)
     
     # calculate required ratios for decomposition of structural material
+    LOGGER.info("Calculating required ratios for structural decomposition")
     _structural_ratios(aligned_inputs['site_index'], site_param_table,
         sv_reg, pp_reg)
     
@@ -646,6 +648,16 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _TARGET_NODATA)
     
+    def calc_wc(afiel_1, awilt_1):
+        """Calculate water content of soil layer 1, which is used to predict
+        potential production. Line 241 Prelim.f"""
+        return afiel_1 - awilt_1
+        
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            pp_reg['afiel_1_path'], pp_reg['awilt_1_path']]],
+        calc_wc, pp_reg['wc_path'], gdal.GDT_Float32, _TARGET_NODATA)
+        
     def calc_eftext(peftxa, peftxb, sand):
         """Calculate the effect of soil texture on soil microbe decomposition
         rate. Line 359 Prelim.f"""
@@ -854,8 +866,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
                   month_index, year_reg):
     """Calculate annual precipitation and annual atmospheric N deposition.
-    Century also calculates non-symbiotic soil N fixation and atmospheric S
-    deposition once yearly, but here those were moved to monthly tasks.
+    Century also calculates non-symbiotic soil N fixation once yearly, but
+    here those were moved to monthly tasks.
     Century uses precipitation in the future 12 months (prcgrw) to predict
     root:shoot ratios, but here we use annual precipitation in 12 months
     including the current one instead if data for 12 future months are not
