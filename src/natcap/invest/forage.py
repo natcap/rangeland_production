@@ -636,11 +636,11 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     
     # temporary intermediate rasters for these calculations
     temp_dir = tempfile.mkdtemp()
-    temp_val_dict = {}
+    param_val_dict = {}
     for val in['peftxa', 'peftxb', 'p1co2a_2', 'p1co2b_2', 'ps1s3_1',
                'ps1s3_2', 'ps2s3_1', 'ps2s3_2', 'omlech_1', 'omlech_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        temp_val_dict[val] = target_path
+        param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
             (site_code, table) in site_param_table.items()])
@@ -669,8 +669,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         return eftext
     
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['peftxa'],
-            temp_val_dict['peftxb'], sand_path]],
+        [(path, 1) for path in [param_val_dict['peftxa'],
+            param_val_dict['peftxb'], sand_path]],
         calc_eftext, pp_reg['eftext_path'], gdal.GDT_Float32, _IC_NODATA)
     
     def calc_p1co2_2(p1co2a_2, p1co2b_2, sand):
@@ -684,8 +684,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         return p1co2_2
     
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['p1co2a_2'],
-            temp_val_dict['p1co2b_2'], sand_path]],
+        [(path, 1) for path in [param_val_dict['p1co2a_2'],
+            param_val_dict['p1co2b_2'], sand_path]],
         calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _IC_NODATA)
         
     def calc_fps1s3(ps1s3_1, ps1s3_2, clay):
@@ -699,8 +699,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         return fps1s3
     
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['ps1s3_1'],
-            temp_val_dict['ps1s3_2'], clay_path]],
+        [(path, 1) for path in [param_val_dict['ps1s3_1'],
+            param_val_dict['ps1s3_2'], clay_path]],
         calc_fps1s3, pp_reg['fps1s3_path'], gdal.GDT_Float32, _IC_NODATA)
             
     def calc_fps2s3(ps2s3_1, ps2s3_2, clay):
@@ -714,8 +714,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         return fps2s3
     
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['ps2s3_1'],
-            temp_val_dict['ps2s3_2'], clay_path]],
+        [(path, 1) for path in [param_val_dict['ps2s3_1'],
+            param_val_dict['ps2s3_2'], clay_path]],
         calc_fps2s3, pp_reg['fps2s3_path'], gdal.GDT_Float32, _IC_NODATA)
     
     def calc_orglch(omlech_1, omlech_2, sand):
@@ -729,8 +729,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         return orglch
     
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['omlech_1'],
-            temp_val_dict['omlech_2'], sand_path]],
+        [(path, 1) for path in [param_val_dict['omlech_1'],
+            param_val_dict['omlech_2'], sand_path]],
         calc_orglch, pp_reg['fps2s3_path'], gdal.GDT_Float32, _IC_NODATA)
     
     # clean up temporary files
@@ -761,15 +761,15 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     material (i.e., material containing lignin). These ratios do not change
     throughout the course of the simulation. Lines 31-77 Predec.f"""
     
-    # temporary intermediate rasters for these calculations
+    # temporary parameter rasters for these calculations
     temp_dir = tempfile.mkdtemp()
-    temp_val_dict = {}
+    param_val_dict = {}
     for iel in [1, 2]:
         for val in['pcemic1_2', 'pcemic1_1', 'pcemic1_3', 'pcemic2_2',
                    'pcemic2_1', 'pcemic2_3', 'rad1p_1', 'rad1p_2',
                    'rad1p_3', 'varat1_1', 'varat22_1']:
             target_path = os.path.join(temp_dir, '{}_{}.tif'.format(val, iel))
-            temp_val_dict['{}_{}'.format(val, iel)] = target_path
+            param_val_dict['{}_{}'.format(val, iel)] = target_path
             site_to_val = dict(
                 [(site_code, float(table['{}_{}'.format(val, iel)])) for
                 (site_code, table) in site_param_table.items()])
@@ -820,9 +820,9 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # calculate rnewas_iel_1 - aboveground material to SOM1
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
-                temp_val_dict['pcemic1_2_{}'.format(iel)],
-                temp_val_dict['pcemic1_1_{}'.format(iel)],
-                temp_val_dict['pcemic1_3_{}'.format(iel)],
+                param_val_dict['pcemic1_2_{}'.format(iel)],
+                param_val_dict['pcemic1_1_{}'.format(iel)],
+                param_val_dict['pcemic1_3_{}'.format(iel)],
                 sv_reg['struce_1_{}_path'.format(iel)],
                 sv_reg['strucc_1_path']]],
             calc_rnewas_som1, pp_reg['rnewas_1_{}_path'.format(iel)],
@@ -830,15 +830,15 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # calculate rnewas_iel_2 - aboveground material to SOM2
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
-                temp_val_dict['pcemic2_2_{}'.format(iel)],
-                temp_val_dict['pcemic2_1_{}'.format(iel)],
-                temp_val_dict['pcemic2_3_{}'.format(iel)],
+                param_val_dict['pcemic2_2_{}'.format(iel)],
+                param_val_dict['pcemic2_1_{}'.format(iel)],
+                param_val_dict['pcemic2_3_{}'.format(iel)],
                 sv_reg['struce_1_{}_path'.format(iel)],
                 sv_reg['strucc_1_path'],
-                temp_val_dict['rad1p_1_{}'.format(iel)],
-                temp_val_dict['rad1p_2_{}'.format(iel)],
-                temp_val_dict['rad1p_3_{}'.format(iel)],
-                temp_val_dict['pcemic1_2_{}'.format(iel)],
+                param_val_dict['rad1p_1_{}'.format(iel)],
+                param_val_dict['rad1p_2_{}'.format(iel)],
+                param_val_dict['rad1p_3_{}'.format(iel)],
+                param_val_dict['pcemic1_2_{}'.format(iel)],
                 pp_reg['rnewas_1_{}_path'.format(iel)]]],
             calc_rnewas_som2, pp_reg['rnewas_2_{}_path'.format(iel)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -904,12 +904,12 @@ def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
         gdal.GDT_Float32, _TARGET_NODATA)
     
     # calculate base N deposition
-    # intermediate rasters for this operation
+    # intermediate parameter rasters for this operation
     temp_dir = tempfile.mkdtemp()
-    temp_val_dict = {}
+    param_val_dict = {}
     for val in['epnfa_1', 'epnfa_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        temp_val_dict[val] = target_path
+        param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
             (site_code, table) in site_param_table.items()])
@@ -928,8 +928,8 @@ def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
         return baseNdep
     
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['epnfa_1'],
-            temp_val_dict['epnfa_2'], year_reg['annual_precip_path']]],
+        [(path, 1) for path in [param_val_dict['epnfa_1'],
+            param_val_dict['epnfa_2'], year_reg['annual_precip_path']]],
         calc_base_N_dep, year_reg['baseNdep_path'], gdal.GDT_Float32,
         _TARGET_NODATA)
     
