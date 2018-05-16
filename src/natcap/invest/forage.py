@@ -949,17 +949,120 @@ def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
     # clean up temporary files
     shutil.rmtree(temp_dir)
 
-def _shortwave_radiation(*raster_list):
-    """Calculate shortwave radiation outside the atmosphere. shwave.f"""
-    # how to get latitude of each pixel?
+def _shortwave_radiation(template_raster, month, shwave_path):
+    """Calculate shortwave radiation outside the atmosphere, using the input
+    `template_raster` to calculate the latitude of each pixel. shwave.f"""
     
-    # Julian date in middle of each month of the year
-    jday_list = [16,46,75,106,136,167,197,228,259,289,320,350]
+    def shwave(month):
+        def _shwave(latitude):
+            """Inputs:
+            latitude - latitude of current site in degrees
+            month - current month
+
+            Output:
+            shwave - short wave solar radiation outside the atmosphere
+            
+            Local variables:
+            ahou            - ?
+            declin          - declination (radians)
+            jday()          - Julian day for middle of current month
+            par1, par2      - parameters in computation of ahou
+            rlatitude       - latitude of the site (in radians)
+            solrad          - solar radiation (ly/day)
+            transcof        - transmission coefficient"""
+            
+            # Julian date in middle of each month of the year
+            jday_list = [
+                16, 46, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350]
+            jday = jday_list[month]
+        
+            transcof = 0.8
+            valid_mask = latitude >= -180.
+            
+            rlatitude = numpy.empty(latitude.shape)
+            rlatitude[:] = _IC_NODATA
+            
+            # Convert latitude from degrees to radians
+            rlatitude[valid_mask] = latitude[valid_mask] * (numpy.pi / 180.0)
+            
+            # short wave solar radiation on a clear day
+            declin = 0.401426 * numpy.sin(6.283185 * (jday - 77.0) / 365.0)
+            
+            temp = 1.0 - (-numpy.tan(rlatitude) * numpy.tan(declin))**2
+            temp = numpy.where(temp < 0., 0., temp)
+
+            par1 = numpy.sqrt(temp)
+            par2 = (-numpy.tan(rlatitude) * numpy.tan(declin))
+
+            ahou = numpy.arctan2(par1, par2)
+            ahou = numpy.where(ahou < 0., 0., ahou)
+
+            solrad = 917.0 * transcof * (ahou * numpy.sin(rlatitude) *
+                numpy.sin(declin) + numpy.cos(rlatitude) * numpy.cos(declin) *
+                numpy.sin(ahou))
+
+            # short wave radiation outside the atmosphere
+            shwave = numpy.empty(latitude.shape)
+            shwave[:] = _TARGET_NODATA
+            shwave[valid_mask] = solrad[valid_mask] / transcof
+            return shwave
+        return _shwave
+
+    # TODO if we allow projected inputs in the future, must reproject the
+    # template raster here to ensure we collect geographic coordinates
+    # calculate an intermediate input, latitude at each pixel center
+    temp_dir = tempfile.mkdtemp()
+    latitude_raster_path = os.path.join(temp_dir, 'latitude.tif')
+    pygeoprocessing.new_raster_from_base(
+        template_raster, latitude_raster_path, gdal.GDT_Float32,
+        [_IC_NODATA])
+    latitude_raster = gdal.OpenEx(latitude_raster_path, gdal.GA_Update)
+    target_band = latitude_raster.GetRasterBand(1)
+    base_raster_info = pygeoprocessing.get_raster_info(template_raster)
+    geotransform = base_raster_info['geotransform']
+    for offset_map, raster_block in pygeoprocessing.iterblocks(
+            template_raster):
+        n_y_block = raster_block.shape[0]
+        n_x_block = raster_block.shape[1]
+
+        # offset by .5 so we're in the center of the pixel
+        xoff = offset_map['xoff'] + 0.5
+        yoff = offset_map['yoff'] + 0.5
+
+        # calculate the projected x and y coordinate bounds for the block
+        x_range = numpy.linspace(
+            geotransform[0] + geotransform[1] * xoff,
+            geotransform[0] + geotransform[1] * (xoff + n_x_block - 1),
+            n_x_block)
+        y_range = numpy.linspace(
+            geotransform[3] + geotransform[5] * yoff,
+            geotransform[3] + geotransform[5] * (yoff + n_y_block - 1),
+            n_y_block)
+            
+        # we'll use this to avoid generating any nodata points
+        valid_mask = raster_block != base_raster_info['nodata']
+
+        # these indexes correspond to projected coordinates
+        # y_vector is what we want, an array of latitude coordinates
+        x_vector, y_vector = numpy.meshgrid(x_range, y_range)
+        
+        target_band.WriteArray(y_vector, xoff=offset_map['xoff'],
+            yoff=offset_map['yoff'])
+        
+    # Making sure the band and dataset is flushed and not in memory
+    target_band.FlushCache()
+    target_band.FlushCache()
+    target_band = None
+    gdal.Dataset.__swig_destroy__(latitude_raster)
+    latitude_raster = None
     
-    # FOR NOW
-    result = np.empty(raster_list[0].shape)
-    result[:] = 1.3
-    return result
+    pygeoprocessing.raster_calculator(
+        [(latitude_raster_path, 1)],
+        shwave(month), shwave_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+        
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
 
 def _reference_evaporation(max_temp, min_temp, shwave, fwloss_4):
     """Calculate reference evapotranspiration with the FAO Penman-Monteith
@@ -995,7 +1098,6 @@ def _reference_evaporation(max_temp, min_temp, shwave, fwloss_4):
     pevap = np.empty(fwloss_4.shape)
     pevap[:] = _TARGET_NODATA
     pevap[valid_mask] = monpet[valid_mask] * fwloss_4[valid_mask]
-    import pdb; pdb.set_trace()
     return pevap
 
 def _potential_production(aligned_inputs, site_param_table, current_month,
@@ -1105,10 +1207,8 @@ def _potential_production(aligned_inputs, site_param_table, current_month,
         calc_ctemp, temp_val_dict['ctemp'], gdal.GDT_Float32, _IC_NODATA)
     
     # shwave, shortwave radiation outside the atmosphere
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in weighted_path_list],
-        _shortwave_radiation, temp_val_dict['shwave'],
-        gdal.GDT_Float32, _TARGET_NODATA)
+    _shortwave_radiation(aligned_inputs['site_index'], current_month,
+        temp_val_dict['shwave'])
         
     # pet, reference evapotranspiration modified by fwloss parameter
     pygeoprocessing.raster_calculator(
