@@ -574,6 +574,14 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     Returns:
         None
     """
+    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
+    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
+    bulkd_nodata = pygeoprocessing.get_raster_info(bulk_d_path)['nodata'][0]
+    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
+    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
+    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
+
     # temporary intermediate rasters for this calculation
     temp_dir = tempfile.mkdtemp()
     edepth_path = os.path.join(temp_dir, 'edepth.tif')
@@ -597,7 +605,11 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
-            (som1c_2 > 0) & (som2c_2 > 0) & (som3c > 0) & (bulkd > 0))
+            (som1c_2 != som1c_2_nodata)
+            & (som2c_2 != som2c_2_nodata)
+            & (som3c != som3c_nodata)
+            & (bulkd != bulkd_nodata)
+            & (edepth != _TARGET_NODATA))
         ompc[valid_mask] = (
             (som1c_2[valid_mask] + som2c_2[valid_mask]
                 + som3c[valid_mask]) * 1.724
@@ -625,7 +637,12 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         """
         afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
-        valid_mask = ompc != _TARGET_NODATA
+        valid_mask = (
+            (sand != sand_nodata)
+            & (silt != silt_nodata)
+            & (clay != clay_nodata)
+            & (ompc != _TARGET_NODATA)
+            & (bulkd != bulkd_nodata))
         afiel[valid_mask] = (
             0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask]
             + 0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask]
@@ -653,7 +670,12 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         """
         awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
-        valid_mask = ompc != _TARGET_NODATA
+        valid_mask = (
+            (sand != sand_nodata)
+            & (silt != silt_nodata)
+            & (clay != clay_nodata)
+            & (ompc != _TARGET_NODATA)
+            & (bulkd != bulkd_nodata))
         awilt[valid_mask] = (
             -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask]
             + 0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask]
@@ -729,6 +751,11 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     Returns:
         None
     """
+    sand_nodata = pygeoprocessing.get_raster_info(
+        sand_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(
+        clay_path)['nodata'][0]
+
     # temporary intermediate rasters for these calculations
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
@@ -743,11 +770,6 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _TARGET_NODATA)
-
-    sand_nodata = pygeoprocessing.get_raster_info(
-        sand_path)['nodata'][0]
-    clay_nodata = pygeoprocessing.get_raster_info(
-        clay_path)['nodata'][0]
 
     def calc_eftext(peftxa, peftxb, sand):
         """Calculate effect of soil texture on microbial decomposition.
