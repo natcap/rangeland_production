@@ -551,23 +551,24 @@ def execute(args):
     _persistent_params(
         aligned_inputs['site_index'], site_param_table,
         aligned_inputs['sand'], aligned_inputs['clay'], pp_reg)
-<<<<<<< working copy
 
     # calculate required ratios for decomposition of structural material
     LOGGER.info("Calculating required ratios for structural decomposition")
-    _structural_ratios(aligned_inputs['site_index'], site_param_table,
-        sv_reg, pp_reg)
+    _structural_ratios(
+        aligned_inputs['site_index'], site_param_table, sv_reg, pp_reg)
 
     # make yearly directory for values that are updated every twelve months
     year_dir = tempfile.mkdtemp()
-    year_reg = dict([(key, os.path.join(year_dir, path)) for key, path in
-        _YEARLY_FILES.iteritems()])
+    year_reg = dict(
+        [(key, os.path.join(year_dir, path)) for key, path in
+            _YEARLY_FILES.iteritems()])
 
     # make monthly directory for monthly intermediate parameters that are
     # shared between submodels, but do not need to be saved as output
     month_temp_dir = tempfile.mkdtemp()
-    month_reg = dict([(key, os.path.join(month_temp_dir, path)) for
-        key, path in _SITE_INTERMEDIATE_PARAMS.iteritems()])
+    month_reg = dict(
+        [(key, os.path.join(month_temp_dir, path)) for
+            key, path in _SITE_INTERMEDIATE_PARAMS.iteritems()])
     for pft_index in pft_id_set:
         for val in _PFT_INTERMEDIATE_PARAMS:
             month_reg['{}_{}_path'.format(
@@ -578,7 +579,8 @@ def execute(args):
     for month_index in xrange(n_months):
         if (month_index % 12) == 0:
             # Update yearly quantities
-            _yearly_tasks(aligned_inputs['site_index'], site_param_table,
+            _yearly_tasks(
+                aligned_inputs['site_index'], site_param_table,
                 aligned_inputs, month_index, year_reg)
 
         month_i = (starting_month + month_index - 1) % 12 + 1
@@ -812,8 +814,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         clay_path)['nodata'][0]
 
     def calc_wc(afiel_1, awilt_1):
-        """Calculate water content of soil layer 1, which is used to predict
-        potential production. Line 241 Prelim.f"""
+        """Calculate water content of soil layer 1."""
         return afiel_1 - awilt_1
 
     pygeoprocessing.raster_calculator(
@@ -980,84 +981,168 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     # clean up temporary files
     shutil.rmtree(temp_dir)
 
-def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
-    """General function to calculate C/<iel> ratios of decomposing
-    aboveground material. In general if these ratios are exceeeded, the
-    material cannot decompose. Agdrat.f
-    Inputs:
-        anps = N or P in the donor material
-        tca = total C in the donor material
-        pcemic = fixed parameters
-            pcemic_1 = maximum C/<iel> of new material
-            pcemic_2 = minimum C/<iel> of new material
-            pcemic_3 = minimum <iel> content of decomposing
-                       material that gives minimum C/<iel> of new material
-        cemicb = slope of the regression line for C/<iel>
-    Returns:
-        agdrat, the C/<iel> ratio of new material"""
 
-    econt = np.where(tca > 0., anps / (tca * 2.5), 0.)
-    agdrat = np.where(econt > pcemic_3, pcemic_2, pcemic_1 + econt * cemicb)
+def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
+    """Calculate C/<iel> ratios of decomposing aboveground material.
+
+    This ratio is used to test whether there is sufficient <iel> (N or P)
+    in aboveground material for the material to decompose. Agdrat.f
+
+    Parameters:
+        anps (numpy.ndarray): N or P in the donor material
+        tca (numpy.ndarray): total C in the donor material
+        pcemic_1 (numpy.ndarray): maximum C/<iel> of new material
+        pcemic_2 (numpy.ndarray): minimum C/<iel> of new material
+        pcemic_3 (numpy.ndarray): minimum <iel> content of decomposing
+            material that gives minimum C/<iel> of new material
+        cemicb (numpy.ndarray): slope of the regression line for C/<iel>
+
+    Returns:
+        agdrat, the C/<iel> ratio of new material
+    """
+    econt = numpy.where(tca > 0., anps / (tca * 2.5), 0.)
+    agdrat = numpy.where(econt > pcemic_3, pcemic_2, pcemic_1 + econt * cemicb)
     return agdrat
 
-def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
-    """Calculate maximum C/N and C/P ratios for decomposition of structural
-    material (i.e., material containing lignin). These ratios do not change
-    throughout the course of the simulation. Lines 31-77 Predec.f"""
 
+def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
+    """Calculate maximum C/N and C/P ratios for structural material.
+
+    These ratios limit decomposition of structural material (i.e., material
+    containing lignin). Lines 31-77 Predec.f
+
+    Parameters:
+        site_index_path (string): path to site spatial index raster
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month
+        pp_reg (dict): map of key, path pairs giving paths to persistent
+            intermediate parameters that do not change over the course of
+            the simulation.
+
+    Modifies the persistent parameter rasters indexed by the following
+    keys:
+        pp_reg['rnewas_1_1_path']
+        pp_reg['rnewas_1_2_path']
+        pp_reg['rnewas_2_1_path']
+        pp_reg['rnewas_2_2_path']
+        pp_reg['rnewbs_1_2_path']
+        pp_reg['rnewbs_2_2_path']
+
+    Returns:
+        None
+    """
     # temporary parameter rasters for these calculations
     temp_dir = tempfile.mkdtemp()
     param_val_dict = {}
     for iel in [1, 2]:
-        for val in['pcemic1_2', 'pcemic1_1', 'pcemic1_3', 'pcemic2_2',
-                   'pcemic2_1', 'pcemic2_3', 'rad1p_1', 'rad1p_2',
-                   'rad1p_3', 'varat1_1', 'varat22_1']:
+        for val in[
+                'pcemic1_2', 'pcemic1_1', 'pcemic1_3', 'pcemic2_2',
+                'pcemic2_1', 'pcemic2_3', 'rad1p_1', 'rad1p_2',
+                'rad1p_3', 'varat1_1', 'varat22_1']:
             target_path = os.path.join(temp_dir, '{}_{}.tif'.format(val, iel))
             param_val_dict['{}_{}'.format(val, iel)] = target_path
             site_to_val = dict(
                 [(site_code, float(table['{}_{}'.format(val, iel)])) for
-                (site_code, table) in site_param_table.items()])
+                    (site_code, table) in site_param_table.items()])
             pygeoprocessing.reclassify_raster(
                 (site_index_path, 1), site_to_val, target_path,
                 gdal.GDT_Float32, _TARGET_NODATA)
 
-    def calc_rnewas_som1(pcemic1_2, pcemic1_1, pcemic1_3,
-                         struce_1, strucc_1):
-        """Calculate maximum ratios for decomposition of aboveground
-        structural material into SOM1."""
-        valid_mask = strucc_1 >= 0.
-        cemicb1 = np.empty(strucc_1.shape)
-        cemicb1[:] = _TARGET_NODATA
-        cemicb1[valid_mask] = (pcemic1_2[valid_mask] -
-            pcemic1_1[valid_mask] / pcemic1_3[valid_mask])
+    def calc_rnewas_som1(
+            pcemic1_2, pcemic1_1, pcemic1_3, struce_1, strucc_1):
+        """Calculate C/<iel> ratio for decomposition into som1.
 
-        rnewas1 = _aboveground_ratio(struce_1, strucc_1, pcemic1_1,
-            pcemic1_2, pcemic1_3, cemicb1)
+        This ratio is calculated separately for each nutrient (i.e., N, P).
+        When material decomposes into the surface active organic pool, the
+        C/<iel> ratio of decomposing material must be smaller than or equal to
+        this ratio.
+
+        Parameters:
+            pcemic1_2 (numpy.ndarray): parameter, minimum C/<iel> ratio for
+                surface active organic pool
+            pcemic1_1 (numpy.ndarray): parameter, maximum C/<iel> ratio for
+                surface active organic pool
+            pcemic1_3 (numpy.ndarray): parameter, mimimum <iel> content of
+                decomposing aboveground material, above which the C/<iel>
+                ratio of the surface microbes equals pcemic1_2
+            struce_1 (numpy.ndarray): state variable, <iel> in surface
+                structural material
+            strucc_1 (numpy.ndarray): state variable, C in surface
+                structural material
+
+        Returns:
+            rnewas1, required ratio for decomposition of structural material
+            into som1 for one nutrient
+        """
+        valid_mask = strucc_1 >= 0.
+        cemicb1 = numpy.empty(strucc_1.shape)
+        cemicb1[:] = _TARGET_NODATA
+        cemicb1[valid_mask] = (
+            pcemic1_2[valid_mask]
+            - pcemic1_1[valid_mask]/pcemic1_3[valid_mask])
+
+        rnewas1 = _aboveground_ratio(
+            struce_1, strucc_1, pcemic1_1, pcemic1_2, pcemic1_3, cemicb1)
         return rnewas1
 
-    def calc_rnewas_som2(pcemic2_2, pcemic2_1, pcemic2_3,
-                         struce_1, strucc_1,
-                         rad1p_1, rad1p_2, rad1p_3,
-                         pcemic1_2, rnewas1):
-        """Calculate maximum ratios for decomposition of aboveground
-        structural material into SOM2, including a fraction of the ratios
-        entering SOM1."""
+    def calc_rnewas_som2(
+            pcemic2_2, pcemic2_1, pcemic2_3, struce_1, strucc_1, rad1p_1,
+            rad1p_2, rad1p_3, pcemic1_2, rnewas1):
+        """Calculate C/<iel> ratio for decomposition into som2.
+
+        This ratio is calculated separately for each nutrient (i.e., N, P).
+        When material decomposes into the surface slow organic pool, the
+        C/<iel> ratio of decomposing material must be smaller than or equal to
+        this ratio. A portion of the ratio of material entering som1, the
+        surface active pool, is also added to som2 and calculated here.
+
+        Parameters:
+            pcemic2_2 (numpy.ndarray): parameter, minimum C/<iel> ratio for
+                surface slow organic pool
+            pcemic2_1 (numpy.ndarray): parameter, maximum C/<iel> ratio for
+                surface slow organic pool
+            pcemic2_3 (numpy.ndarray): parameter, mimimum <iel> content of
+                decomposing aboveground material, above which the C/<iel>
+                ratio of the surface slow organic pool equals pcemic1_2
+            struce_1 (numpy.ndarray): state variable, <iel> in surface
+                structural material
+            strucc_1 (numpy.ndarray): state variable, C in surface
+                structural material
+            rad1p_1 (numpy.ndarray): parameter, intercept of regression used
+                to calculate addition of <iel> from surface active pool
+            rad1p_2 (numpy.ndarray): parameter, slope of regression used
+                to calculate addition of <iel> from surface active pool
+            rad1p_3 (numpy.ndarray): parameter, minimum allowable C/<iel>
+                used to calculate addition term for C/<iel> ratio of som2
+                formed from surface active pool
+            pcemic1_2 (numpy.ndarray): parameter, minimum C/<iel> ratio for
+                surface active organic pool
+            rnewas1 (numpy.ndarray): C/<iel> ratio for decomposition into som1
+
+        Returns:
+            rnewas2, required ratio for decomposition of structural material
+            into som2 for one nutrient
+        """
         valid_mask = strucc_1 >= 0.
-        cemicb2 = np.empty(strucc_1.shape)
+        cemicb2 = numpy.empty(strucc_1.shape)
         cemicb2[:] = _TARGET_NODATA
-        cemicb2[valid_mask] = (pcemic2_2[valid_mask] -
-            pcemic2_1[valid_mask] / pcemic2_3[valid_mask])
+        cemicb2[valid_mask] = (
+            pcemic2_2[valid_mask]
+            - pcemic2_1[valid_mask]/pcemic2_3[valid_mask])
 
-        rnewas2 = _aboveground_ratio(struce_1, strucc_1, pcemic2_1,
-            pcemic2_2, pcemic2_3, cemicb2)
+        rnewas2 = _aboveground_ratio(
+            struce_1, strucc_1, pcemic2_1, pcemic2_2, pcemic2_3, cemicb2)
 
-        radds1 = np.empty(strucc_1.shape)
+        radds1 = numpy.empty(strucc_1.shape)
         radds1[:] = _TARGET_NODATA
-        radds1[valid_mask] = (rad1p_1[valid_mask] + rad1p_2[valid_mask] *
-            (rnewas1[valid_mask] - pcemic1_2[valid_mask]))
+        radds1[valid_mask] = (
+            rad1p_1[valid_mask] + rad1p_2[valid_mask]
+            * (rnewas1[valid_mask] - pcemic1_2[valid_mask]))
         rnewas2[valid_mask] = rnewas1[valid_mask] + radds1[valid_mask]
-        rnewas2[valid_mask] = np.maximum(rnewas2[valid_mask],
-            rad1p_3[valid_mask])
+        rnewas2[valid_mask] = numpy.maximum(
+            rnewas2[valid_mask], rad1p_3[valid_mask])
         return rnewas2
 
     for iel in [1, 2]:
@@ -1107,20 +1192,38 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     # clean up temporary files
     shutil.rmtree(temp_dir)
 
-def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
-                  month_index, year_reg):
-    """Calculate annual precipitation and annual atmospheric N deposition.
-    Century also calculates non-symbiotic soil N fixation once yearly, but
-    here those were moved to monthly tasks.
-    Century uses precipitation in the future 12 months (prcgrw) to predict
-    root:shoot ratios, but here we use annual precipitation in 12 months
-    including the current one instead if data for 12 future months are not
-    available.
-    Lines 79-82 Eachyr.f"""
 
-    # annual precipitation = precip in 12 months following this one, or
-    # in 12 months including months previous to this one if data for 12
-    # future months are not available
+def _yearly_tasks(
+        site_index_path, site_param_table, aligned_inputs, month_index,
+        year_reg):
+    """Calculate quantities that remain static for 12 months.
+
+    These quantities are annual precipitation and annual atmospheric N
+    deposition. Century also calculates non-symbiotic soil N fixation once
+    yearly, but here those were moved to monthly tasks.
+    Century uses precipitation in the future 12 months (prcgrw) to predict
+    root:shoot ratios, but here we instead use the sum of monthly
+    precipitation in 12 months including the current one, if data for 12
+    future months are not available.
+    Lines 79-82 Eachyr.f
+
+    Parameters:
+        site_index_path (string): path to site spatial index raster
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including monthly precipitation
+        month_index (int): current monthly step, relative to 0 so that
+            month_index=0 at first monthly time step
+        year_reg (dict): map of key, path pairs giving paths to the annual
+            precipitation and N deposition rasters
+
+    Modifies the rasters year_reg['annual_precip_path'] and
+        year_reg['baseNdep_path']
+
+    Returns:
+        None
+    """
     annual_precip_rasters = []
     for precip_month in xrange(month_index, month_index + 12):
         try:
@@ -1138,9 +1241,9 @@ def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
             raise KeyError("Insufficient precipitation rasters were found")
         offset = offset + 1
 
-    # sum them
     def raster_sum(*raster_list):
-        return np.sum(raster_list, axis=0)
+        """Add the rasters in raster_list element-wise."""
+        return numpy.sum(raster_list, axis=0)
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in annual_precip_rasters],
@@ -1156,52 +1259,77 @@ def _yearly_tasks(site_index_path, site_param_table, aligned_inputs,
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-            (site_code, table) in site_param_table.items()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _TARGET_NODATA)
 
     def calc_base_N_dep(epnfa_1, epnfa_2, prcann):
-        # baseNdep = max(epnfa_1 + epnfa_2 * MIN(prcann, 80.0), 0.)
-        baseNdep = np.empty(prcann.shape)
+        """Calculate base annual atmospheric N deposition.
+
+        Parameters:
+            epnfa_1 (numpy.ndarray): intercept of regression predicting
+                atmospheric N deposition from precipitation
+            epnfa_2 (numpy.ndarray): slope of regression predicting
+                atmospheric N deposition from precipitation
+            prcann (numpy.ndarray): annual precipitation
+
+        Returns:
+            baseNdep, annual atmospheric N deposition
+        """
+        baseNdep = numpy.empty(prcann.shape)
         baseNdep[:] = 0.
         valid_mask = prcann >= 0.
-        baseNdep[valid_mask] = epnfa_1[valid_mask] + (epnfa_2[valid_mask] *
-            np.minimum(prcann[valid_mask], 80.))
+        baseNdep[valid_mask] = (
+            epnfa_1[valid_mask]
+            + (epnfa_2[valid_mask] * numpy.minimum(prcann[valid_mask], 80.)))
         baseNdep[baseNdep < 0] = 0.
         return baseNdep
 
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [param_val_dict['epnfa_1'],
-            param_val_dict['epnfa_2'], year_reg['annual_precip_path']]],
+        [(path, 1) for path in [
+            param_val_dict['epnfa_1'], param_val_dict['epnfa_2'],
+            year_reg['annual_precip_path']]],
         calc_base_N_dep, year_reg['baseNdep_path'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
 
-def _shortwave_radiation(template_raster, month, shwave_path):
-    """Calculate shortwave radiation outside the atmosphere, using the input
-    `template_raster` to calculate the latitude of each pixel. shwave.f"""
 
+def _shortwave_radiation(template_raster, month, shwave_path):
+    """Calculate shortwave radiation outside the atmosphere.
+
+    Shortwave radiation outside the atmosphere is calculated according to
+    Penman (1948), "Natural evaporation from open water, bare soil and grass",
+    Proc. Roy. Soc. London. The latitude of each pixel is required to
+    calculate radiation and is calculated as an intermediate step from the
+    input `template_raster`. shwave.f
+
+    Parameters:
+        template_raster (string): path to a raster in geographic coordinates
+            that is aligned with model inputs
+        month (int): current month of the year, such that month=0 indicates
+            January
+        shwave_path (string): path to shortwave radiation raster
+
+    Modifies the raster indicated by shwave_path
+
+    Returns:
+        None
+    """
     def shwave(month):
         def _shwave(latitude):
-            """Inputs:
-            latitude - latitude of current site in degrees
-            month - current month
+            """Calculate shortwave radiation outside the atmosphere.
 
-            Output:
-            shwave - short wave solar radiation outside the atmosphere
+            Parameters:
+                latitude (float): latitude of current site in degrees
+                month (int): current month of the year, such that month=0
+                    indicates January
 
-            Local variables:
-            ahou            - ?
-            declin          - declination (radians)
-            jday()          - Julian day for middle of current month
-            par1, par2      - parameters in computation of ahou
-            rlatitude       - latitude of the site (in radians)
-            solrad          - solar radiation (ly/day)
-            transcof        - transmission coefficient"""
-
+            Returns:
+                shwave, short wave solar radiation outside the atmosphere
+            """
             # Julian date in middle of each month of the year
             jday_list = [
                 16, 46, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350]
@@ -1228,9 +1356,11 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             ahou = numpy.arctan2(par1, par2)
             ahou = numpy.where(ahou < 0., 0., ahou)
 
-            solrad = 917.0 * transcof * (ahou * numpy.sin(rlatitude) *
-                numpy.sin(declin) + numpy.cos(rlatitude) * numpy.cos(declin) *
-                numpy.sin(ahou))
+            solrad = (
+                917.0 * transcof * (
+                    ahou * numpy.sin(rlatitude) * numpy.sin(declin)
+                    + numpy.cos(rlatitude)
+                    * numpy.cos(declin) * numpy.sin(ahou)))
 
             # short wave radiation outside the atmosphere
             shwave = numpy.empty(latitude.shape)
@@ -1277,8 +1407,8 @@ def _shortwave_radiation(template_raster, month, shwave_path):
         # y_vector is what we want, an array of latitude coordinates
         x_vector, y_vector = numpy.meshgrid(x_range, y_range)
 
-        target_band.WriteArray(y_vector, xoff=offset_map['xoff'],
-            yoff=offset_map['yoff'])
+        target_band.WriteArray(
+            y_vector, xoff=offset_map['xoff'], yoff=offset_map['yoff'])
 
     # Making sure the band and dataset is flushed and not in memory
     target_band.FlushCache()
@@ -1295,176 +1425,55 @@ def _shortwave_radiation(template_raster, month, shwave_path):
     # clean up temporary files
     shutil.rmtree(temp_dir)
 
-def _reference_evaporation(max_temp, min_temp, shwave, fwloss_4):
-    """Calculate reference evapotranspiration with the FAO Penman-Monteith
-    equation (http://www.fao.org/docrep/X0490E/x0490e08.htm),
-    modified by the parameter fwloss(4). Pevap.f"""
 
+def _reference_evapotranspiration(max_temp, min_temp, shwave, fwloss_4):
+    """Calculate reference evapotranspiration.
+
+    Reference evapotranspiration from the FAO Penman-Monteith equation in
+    "Guidelines for computing crop water requirements", FAO Irrigation and
+    drainage paper 56 (http://www.fao.org/docrep/X0490E/x0490e08.htm),
+    modified by the parameter fwloss(4). Pevap.f
+
+    Parameters:
+        max_temp (numpy.ndarray): maximum monthly temperature
+        min_temp (numpy.ndarray): minimum monthly temperature
+        shwave (numpy.ndarray): shortwave radiation outside the atmosphere
+        fwloss_4 (numpy.ndarray): parameter, scaling factor for reference
+            evapotranspiration
+
+    Returns:
+        pevap, reference evapotranspiration
+    """
     const1 = 0.0023
     const2 = 17.8
     langleys2watts = 54.0
 
     valid_mask = (fwloss_4 > 0) & (shwave >= 0)
-    trange = np.empty(fwloss_4.shape)
+    trange = numpy.empty(fwloss_4.shape)
     trange[:] = _TARGET_NODATA
     trange[valid_mask] = max_temp[valid_mask] - min_temp[valid_mask]
-    tmean = np.empty(fwloss_4.shape)
+    tmean = numpy.empty(fwloss_4.shape)
     tmean[:] = _IC_NODATA
     tmean[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.0
 
     # daily reference evapotranspiration
-    daypet = np.empty(fwloss_4.shape)
+    daypet = numpy.empty(fwloss_4.shape)
     daypet[:] = _TARGET_NODATA
     in1 = const1 * (tmean[valid_mask] + const2)
-    in2 = np.sqrt(trange[valid_mask])
+    in2 = numpy.sqrt(trange[valid_mask])
     in3 = (shwave[valid_mask] / langleys2watts)
-    daypet[valid_mask] = (const1 * (tmean[valid_mask] + const2) *
-        np.sqrt(trange[valid_mask]) * (shwave[valid_mask] / langleys2watts))
+    daypet[valid_mask] = (
+        const1 * (tmean[valid_mask] + const2)
+        * numpy.sqrt(trange[valid_mask])
+        * (shwave[valid_mask] / langleys2watts))
 
     # monthly reference evapotranspiration, from mm to cm,
     # bounded to be at least 0.5
-    monpet = np.where(((daypet * 30.) / 10.) > 0.5,
+    monpet = numpy.where(
+        ((daypet * 30.) / 10.) > 0.5,
         ((daypet * 30.) / 10.), 0.5)
 
-    pevap = np.empty(fwloss_4.shape)
+    pevap = numpy.empty(fwloss_4.shape)
     pevap[:] = _TARGET_NODATA
     pevap[valid_mask] = monpet[valid_mask] * fwloss_4[valid_mask]
     return pevap
-
-def _potential_production(aligned_inputs, site_param_table, current_month,
-                          pft_id_set, veg_trait_table, sv_reg):
-    """Calculate total potential production and root:shoot ratios. Potcrp.f"""
-    # if growth does not occur this month for all PFTs,
-    # skip the rest of the function
-    do_PFT = []
-    for pft_index in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
-            do_PFT.append(pft_index)
-    if not do_PFT:
-        return
-
-    def multiply_positive_rasters(raster1, raster2):
-        masked_r1 = np.where(raster1 < 0., 0., raster1)
-        masked_r2 = np.where(raster2 < 0., 0., raster2)
-        return masked_r1 * masked_r2
-
-    def sum_positive_rasters(*raster_list):
-        masked_list = [np.where(r < 0., 0., r) for r in raster_list]
-        return np.sum(masked_list, axis=0)
-
-    def calc_ctemp(aglivc, pmxbio, maxtmp, pmxtmp, mintmp, pmntmp):
-        """Calculate soil temperature relative to its effect on growth.
-        Lines 69-84 Potcrp.f"""
-        bio = np.empty(aglivc.shape)
-        bio[:] = _IC_NODATA
-        valid_mask = pmxbio >= 0
-        bio[valid_mask] = aglivc[valid_mask] * 2.5
-        bio = np.where(bio > pmxbio, pmxbio, bio)
-        bio[pmxbio < 0] = _IC_NODATA
-
-        # Maximum temperature
-        tmxs = np.empty(aglivc.shape)
-        tmxs[:] = _IC_NODATA
-        tmxs[valid_mask] = maxtmp[valid_mask] + ((25.4/(1. + 18. *
-            np.exp(-0.20 * maxtmp[valid_mask]))) *
-            (np.exp(pmxtmp[valid_mask] * bio[valid_mask]) - 0.13))
-
-        # Minimum temperature
-        tmns = np.empty(aglivc.shape)
-        tmns[:] = _IC_NODATA
-        tmns[valid_mask] = mintmp[valid_mask] + (pmntmp[valid_mask] *
-            bio[valid_mask] - 1.78)
-
-        # Average temperature
-        ctemp = np.empty(aglivc.shape)
-        ctemp[:] = _IC_NODATA
-        ctemp[valid_mask] = (tmxs[valid_mask] + tmns[valid_mask])/2.
-        return ctemp
-
-    # temporary intermediate rasters for these calculations
-    temp_dir = tempfile.mkdtemp()
-    temp_val_dict = {}
-    # site-level temporary calculated values
-    for val in ['sum_aglivc', 'sum_stdedc', 'ctemp', 'shwave', 'pevap']:
-        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-    # PFT-level temporary calculated values
-    for pft_i in pft_id_set:
-        for val in ['aglivc_weighted', 'stdedc_weighted']:
-            temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
-                temp_dir, '{}_{}.tif'.format(val, pft_i))
-
-    # temporary parameter rasters for these calculations
-    param_val_dict = {}
-    # site-level parameters
-    for val in ['pmxbio', 'pmxtmp', 'pmntmp', 'fwloss_4']:
-        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        param_val_dict[val] = target_path
-        site_to_val = dict(
-            [(site_code, float(table[val])) for
-            (site_code, table) in site_param_table.items()])
-        pygeoprocessing.reclassify_raster(
-            (aligned_inputs['site_index'], 1), site_to_val, target_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
-    # PFT-level parameters
-
-    # calculate intermediate quantities that do not differ between PFTs:
-    # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
-    # across PFTs, weighted by % cover of each PFT
-    for sv in ['aglivc', 'stdedc']:
-        weighted_path_list = []
-        for pft_index in pft_id_set:
-            target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in
-                    sv_reg['{}_{}_path'.format(sv, pft_index)],
-                    aligned_inputs['pft_{}'.format(pft_index)]],
-                multiply_positive_rasters, target_path,
-                gdal.GDT_Float32, _TARGET_NODATA)
-            weighted_path_list.append(target_path)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in weighted_path_list],
-            sum_positive_rasters, temp_val_dict['sum_{}'.format(sv)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-    # ctemp, soil temperature relative to impacts on growth
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [temp_val_dict['sum_aglivc'],
-            param_val_dict['pmxbio'],
-            aligned_inputs['max_temp_{}'.format(current_month)],
-            param_val_dict['pmxtmp'],
-            aligned_inputs['min_temp_{}'.format(current_month)],
-            param_val_dict['pmntmp']]],
-        calc_ctemp, temp_val_dict['ctemp'], gdal.GDT_Float32, _IC_NODATA)
-
-    # shwave, shortwave radiation outside the atmosphere
-    _shortwave_radiation(aligned_inputs['site_index'], current_month,
-        temp_val_dict['shwave'])
-
-    # pet, reference evapotranspiration modified by fwloss parameter
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [
-            aligned_inputs['max_temp_{}'.format(current_month)],
-            aligned_inputs['min_temp_{}'.format(current_month)],
-            temp_val_dict['shwave'],
-            param_val_dict['fwloss_4']]],
-        _reference_evaporation, temp_val_dict['pevap'],
-        gdal.GDT_Float32, _TARGET_NODATA)
-
-    # h2ogef_prior, line 59 Potcrp.f
-
-    # calculate quantities that differ between PFTs
-    # for pft_i in do_PFT:
-        # potprd, the limiting effect of temperature on growth
-        # potprd = f(temp_val_dict['ctemp'])
-        # h2ogef(1), the limiting effect of soil water availability on growth
-        # h2ogef(1) = f(pet) # does this need to take into account other PFTs?
-        # biof, the limiting effect of obstruction by standing dead on growth
-        # biof = f(sum of STDEDC, STRUCC_1) sv_reg['strucc_1_path']
-        # sdlng, the limiting effect of shading by live material on growth
-        # sdlng = f(sum of AGLIVC)
-        # total potential production for each PFT
-        # tgprod = prdx(1) * shwave * potprd * h2ogef(1) * biof * sdlng
-
-    # clean up temporary files
-    shutil.rmtree(temp_dir)
