@@ -744,6 +744,11 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _TARGET_NODATA)
 
+    sand_nodata = pygeoprocessing.get_raster_info(
+        sand_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(
+        clay_path)['nodata'][0]
+
     def calc_eftext(peftxa, peftxb, sand):
         """Calculate effect of soil texture on microbial decomposition.
 
@@ -760,7 +765,10 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         """
         eftext = numpy.empty(sand.shape, dtype=numpy.float32)
         eftext[:] = _IC_NODATA
-        valid_mask = sand > 0
+        valid_mask = (
+            (peftxa != _TARGET_NODATA)
+            & (peftxb != _TARGET_NODATA)
+            & (sand != sand_nodata))
         eftext[valid_mask] = (
             peftxa[valid_mask] + (peftxb[valid_mask] * sand[valid_mask]))
         return eftext
@@ -790,7 +798,10 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         """
         p1co2_2 = numpy.empty(sand.shape, dtype=numpy.float32)
         p1co2_2[:] = _IC_NODATA
-        valid_mask = sand > 0
+        valid_mask = (
+            (p1co2a_2 != _TARGET_NODATA)
+            & (p1co2b_2 != _TARGET_NODATA)
+            & (sand != sand_nodata))
         p1co2_2[valid_mask] = (
             p1co2a_2[valid_mask] + (p1co2b_2[valid_mask] * sand[valid_mask]))
         return p1co2_2
@@ -818,7 +829,10 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         """
         fps1s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps1s3[:] = _IC_NODATA
-        valid_mask = clay > 0
+        valid_mask = (
+            (ps1s3_1 != _TARGET_NODATA)
+            & (ps1s3_2 != _TARGET_NODATA)
+            & (clay != clay_nodata))
         fps1s3[valid_mask] = (
             ps1s3_1[valid_mask] + (ps1s3_2[valid_mask] * clay[valid_mask]))
         return fps1s3
@@ -846,7 +860,10 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         """
         fps2s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps2s3[:] = _IC_NODATA
-        valid_mask = clay > 0
+        valid_mask = (
+            (ps2s3_1 != _TARGET_NODATA)
+            & (ps2s3_2 != _TARGET_NODATA)
+            & (clay != clay_nodata))
         fps2s3[valid_mask] = (
             ps2s3_1[valid_mask] + (ps2s3_2[valid_mask] * clay[valid_mask]))
         return fps2s3
@@ -874,7 +891,10 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         """
         orglch = numpy.empty(sand.shape, dtype=numpy.float32)
         orglch[:] = _IC_NODATA
-        valid_mask = sand > 0
+        valid_mask = (
+            (omlech_1 != _TARGET_NODATA)
+            & (omlech_2 != _TARGET_NODATA)
+            & (sand != sand_nodata))
         orglch[valid_mask] = (
             omlech_1[valid_mask] + (omlech_2[valid_mask] * sand[valid_mask]))
         return orglch
