@@ -330,7 +330,7 @@ def execute(args):
     site_param_table = utils.build_lookup_from_csv(
         args['site_param_table'], 'site')
     missing_site_index_list = list(
-        site_index_set.difference(set(site_param_table.keys())))
+        site_index_set.difference(site_param_table.iterkeys()))
     if missing_site_index_list:
         raise ValueError(
             "Couldn't find parameter values for the following site "
@@ -353,8 +353,7 @@ def execute(args):
         base_align_raster_path_id_map['pft_%d' % pft_i] = pft_path
     veg_trait_table = utils.build_lookup_from_csv(
         args['veg_trait_path'], 'PFT')
-    missing_pft_trait_list = pft_id_set.difference(
-        set(veg_trait_table.keys()))
+    missing_pft_trait_list = pft_id_set.difference(veg_trait_table.iterkeys())
     if missing_pft_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following plant functional "
@@ -379,7 +378,7 @@ def execute(args):
     anim_trait_table = utils.build_lookup_from_csv(
         args['animal_trait_path'], 'animal_id')
     missing_animal_trait_list = set(
-        anim_id_list).difference(set(anim_trait_table.keys()))
+        anim_id_list).difference(anim_trait_table.iterkeys())
     if missing_animal_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following animal "
@@ -423,7 +422,7 @@ def execute(args):
         missing_initial_values = []
         # align initial state variables to resampled inputs
         resample_initial_path_map = {}
-        for sv in _SITE_STATE_VARIABLE_FILES.keys():
+        for sv in _SITE_STATE_VARIABLE_FILES.iterkeys():
             sv_path = os.path.join(
                 args['initial_conditions_dir'],
                 _SITE_STATE_VARIABLE_FILES[sv])
@@ -644,7 +643,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     # temporary raster from site parameter 'edepth'
     site_to_edepth = dict(
         [(site_code, float(table['edepth'])) for
-         (site_code, table) in site_param_table.items()])
+         (site_code, table) in site_param_table.iteritems()])
 
     pygeoprocessing.reclassify_raster(
         (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
@@ -716,7 +715,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         temp_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for (
-                site_code, table) in site_param_table.items()])
+                site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _TARGET_NODATA)
