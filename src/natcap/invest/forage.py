@@ -563,17 +563,6 @@ def execute(args):
         [(key, os.path.join(year_dir, path)) for key, path in
             _YEARLY_FILES.iteritems()])
 
-    # make monthly directory for monthly intermediate parameters that are
-    # shared between submodels, but do not need to be saved as output
-    month_temp_dir = tempfile.mkdtemp()
-    month_reg = dict(
-        [(key, os.path.join(month_temp_dir, path)) for
-            key, path in _SITE_INTERMEDIATE_PARAMS.iteritems()])
-    for pft_index in pft_id_set:
-        for val in _PFT_INTERMEDIATE_PARAMS:
-            month_reg['{}_{}_path'.format(
-                val, pft_index)] = '{}_{}.tif'.format(val, pft_index)
-
     # Main simulation loop
     # for each step in the simulation
     for month_index in xrange(n_months):
@@ -638,6 +627,14 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     Returns:
         None
     """
+    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
+    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
+    bulkd_nodata = pygeoprocessing.get_raster_info(bulk_d_path)['nodata'][0]
+    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
+    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
+    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
+
     # temporary intermediate rasters for this calculation
     temp_dir = tempfile.mkdtemp()
     edepth_path = os.path.join(temp_dir, 'edepth.tif')
@@ -661,7 +658,11 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
-            (som1c_2 > 0) & (som2c_2 > 0) & (som3c > 0) & (bulkd > 0))
+            (som1c_2 != som1c_2_nodata)
+            & (som2c_2 != som2c_2_nodata)
+            & (som3c != som3c_nodata)
+            & (bulkd != bulkd_nodata)
+            & (edepth != _TARGET_NODATA))
         ompc[valid_mask] = (
             (som1c_2[valid_mask] + som2c_2[valid_mask]
                 + som3c[valid_mask]) * 1.724
@@ -689,7 +690,12 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         """
         afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
-        valid_mask = ompc != _TARGET_NODATA
+        valid_mask = (
+            (sand != sand_nodata)
+            & (silt != silt_nodata)
+            & (clay != clay_nodata)
+            & (ompc != _TARGET_NODATA)
+            & (bulkd != bulkd_nodata))
         afiel[valid_mask] = (
             0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask]
             + 0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask]
@@ -717,7 +723,12 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         """
         awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
-        valid_mask = ompc != _TARGET_NODATA
+        valid_mask = (
+            (sand != sand_nodata)
+            & (silt != silt_nodata)
+            & (clay != clay_nodata)
+            & (ompc != _TARGET_NODATA)
+            & (bulkd != bulkd_nodata))
         awilt[valid_mask] = (
             -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask]
             + 0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask]
@@ -793,6 +804,9 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     Returns:
         None
     """
+    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
+
     # temporary intermediate rasters for these calculations
     temp_dir = tempfile.mkdtemp()
     param_val_dict = {}
@@ -807,11 +821,6 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _TARGET_NODATA)
-
-    sand_nodata = pygeoprocessing.get_raster_info(
-        sand_path)['nodata'][0]
-    clay_nodata = pygeoprocessing.get_raster_info(
-        clay_path)['nodata'][0]
 
     def calc_wc(afiel_1, awilt_1):
         """Calculate water content of soil layer 1."""
@@ -881,7 +890,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
-            temp_val_dict['p1co2a_2'], param_val_dict['p1co2b_2'], sand_path]],
+            param_val_dict['p1co2a_2'],
+            param_val_dict['p1co2b_2'], sand_path]],
         calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _IC_NODATA)
 
     def calc_fps1s3(ps1s3_1, ps1s3_2, clay):
@@ -1033,6 +1043,9 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     Returns:
         None
     """
+    strucc_1_nodata = pygeoprocessing.get_raster_info(
+            sv_reg['strucc_1_path'])['nodata'][0]
+
     # temporary parameter rasters for these calculations
     temp_dir = tempfile.mkdtemp()
     param_val_dict = {}
@@ -1045,7 +1058,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             param_val_dict['{}_{}'.format(val, iel)] = target_path
             site_to_val = dict(
                 [(site_code, float(table['{}_{}'.format(val, iel)])) for
-                    (site_code, table) in site_param_table.items()])
+                    (site_code, table) in site_param_table.iteritems()])
             pygeoprocessing.reclassify_raster(
                 (site_index_path, 1), site_to_val, target_path,
                 gdal.GDT_Float32, _TARGET_NODATA)
@@ -1076,8 +1089,13 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             rnewas1, required ratio for decomposition of structural material
             into som1 for one nutrient
         """
-        valid_mask = strucc_1 >= 0.
-        cemicb1 = numpy.empty(strucc_1.shape)
+        valid_mask = (
+            (pcemic1_2 != _TARGET_NODATA)
+            & (pcemic1_1 != _TARGET_NODATA)
+            & (pcemic1_3 != _TARGET_NODATA)
+            & (struce_1 != struce_1_nodata)
+            & (strucc_1 != strucc_1_nodata))
+        cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
             pcemic1_2[valid_mask]
@@ -1125,8 +1143,18 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             rnewas2, required ratio for decomposition of structural material
             into som2 for one nutrient
         """
-        valid_mask = strucc_1 >= 0.
-        cemicb2 = numpy.empty(strucc_1.shape)
+        valid_mask = (
+            (pcemic2_2 != _TARGET_NODATA)
+            & (pcemic2_1 != _TARGET_NODATA)
+            & (pcemic2_3 != _TARGET_NODATA)
+            & (struce_1 != struce_1_nodata)
+            & (strucc_1 != strucc_1_nodata)
+            & (rad1p_1 != _TARGET_NODATA)
+            & (rad1p_2 != _TARGET_NODATA)
+            & (rad1p_3 != _TARGET_NODATA)
+            & (pcemic1_2 != _TARGET_NODATA)
+            & (rnewas1 != _TARGET_NODATA))
+        cemicb2 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb2[:] = _TARGET_NODATA
         cemicb2[valid_mask] = (
             pcemic2_2[valid_mask]
@@ -1135,7 +1163,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         rnewas2 = _aboveground_ratio(
             struce_1, strucc_1, pcemic2_1, pcemic2_2, pcemic2_3, cemicb2)
 
-        radds1 = numpy.empty(strucc_1.shape)
+        radds1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         radds1[:] = _TARGET_NODATA
         radds1[valid_mask] = (
             rad1p_1[valid_mask] + rad1p_2[valid_mask]
@@ -1147,6 +1175,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
     for iel in [1, 2]:
         # calculate rnewas_iel_1 - aboveground material to SOM1
+        struce_1_nodata = pygeoprocessing.get_raster_info(
+            sv_reg['struce_1_{}_path'.format(iel)])['nodata'][0]
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 param_val_dict['pcemic1_2_{}'.format(iel)],
@@ -1174,7 +1204,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # calculate rnewbs_iel_1 - belowground material to SOM1
         site_to_varat1_1 = dict([
             (site_code, float(table['varat1_1_{}'.format(iel)])) for
-            (site_code, table) in site_param_table.items()])
+            (site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_varat1_1,
             pp_reg['rnewbs_{}_1_path'.format(iel)],
@@ -1183,7 +1213,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # rnewbs(iel,2) = varat22(1,iel)
         site_to_varat22_1 = dict([
             (site_code, float(table['varat22_1_{}'.format(iel)])) for
-            (site_code, table) in site_param_table.items()])
+            (site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_varat22_1,
             pp_reg['rnewbs_{}_2_path'.format(iel)],
@@ -1223,6 +1253,9 @@ def _yearly_tasks(
 
     Returns:
         None
+
+    Raises:
+        ValueError if less than 12 monthly precipitation rasters can be found
     """
     annual_precip_rasters = []
     for precip_month in xrange(month_index, month_index + 12):
@@ -1259,7 +1292,7 @@ def _yearly_tasks(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.items()])
+                (site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -1277,9 +1310,12 @@ def _yearly_tasks(
         Returns:
             baseNdep, annual atmospheric N deposition
         """
-        baseNdep = numpy.empty(prcann.shape)
+        baseNdep = numpy.empty(prcann.shape, dtype=numpy.float32)
         baseNdep[:] = 0.
-        valid_mask = prcann >= 0.
+        valid_mask = (
+            (epnfa_1 != _TARGET_NODATA)
+            & (epnfa_2 != _TARGET_NODATA)
+            & (prcann != _TARGET_NODATA))
         baseNdep[valid_mask] = (
             epnfa_1[valid_mask]
             + (epnfa_2[valid_mask] * numpy.minimum(prcann[valid_mask], 80.)))
@@ -1334,15 +1370,10 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             jday_list = [
                 16, 46, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350]
             jday = jday_list[month]
-
             transcof = 0.8
-            valid_mask = latitude >= -180.
-
-            rlatitude = numpy.empty(latitude.shape)
-            rlatitude[:] = _IC_NODATA
 
             # Convert latitude from degrees to radians
-            rlatitude[valid_mask] = latitude[valid_mask] * (numpy.pi / 180.0)
+            rlatitude = latitude * (numpy.pi / 180.0)
 
             # short wave solar radiation on a clear day
             declin = 0.401426 * numpy.sin(6.283185 * (jday - 77.0) / 365.0)
@@ -1363,9 +1394,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
                     * numpy.cos(declin) * numpy.sin(ahou)))
 
             # short wave radiation outside the atmosphere
-            shwave = numpy.empty(latitude.shape)
-            shwave[:] = _TARGET_NODATA
-            shwave[valid_mask] = solrad[valid_mask] / transcof
+            shwave = solrad / transcof
             return shwave
         return _shwave
 
@@ -1448,16 +1477,23 @@ def _reference_evapotranspiration(max_temp, min_temp, shwave, fwloss_4):
     const2 = 17.8
     langleys2watts = 54.0
 
-    valid_mask = (fwloss_4 > 0) & (shwave >= 0)
-    trange = numpy.empty(fwloss_4.shape)
+    max_temp_nodata = pygeoprocessing.get_raster_info(max_temp)['nodata'][0]
+    min_temp_nodata = pygeoprocessing.get_raster_info(min_temp)['nodata'][0]
+
+    valid_mask = (
+        (max_temp != max_temp_nodata)
+        & (min_temp != min_temp_nodata)
+        & (shwave != _TARGET_NODATA)
+        & (fwloss_4 != _TARGET_NODATA))
+    trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
     trange[:] = _TARGET_NODATA
     trange[valid_mask] = max_temp[valid_mask] - min_temp[valid_mask]
-    tmean = numpy.empty(fwloss_4.shape)
+    tmean = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
     tmean[:] = _IC_NODATA
     tmean[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.0
 
     # daily reference evapotranspiration
-    daypet = numpy.empty(fwloss_4.shape)
+    daypet = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
     daypet[:] = _TARGET_NODATA
     in1 = const1 * (tmean[valid_mask] + const2)
     in2 = numpy.sqrt(trange[valid_mask])
@@ -1473,7 +1509,7 @@ def _reference_evapotranspiration(max_temp, min_temp, shwave, fwloss_4):
         ((daypet * 30.) / 10.) > 0.5,
         ((daypet * 30.) / 10.), 0.5)
 
-    pevap = numpy.empty(fwloss_4.shape)
+    pevap = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
     pevap[:] = _TARGET_NODATA
     pevap[valid_mask] = monpet[valid_mask] * fwloss_4[valid_mask]
     return pevap
