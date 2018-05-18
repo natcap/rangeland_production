@@ -21,8 +21,17 @@ LOGGER = logging.getLogger('natcap.invest.forage')
 # we only have these types of soils
 SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
 
-# state variables that are updated at each monthly timestep
-# state variables property of the site
+# state variables and parameters take their names from Century
+# _SITE_STATE_VARIABLE_FILES contains state variables that are a
+# property of the site, including:
+# carbon in each soil compartment
+# (structural, metabolic, som1, som2, som3) and layer (1=surface, 2=soil)
+# e.g., som2c_2 = carbon in soil som2;
+# N and P in each soil layer and compartment (1=N, 2=P)
+# e.g., som2e_1_1 = N in surface som2, som2e_1_2 = P in surface som2;
+# water in each soil layer, asmos_<layer>
+# state variables fully described in this table:
+# https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 _SITE_STATE_VARIABLE_FILES = {
     'metabc_1_path': 'metabc_1.tif',
     'metabc_2_path': 'metabc_2.tif',
@@ -65,13 +74,27 @@ _SITE_STATE_VARIABLE_FILES = {
     'asmos_9_path': 'asmos_9.tif',
     }
 
-# state variables property of PFT
+# _PFT_STATE_VARIABLES contains state variables that are a
+# property of a PFT, including:
+# carbon, nitrogen, and phosphorous in aboveground biomass
+# where 1=N, 2=P
+# e.g. aglivc = C in aboveground live biomass,
+# aglive_1 = N in aboveground live biomass;
+# carbon, nitrogen, and phosphorous in aboveground standing dead
+# biomass, stdedc and stdede;
+# carbon, nitrogen and phosphorous in belowground live biomass,
+# aglivc and aglive
+# state variables fully described in this table:
+# https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 _PFT_STATE_VARIABLES = [
     'aglivc', 'bglivc', 'stdedc', 'aglive_1', 'bglive_1',
     'stdede_1', 'aglive_2', 'bglive_2', 'stdede_2',
     ]
 
-# intermediate parameters that do not change between timesteps
+# intermediate parameters that do not change between timesteps,
+# including field capacity and wilting point of each soil layer,
+# coefficients describing effect of soil texture on decomposition
+# rates
 _PERSISTENT_PARAMS_FILES = {
     'afiel_1_path': 'afiel_1.tif',
     'afiel_2_path': 'afiel_2.tif',
@@ -246,6 +269,7 @@ def execute(args):
     LOGGER.info("model execute: %s", args)
     starting_month = int(args['starting_month'])
     starting_year = int(args['starting_year'])
+    n_months = int(args['n_months'])
     # this will be used to look up precip path given the model's month
     # timestep index that starts at 0
     precip_path_list = []
@@ -259,7 +283,7 @@ def execute(args):
     base_align_raster_path_id_map = {}
     # we'll use this to report any missing paths
     missing_precip_path_list = []
-    for month_index in xrange(int(args['n_months'])):
+    for month_index in xrange(n_months):
         month_i = (starting_month + month_index - 1) % 12 + 1
         temperature_month_set.add(month_i)
         year = starting_year + (starting_month + month_index - 1) // 12
@@ -497,7 +521,7 @@ def execute(args):
 
     # Main simulation loop
     # for each step in the simulation
-    for month_index in xrange(int(args['n_months'])):
+    for month_index in xrange(n_months):
         # make new folders for state variables during this step
         sv_dir = os.path.join(
             args['workspace_dir'], 'state_variables_m%d' % month_index)
@@ -512,7 +536,7 @@ def execute(args):
         # update state variables from previous month
         LOGGER.info(
             "Main simulation loop: month %d of %d" % (
-                month_index, int(args['n_months'])))
+                month_index, n_months))
 
 
 def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
@@ -570,7 +594,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
             ompc, total soil organic matter weighted by bulk
             density.
         """
-        ompc = numpy.empty(som1c_2.shape)
+        ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
             (som1c_2 > 0) & (som2c_2 > 0) & (som3c > 0) & (bulkd > 0))
@@ -599,7 +623,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         Returns:
             afiel, field capacity for this soil layer
         """
-        afiel = numpy.empty(sand.shape)
+        afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
         valid_mask = ompc != _TARGET_NODATA
         afiel[valid_mask] = (
@@ -627,7 +651,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         Returns:
             awilt, wilting point for this soil layer
         """
-        awilt = numpy.empty(sand.shape)
+        awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
         valid_mask = ompc != _TARGET_NODATA
         awilt[valid_mask] = (
@@ -734,7 +758,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Returns:
             eftext, coefficient that modifies microbe decomposition rate.
         """
-        eftext = numpy.empty(sand.shape)
+        eftext = numpy.empty(sand.shape, dtype=numpy.float32)
         eftext[:] = _IC_NODATA
         valid_mask = sand > 0
         eftext[valid_mask] = (
@@ -764,7 +788,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             p1co2_2, fraction of carbon that flows to CO2 from active
             organic soil carbon
         """
-        p1co2_2 = numpy.empty(sand.shape)
+        p1co2_2 = numpy.empty(sand.shape, dtype=numpy.float32)
         p1co2_2[:] = _IC_NODATA
         valid_mask = sand > 0
         p1co2_2[valid_mask] = (
@@ -792,7 +816,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             fps1s3, coefficient that modifies rate of decomposition
             from som1c_2
         """
-        fps1s3 = numpy.empty(clay.shape)
+        fps1s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps1s3[:] = _IC_NODATA
         valid_mask = clay > 0
         fps1s3[valid_mask] = (
@@ -820,7 +844,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             fps2s3, coefficient that modifies rate of decomposition from
             som2c_2 to som3c
         """
-        fps2s3 = numpy.empty(clay.shape)
+        fps2s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps2s3[:] = _IC_NODATA
         valid_mask = clay > 0
         fps2s3[valid_mask] = (
@@ -848,7 +872,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             orglch, the fraction of organic compounds leaching from soil
             with drainage from soil layer 1 to layer 2
         """
-        orglch = numpy.empty(sand.shape)
+        orglch = numpy.empty(sand.shape, dtype=numpy.float32)
         orglch[:] = _IC_NODATA
         valid_mask = sand > 0
         orglch[valid_mask] = (
