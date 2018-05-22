@@ -88,14 +88,13 @@ _SITE_STATE_VARIABLE_FILES = {
 # https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 _PFT_STATE_VARIABLES = [
     'aglivc', 'bglivc', 'stdedc', 'aglive_1', 'bglive_1',
-    'stdede_1', 'aglive_2', 'bglive_2', 'stdede_2',
+    'stdede_1', 'aglive_2', 'bglive_2', 'stdede_2', 'avh2o_1'
     ]
 
 # intermediate parameters that do not change between timesteps,
 # including field capacity and wilting point of each soil layer,
 # coefficients describing effect of soil texture on decomposition
 # rates
-
 _PERSISTENT_PARAMS_FILES = {
     'afiel_1_path': 'afiel_1.tif',
     'afiel_2_path': 'afiel_2.tif',
@@ -130,11 +129,16 @@ _PERSISTENT_PARAMS_FILES = {
     'rnewbs_2_1_path': 'rnewbs_2_1.tif',
     'rnewbs_2_2_path': 'rnewbs_2_2.tif',
     }
+
 # values that are updated once per year
 _YEARLY_FILES = {
     'annual_precip_path': 'annual_precip.tif',
     'baseNdep_path': 'baseNdep.tif',
     }
+
+# intermediate values for each plant functional type that are shared
+# between submodels, but do not need to be saved as output
+_PFT_INTERMEDIATE_VALUES = ['tgprod']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -319,17 +323,17 @@ def execute(args):
     # atmospheric N deposition and potential production from annual precip
     n_precip_months = int(args['n_months'])
     if n_precip_months < 12:
-        month_index = int(args['n_months'])
-        while month_index <= 12:
-            month_i = (starting_month + month_index - 1) % 12 + 1
-            year = starting_year + (starting_month + month_index - 1) // 12
+        m_index = int(args['n_months'])
+        while m_index <= 12:
+            month_i = (starting_month + m_index - 1) % 12 + 1
+            year = starting_year + (starting_month + m_index - 1) // 12
             precip_path = args['monthly_precip_path_pattern'].replace(
                 '<year>', str(year)).replace('<month>', '%.2d' % month_i)
-            base_align_raster_path_id_map['precip_%d' % month_index] = precip_path
+            base_align_raster_path_id_map['precip_%d' % m_index] = precip_path
             precip_path_list.append(precip_path)
             if os.path.exists(precip_path):
                 n_precip_months = n_precip_months + 1
-            month_index = month_index + 1
+            m_index = m_index + 1
     if n_precip_months < 12:
         raise ValueError("At least 12 months of precipitation data required")
 
@@ -563,6 +567,16 @@ def execute(args):
         [(key, os.path.join(year_dir, path)) for key, path in
             _YEARLY_FILES.iteritems()])
 
+    # make monthly directory for monthly intermediate parameters that are
+    # shared between submodels, but do not need to be saved as output
+    month_temp_dir = tempfile.mkdtemp()
+    month_reg = {}
+    for pft_index in pft_id_set:
+        for val in _PFT_INTERMEDIATE_VALUES:
+            month_reg['{}_{}_path'.format(
+                val, pft_index)] = os.path.join(
+                month_temp_dir, '{}_{}.tif'.format(val, pft_index))
+
     # Main simulation loop
     # for each step in the simulation
     for month_index in xrange(n_months):
@@ -572,7 +586,7 @@ def execute(args):
                 aligned_inputs['site_index'], site_param_table,
                 aligned_inputs, month_index, year_reg)
 
-        month_i = (starting_month + month_index - 1) % 12 + 1
+        current_month = (starting_month + month_index - 1) % 12 + 1
         year = starting_year + (starting_month + month_index - 1) // 12
 
         # make new folders for state variables during this step
@@ -581,15 +595,19 @@ def execute(args):
         utils.make_directories([sv_dir])
 
         # track state variables from previous step
-        prev_sv_reg = sv_reg
-        sv_reg = utils.build_file_registry(
-            [(_SITE_STATE_VARIABLE_FILES, sv_dir),
-                (pft_sv_dict, sv_dir)], file_suffix)
+        # prev_sv_reg = sv_reg
+        # sv_reg = utils.build_file_registry(
+        #     [(_SITE_STATE_VARIABLE_FILES, sv_dir),
+        #         (pft_sv_dict, sv_dir)], file_suffix)
 
         # update state variables from previous month
         LOGGER.info(
             "Main simulation loop: month %d of %d" % (
                 month_index, n_months))
+
+        _potential_production(
+            aligned_inputs, site_param_table, current_month, month_index,
+            pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
 
 
 def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
@@ -619,7 +637,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         bulk_d_path (string): path to raster containing bulk density of soil
         pp_reg (dict): map of key, path pairs giving paths to persistent
             intermediate parameters that do not change over the course of
-            the simulation.
+            the simulation
 
     Modifies the rasters pp_reg['afiel_<layer>'] and pp_reg['awilt_<layer>']
         for all soil layers.
@@ -643,6 +661,10 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     def calc_ompc(som1c_2, som2c_2, som3c, bulkd, edepth):
         """Estimate total soil organic matter.
 
+        Total soil organic matter is the sum of soil carbon across
+        slow, active, and passive compartments, weighted by bulk
+        density and total modeled soil depth. Lines 220-222, Prelim.f
+
         Parameters:
             som1c_2 (numpy.ndarray): active organic soil carbon
             som2c_2 (numpy.ndarray): slow organic soil carbon
@@ -650,7 +672,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
             bulkd (numpy.ndarray): bulk density of soil
             edepth (numpy.ndarray): parameter, depth of soil for this
                 calculation
-        From line 222, Prelim.f
+
         Returns:
             ompc, total soil organic matter weighted by bulk
             density.
@@ -1349,7 +1371,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             January
         shwave_path (string): path to shortwave radiation raster
 
-    Modifies the raster indicated by shwave_path
+    Modifies the raster indicated by `shwave_path`
 
     Returns:
         None
@@ -1360,7 +1382,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
 
             Parameters:
                 latitude (float): latitude of current site in degrees
-                month (int): current month of the year, such that month=0
+                month (int): current month of the year, such that month=1
                     indicates January
 
             Returns:
@@ -1369,7 +1391,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             # Julian date in middle of each month of the year
             jday_list = [
                 16, 46, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350]
-            jday = jday_list[month]
+            jday = jday_list[month - 1]
             transcof = 0.8
 
             # Convert latitude from degrees to radians
@@ -1455,61 +1477,550 @@ def _shortwave_radiation(template_raster, month, shwave_path):
     shutil.rmtree(temp_dir)
 
 
-def _reference_evapotranspiration(max_temp, min_temp, shwave, fwloss_4):
+def _reference_evapotranspiration(
+        max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
+        pevap_path):
     """Calculate reference evapotranspiration.
 
     Reference evapotranspiration from the FAO Penman-Monteith equation in
     "Guidelines for computing crop water requirements", FAO Irrigation and
     drainage paper 56 (http://www.fao.org/docrep/X0490E/x0490e08.htm),
-    modified by the parameter fwloss(4). Pevap.f
+    modified by the parameter fwloss(4).
 
     Parameters:
-        max_temp (numpy.ndarray): maximum monthly temperature
-        min_temp (numpy.ndarray): minimum monthly temperature
-        shwave (numpy.ndarray): shortwave radiation outside the atmosphere
-        fwloss_4 (numpy.ndarray): parameter, scaling factor for reference
-            evapotranspiration
+            max_temp_path (string): path to maximum monthly temperature
+            min_temp_path (string): path to minimum monthly temperature
+            shwave_path (string): path to shortwave radiation outside the
+                atmosphere
+            fwloss_4_path (string): path to parameter, scaling factor for
+                reference evapotranspiration
+            pevap_path (string): path to result, reference evapotranspiration
+                raster
+
+    Modifies:
+        The raster indicated by `pevap_path`
 
     Returns:
-        pevap, reference evapotranspiration
+        None
     """
-    const1 = 0.0023
-    const2 = 17.8
-    langleys2watts = 54.0
+    def _calc_pevap(max_temp, min_temp, shwave, fwloss_4):
+        """Calculate reference evapotranspiration.
 
-    max_temp_nodata = pygeoprocessing.get_raster_info(max_temp)['nodata'][0]
-    min_temp_nodata = pygeoprocessing.get_raster_info(min_temp)['nodata'][0]
+        Pevap.f
 
-    valid_mask = (
-        (max_temp != max_temp_nodata)
-        & (min_temp != min_temp_nodata)
-        & (shwave != _TARGET_NODATA)
-        & (fwloss_4 != _TARGET_NODATA))
-    trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
-    trange[:] = _TARGET_NODATA
-    trange[valid_mask] = max_temp[valid_mask] - min_temp[valid_mask]
-    tmean = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
-    tmean[:] = _IC_NODATA
-    tmean[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.0
+        Parameters:
+            max_temp (numpy.ndarray): maximum monthly temperature
+            min_temp (numpy.ndarray): minimum monthly temperature
+            shwave (numpy.ndarray): shortwave radiation outside the atmosphere
+            fwloss_4 (numpy.ndarray): parameter, scaling factor for reference
+                evapotranspiration
 
-    # daily reference evapotranspiration
-    daypet = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
-    daypet[:] = _TARGET_NODATA
-    in1 = const1 * (tmean[valid_mask] + const2)
-    in2 = numpy.sqrt(trange[valid_mask])
-    in3 = (shwave[valid_mask] / langleys2watts)
-    daypet[valid_mask] = (
-        const1 * (tmean[valid_mask] + const2)
-        * numpy.sqrt(trange[valid_mask])
-        * (shwave[valid_mask] / langleys2watts))
+        Returns:
+            pevap, reference evapotranspiration
+        """
+        const1 = 0.0023
+        const2 = 17.8
+        langleys2watts = 54.0
 
-    # monthly reference evapotranspiration, from mm to cm,
-    # bounded to be at least 0.5
-    monpet = numpy.where(
-        ((daypet * 30.) / 10.) > 0.5,
-        ((daypet * 30.) / 10.), 0.5)
+        valid_mask = (
+            (max_temp != maxtmp_nodata)
+            & (min_temp != mintmp_nodata)
+            & (shwave != _TARGET_NODATA)
+            & (fwloss_4 != _TARGET_NODATA))
+        trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
+        trange[:] = _TARGET_NODATA
+        trange[valid_mask] = max_temp[valid_mask] - min_temp[valid_mask]
+        tmean = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
+        tmean[:] = _IC_NODATA
+        tmean[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.0
 
-    pevap = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
-    pevap[:] = _TARGET_NODATA
-    pevap[valid_mask] = monpet[valid_mask] * fwloss_4[valid_mask]
-    return pevap
+        # daily reference evapotranspiration
+        daypet = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
+        daypet[:] = _TARGET_NODATA
+        in1 = const1 * (tmean[valid_mask] + const2)
+        in2 = numpy.sqrt(trange[valid_mask])
+        in3 = (shwave[valid_mask] / langleys2watts)
+        daypet[valid_mask] = (
+            const1 * (tmean[valid_mask] + const2)
+            * numpy.sqrt(trange[valid_mask])
+            * (shwave[valid_mask] / langleys2watts))
+
+        # monthly reference evapotranspiration, from mm to cm,
+        # bounded to be at least 0.5
+        monpet = numpy.where(
+            ((daypet * 30.) / 10.) > 0.5,
+            ((daypet * 30.) / 10.), 0.5)
+
+        pevap = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
+        pevap[:] = _TARGET_NODATA
+        pevap[valid_mask] = monpet[valid_mask] * fwloss_4[valid_mask]
+        return pevap
+
+    maxtmp_nodata = pygeoprocessing.get_raster_info(
+        max_temp_path)['nodata'][0]
+    mintmp_nodata = pygeoprocessing.get_raster_info(
+        min_temp_path)['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            max_temp_path, min_temp_path, shwave_path, fwloss_4_path]],
+        _calc_pevap, pevap_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+
+def _potential_production(
+        aligned_inputs, site_param_table, current_month, month_index,
+        pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg):
+    """Calculate above- and belowground potential production.
+
+    Potential production of each plant functional type is calculated
+    as total potential production given incoming solar radiation,
+    limited by temperature, soil moisture, and obstruction by biomass and
+    litter. Lines 57-148 Potcrp.f
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including precipitation, temperature,
+            plant functional type composition, and site spatial index
+        site_param_table (dict): map of site spatial indices to dictionaries
+            containing site parameters
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        month_index (int): month of the simulation, such that month_index=13
+            indicates month 13 of the simulation
+        pft_id_set (set): set of integers identifying plant functional types
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        pp_reg (dict): map of key, path pairs giving paths to persistent
+            intermediate parameters that do not change over the course of
+            the simulation
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+
+    Modifies:
+        The raster indicated by `month_reg['tgprod_<PFT>']` for each plant
+            functional type (PFT) where growth is scheduled to occur in this
+            month
+
+    Returns:
+        None
+    """
+    # if growth does not occur this month for all PFTs,
+    # skip the rest of the function
+    do_PFT = []
+    for pft_index in pft_id_set:
+        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
+            do_PFT.append(pft_index)
+    if not do_PFT:
+        return
+
+    def multiply_positive_rasters(raster1, raster2):
+        """Multiply positive values in two rasters."""
+        masked_r1 = numpy.where(raster1 < 0., 0., raster1)
+        masked_r2 = numpy.where(raster2 < 0., 0., raster2)
+        return masked_r1 * masked_r2
+
+    def sum_positive_rasters(*raster_list):
+        """Add positive values in the rasters in raster_list."""
+        masked_list = [numpy.where(r < 0., 0., r) for r in raster_list]
+        return numpy.sum(masked_list, axis=0)
+
+    def calc_ctemp(aglivc, pmxbio, maxtmp, pmxtmp, mintmp, pmntmp):
+        """Calculate soil temperature relative to its effect on growth.
+
+        Soil temperature is calculated from monthly temperature inputs and
+        modified by total standing live biomass. Lines 69-84 Potcrp.f
+
+        Parameters:
+            aglivc (numpy.ndarray): sum of aglivc (carbon in aboveground live
+                biomass) across plant functional types
+            pmxbio (numpy.ndarray): maximum biomass impact on temperature
+            maxtmp (numpy.ndarray): average maximum monthly temperature
+            pmxtmp (numpy.ndarray): scaling factor for effect of biomass on
+                monthly maximum temperature
+            mintmp (numpy.ndarray): average minimum monthly temperature
+            pmntmp (numpy.ndarray): scaling factor for effect of biomass on
+                monthly minimum temperature
+
+        Returns:
+            ctemp, effect of soil temperature on potential production
+
+        """
+        bio = numpy.empty(aglivc.shape, dtype=numpy.float32)
+        bio[:] = _IC_NODATA
+        valid_mask = (
+            (aglivc >= 0.)
+            & (pmxbio != _IC_NODATA)
+            & (maxtmp != maxtmp_nodata)
+            & (pmxtmp != _IC_NODATA)
+            & (mintmp != mintmp_nodata)
+            & (pmntmp != _IC_NODATA))
+        bio[valid_mask] = aglivc[valid_mask] * 2.5
+        bio = numpy.where(bio > pmxbio, pmxbio, bio)
+        bio[pmxbio < 0] = _IC_NODATA
+
+        # Maximum temperature
+        tmxs = numpy.empty(aglivc.shape, dtype=numpy.float32)
+        tmxs[:] = _IC_NODATA
+        tmxs[valid_mask] = (
+            maxtmp[valid_mask] + (
+                (25.4/(1. + 18. * numpy.exp(-0.20 * maxtmp[valid_mask])))
+                * (numpy.exp(pmxtmp[valid_mask] * bio[valid_mask]) - 0.13)))
+
+        # Minimum temperature
+        tmns = numpy.empty(aglivc.shape, dtype=numpy.float32)
+        tmns[:] = _IC_NODATA
+        tmns[valid_mask] = (
+            mintmp[valid_mask]
+            + (pmntmp[valid_mask] * bio[valid_mask] - 1.78))
+
+        # Average temperature
+        ctemp = numpy.empty(aglivc.shape, dtype=numpy.float32)
+        ctemp[:] = _IC_NODATA
+        ctemp[valid_mask] = (tmxs[valid_mask] + tmns[valid_mask])/2.
+        return ctemp
+
+    def calc_potprd(ctemp, ppdf_1, ppdf_2, ppdf_3, ppdf_4):
+        """Calculate the limiting effect of temperature on growth.
+
+        Estimated soil temperature restricts potential production according to
+        a Poisson Density Function curve described by the plant functional
+        type-specific parameters ppdf_1-4.. Lines 73-84 Potcrp.f
+
+        Parameters:
+            ctemp (numpy.ndarray): soil temperature, as calculated from
+                monthly temperature and modified by standing live biomass
+            ppdf_1 (numpy.ndarray): optimum temperature for growth
+            ppdf_2 (numpy.ndarray): maximum temperature for growth
+            ppdf_3 (numpy.ndarray): left curve shape for Poisson Density
+                Function curve describing growth as function of temperature
+            ppdf_4 (numpy.ndarray): right curve shape for Poisson Density
+                Function curve describing growth as function of temperature
+
+        Returns:
+            potprd, scaling factor describing potential production limited
+                by temperature
+        """
+        valid_mask = (
+            (ctemp != _IC_NODATA)
+            & (ppdf_1 != _IC_NODATA)
+            & (ppdf_2 != _IC_NODATA)
+            & (ppdf_3 != _IC_NODATA)
+            & (ppdf_4 != _IC_NODATA))
+        frac = numpy.empty(ctemp.shape, dtype=numpy.float32)
+        frac[:] = _TARGET_NODATA
+        frac[valid_mask] = (
+            (ppdf_2[valid_mask] - ctemp[valid_mask])
+            / (ppdf_2[valid_mask] - ppdf_1[valid_mask]))
+        gpdf = numpy.empty(ctemp.shape, dtype=numpy.float32)
+        gpdf[:] = _TARGET_NODATA
+        gpdf[valid_mask] = numpy.exp(
+            ppdf_3[valid_mask]/ppdf_4[valid_mask]
+            * (1. - numpy.power(frac[valid_mask], ppdf_4[valid_mask]))
+            * numpy.power(frac[valid_mask], ppdf_3[valid_mask]))
+        return gpdf
+
+    def calc_h2ogef_1(
+            pevap, avh2o_1, precip, wc, pprpts_1, pprpts_2, pprpts_3):
+        """Calculate the limiting factor of water availability on growth.
+
+        Soil moisture restricts potential production according to the ratio
+        of available water to reference evapotranspiration. The shape of the
+        linear relationship of this ratio to potential production is
+        controlled by the site parameters pprpts_1, pprpts_2, and pprpts_3.
+        Lines 57-64 Potcrp.f
+
+        Parameters:
+            pevap (numpy.ndarray): reference evapotranspiration
+            avh2o_1 (numpy.ndarray): water available to this plant functional
+                type for growth
+            precip (numpy.ndarray): precipitation for the current month
+            wc (numpy.ndarray): water content in soil layer 1
+            pprpts_1 (numpy.ndarray): parameter, the minimum ratio of
+                available water to reference evapotranspiration that limits
+                production completely
+            pprpts_2 (numpy.ndarray): parameter, influences the slope of the
+                line predicting potential production from available water
+            pprpts_3 (numpy.ndarray): parameter, the ratio of available water
+                to reference evapotranspiration above which production is
+                not restricted
+
+        Returns:
+            h2ogef_1, scaling factor describing potential production limited
+                by soil moisture
+
+        """
+        valid_mask = (
+            (pevap != _TARGET_NODATA)
+            & (avh2o_1 != avh2o_1_nodata)
+            & (precip != precip_nodata)
+            & (wc != _TARGET_NODATA)
+            & (pprpts_1 != _IC_NODATA)
+            & (pprpts_2 != _IC_NODATA)
+            & (pprpts_3 != _IC_NODATA))
+        h2ogef_prior = numpy.empty(pevap.shape, dtype=numpy.float32)
+        h2ogef_prior[:] = _TARGET_NODATA
+        h2ogef_prior[valid_mask] = numpy.where(
+            pevap[valid_mask] >= 0.01,
+            (avh2o_1[valid_mask] + precip[valid_mask])/pevap[valid_mask],
+            0.01)
+
+        intcpt = pprpts_1 + (pprpts_2 * wc)
+        slope = 1. / (pprpts_3 - intcpt)
+
+        h2ogef_1 = numpy.empty(pevap.shape, dtype=numpy.float32)
+        h2ogef_1[:] = _TARGET_NODATA
+        h2ogef_1[valid_mask] = (
+            1.0 + slope[valid_mask]
+            * (h2ogef_prior[valid_mask] - pprpts_3[valid_mask]))
+
+        h2ogef_1[valid_mask] = numpy.where(
+            h2ogef_1[valid_mask] > 1., 1., h2ogef_1[valid_mask])
+        h2ogef_1[valid_mask] = numpy.where(
+            h2ogef_1[valid_mask] < 0.01, 0.01, h2ogef_1[valid_mask])
+        return h2ogef_1
+
+    def calc_biof(sum_stdedc, sum_aglivc, strucc_1, pmxbio, biok5):
+        """Calculate the effect of obstruction on growth.
+
+        Live biomass, standing dead biomass, and litter reduce potential
+        production through obstruction. The shape of the relationship between
+        standing biomass and litter and potential production is controlled by
+        the site parameter pmxbio and the plant functional type parameter
+        biok5. Lines 91-120 Potcrp.f
+
+        Parameters:
+            sum_stdedc (numpy.ndarray): total carbon in standing dead
+                biomass across plant functional types
+            sum_aglivc (numpy.ndarray): total carbin in aboveground live
+                biomass across plant functional types
+            strucc_1 (numpy.ndarray): carbon in surface litter
+            pmxbio (numpy.ndarray): parameter, maximum biomass impact on
+                potential production
+            biok5 (numpy.ndarray): parameter, level of standing dead biomass
+                and litter
+
+        Returns:
+            biof, scaling factor describing potential production limited
+                by obstruction
+        """
+        valid_mask = (
+            (strucc_1 != strucc_1_nodata)
+            & (pmxbio != _IC_NODATA)
+            & (biok5 != _IC_NODATA))
+
+        bioc = numpy.empty(sum_stdedc.shape, dtype=numpy.float32)
+        bioc[:] = _IC_NODATA
+        bioc[valid_mask] = numpy.where(
+            ((sum_stdedc[valid_mask] + 0.1*strucc_1[valid_mask]) <= 0.), 0.01,
+            (sum_stdedc[valid_mask] + 0.1*strucc_1[valid_mask]))
+        bioc[valid_mask] = numpy.where(
+            (bioc[valid_mask] > pmxbio[valid_mask]), pmxbio[valid_mask],
+            bioc[valid_mask])
+
+        bioprd = numpy.empty(sum_stdedc.shape, dtype=numpy.float32)
+        bioprd[:] = _IC_NODATA
+        bioprd[valid_mask] = 1. - (
+            bioc[valid_mask] / (biok5[valid_mask] + bioc[valid_mask]))
+
+        temp1 = 1. - bioprd
+        temp2 = temp1 * 0.75
+        temp3 = temp1 * 0.25
+
+        ratlc = numpy.empty(sum_stdedc.shape, dtype=numpy.float32)
+        ratlc[:] = _IC_NODATA
+        ratlc[valid_mask] = sum_aglivc[valid_mask] / bioc[valid_mask]
+
+        biof = numpy.empty(sum_stdedc.shape, dtype=numpy.float32)
+        biof[:] = _TARGET_NODATA
+        biof[valid_mask] = numpy.where(
+            ratlc[valid_mask] <= 1.,
+            (bioprd[valid_mask] + (temp2[valid_mask] * ratlc[valid_mask])),
+            numpy.where(
+                ratlc[valid_mask] <= 2.,
+                (bioprd[valid_mask] + temp2[valid_mask])
+                + temp3[valid_mask] * (ratlc[valid_mask] - 1.),
+                1.))
+        return biof
+
+    def calc_tgprod(prdx_1, shwave, potprd, h2ogef_1, biof):
+        """Calculate total potential production.
+
+        Total above- and belowground potential production is calculated as
+        the total potential production given solar radiation and the
+        intrinsinc growth capacity of the plant functional type, modified by
+        limiting factors of temperature, soil moisture, and obstruction by
+        standing biomass and litter. Line 147 Potcrp.f
+
+        Parameters:
+            prdx_1 (numpy.ndarray): parameter, the intrinsic capacity of the
+                plant functional type for growth per unit of solar radiation
+            shwave (numpy.ndarray): shortwave solar radiation outside the
+                atmosphere
+            potprd (numpy.ndarray): scaling factor describing limiting effect
+                of temperature
+            h2ogef_1 (numpy.ndarray): scaling factor describing the limiting
+                effect of soil moisture
+            biof (numpy.ndarray): scaling factor describing the limiting
+                effect of obstruction by standing biomass and litter
+
+        Returns:
+            tgprod, total above- and belowground potential production
+        """
+        valid_mask = (
+            (prdx_1 != _IC_NODATA)
+            & (shwave != _TARGET_NODATA)
+            & (potprd != _TARGET_NODATA)
+            & (h2ogef_1 != _TARGET_NODATA)
+            & (biof != _TARGET_NODATA))
+        tgprod = numpy.empty(prdx.shape, dtype=numpy.float32)
+        tgprod[:] = _TARGET_NODATA
+
+        tgprod[valid_mask] = (
+            prdx_1[valid_mask] * shwave[valid_mask] * potprd[valid_mask]
+            * h2ogef_1[valid_mask] * biof[valid_mask])
+        return tgprod
+
+    # temporary intermediate rasters for these calculations
+    temp_dir = tempfile.mkdtemp()
+    temp_val_dict = {}
+    # site-level temporary calculated values
+    for val in ['sum_aglivc', 'sum_stdedc', 'ctemp', 'shwave', 'pevap']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    # PFT-level temporary calculated values
+    for pft_i in pft_id_set:
+        for val in [
+                'aglivc_weighted', 'stdedc_weighted', 'potprd', 'h2ogef_1',
+                'biof', 'tgprod']:
+            temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+
+    # temporary parameter rasters for these calculations
+    param_val_dict = {}
+    # site-level parameters
+    for val in [
+            'pmxbio', 'pmxtmp', 'pmntmp', 'fwloss_4', 'pprpts_1',
+            'pprpts_2', 'pprpts_3']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    # PFT-level parameters
+    for val in [
+            'ppdf_1', 'ppdf_2', 'ppdf_3', 'ppdf_4', 'biok5', 'prdx_1']:
+        for pft_i in do_PFT:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
+                [_IC_NODATA], fill_value_list=[fill_val])
+
+    # calculate intermediate quantities that do not differ between PFTs:
+    # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
+    # across PFTs, weighted by % cover of each PFT
+    maxtmp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
+    mintmp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
+    precip_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['precip_{}'.format(month_index)])['nodata'][0]
+    strucc_1_nodata = pygeoprocessing.get_raster_info(
+        sv_reg['strucc_1_path'])['nodata'][0]
+    for sv in ['aglivc', 'stdedc']:
+        weighted_path_list = []
+        for pft_index in pft_id_set:
+            target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in
+                    sv_reg['{}_{}_path'.format(sv, pft_index)],
+                    aligned_inputs['pft_{}'.format(pft_index)]],
+                multiply_positive_rasters, target_path,
+                gdal.GDT_Float32, _TARGET_NODATA)
+            weighted_path_list.append(target_path)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in weighted_path_list],
+            sum_positive_rasters, temp_val_dict['sum_{}'.format(sv)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # ctemp, soil temperature relative to impacts on growth
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['sum_aglivc'],
+            param_val_dict['pmxbio'],
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            param_val_dict['pmxtmp'],
+            aligned_inputs['min_temp_{}'.format(current_month)],
+            param_val_dict['pmntmp']]],
+        calc_ctemp, temp_val_dict['ctemp'], gdal.GDT_Float32, _IC_NODATA)
+
+    # shwave, shortwave radiation outside the atmosphere
+    _shortwave_radiation(
+        aligned_inputs['site_index'], current_month, temp_val_dict['shwave'])
+
+    # pet, reference evapotranspiration modified by fwloss parameter
+    _reference_evapotranspiration(
+        aligned_inputs['max_temp_{}'.format(current_month)],
+        aligned_inputs['min_temp_{}'.format(current_month)],
+        temp_val_dict['shwave'],
+        param_val_dict['fwloss_4'],
+        temp_val_dict['pevap'])
+
+    # calculate quantities that differ between PFTs
+    for pft_i in do_PFT:
+        avh2o_1_nodata = pygeoprocessing.get_raster_info(
+            sv_reg['avh2o_1_{}_path'.format(pft_i)])['nodata'][0]
+        # potprd, the limiting effect of temperature
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                temp_val_dict['ctemp'],
+                param_val_dict['ppdf_1_{}'.format(pft_i)],
+                param_val_dict['ppdf_2_{}'.format(pft_i)],
+                param_val_dict['ppdf_3_{}'.format(pft_i)],
+                param_val_dict['ppdf_4_{}'.format(pft_i)]],
+            calc_potprd, temp_val_dict['potprd_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # h2ogef_1, the limiting effect of soil water availability
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                temp_val_dict['pevap'],
+                sv_reg['avh2o_1_{}_path'.format(pft_i)],
+                aligned_inputs['precip_{}'.format(month_index)],
+                pp_reg['wc_path'],
+                param_val_dict['pprpts_1'],
+                param_val_dict['pprpts_2'],
+                param_val_dict['pprpts_3']],
+            calc_h2ogef_1, temp_val_dict['h2ogef_1_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # biof, the limiting effect of obstruction
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                temp_val_dict['sum_stdedc'],
+                temp_val_dict['sum_aglivc'],
+                sv_reg['strucc_1_path'],
+                param_val_dict['pmxbio'],
+                param_val_dict['biok5_{}'.format(pft_i)]],
+            calc_biof, temp_val_dict['biof_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # total potential production
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                param_val_dict['prdx_1_{}'.format(pft_i)],
+                temp_val_dict['shwave'],
+                temp_val_dict['potprd_{}'.format(pft_i)],
+                temp_val_dict['h2ogef_1_{}'.format(pft_i)],
+                temp_val_dict['biof_{}'.format(pft_i)]],
+            calc_biof, month_reg['tgprod_{}_path'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
