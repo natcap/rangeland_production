@@ -1875,8 +1875,8 @@ def _potential_production(
     def calc_tgprod(prdx_1, shwave, potprd, h2ogef_1, biof):
         """Calculate total potential production.
 
-        Total above- and belowground potential production is calculated as
-        the total potential production given solar radiation and the
+        Total above- and belowground potential biomass production is calculated
+        as the total potential production given solar radiation and the
         intrinsinc growth capacity of the plant functional type, modified by
         limiting factors of temperature, soil moisture, and obstruction by
         standing biomass and litter. Line 147 Potcrp.f
@@ -1894,7 +1894,7 @@ def _potential_production(
                 effect of obstruction by standing biomass and litter
 
         Returns:
-            tgprod, total above- and belowground potential production
+            tgprod, total above- and belowground potential biomass production
         """
         valid_mask = (
             (prdx_1 != _IC_NODATA)
@@ -2305,6 +2305,83 @@ def _calc_available_nutrient(
     shutil.rmtree(temp_dir)
 
 
+def _calc_nutrient_demand(
+        biomass_production_path, fraction_allocated_to_roots_path,
+        cercrp_min_above_path, cercrp_min_below_path, demand_path):
+    """Calculate the demand of one nutrient by a plant functional type.
+
+    Demand is calculated from total biomass production, the fraction of biomass
+    production allocated to roots, and the minimum carbon/nutrient ratios of
+    above- and belowground live biomass.  Lines 88-92 CropDynC.f and line
+    65, Nutrlm.f
+
+    Parameters:
+        biomass_production_path (string): path to raster giving total
+            biomass production
+        fraction_allocated_to_roots_path (string): path to raster giving
+            the fraction fo total biomass production allocated to roots
+        cercrp_min_above_path (string): path to raster giving the minimum
+            ratio of carbon to nutrient in aboveground live biomass
+        cercrp_min_below_path (string): path to raster giving the minimum
+            ratio of carbon to nutrient in belowground live biomass
+
+    Modifies:
+        The raster indicated by `demand_path`
+
+    Returns:
+        None
+    """
+    def nutrient_demand_op(
+            biomass_production, root_fraction, cercrp_min_above,
+            cercrp_min_below):
+        """Calculate nutrient demand.
+
+        Parameters:
+            biomass_production (numpy.ndarray): total biomass production
+            root_fraction (numpy.ndarray): fraction of biomass
+                allocated to roots
+            cercrp_min_above (numpy.ndarray): minimum carbon to nutrient ratio
+                of new aboveground live material
+            cercrp_min_below (numpy.ndarray): minimum carbon to nutrient ratio
+                of new belowground live material
+
+        Returns:
+            demand_e, nutrient demand
+        """
+        valid_mask = (
+            (biomass_production != _TARGET_NODATA)
+            & (root_fraction != _TARGET_NODATA)
+            & (cercrp_min_above != _TARGET_NODATA)
+            & (cercrp_min_below != _TARGET_NODATA))
+
+        demand_above = numpy.empty(root_fraction.shape, dtype=numpy.float32)
+        demand_above[:] = _TARGET_NODATA
+        demand_above[valid_mask] = (
+            ((biomass_production[valid_mask]
+                * (1. - root_fraction[valid_mask])) / 2.5)
+            * (1. / cercrp_min_above[valid_mask]))
+
+        demand_below = numpy.empty(root_fraction.shape, dtype=numpy.float32)
+        demand_below[:] = _TARGET_NODATA
+        demand_below[valid_mask] = (
+            ((biomass_production[valid_mask]
+                * (root_fraction[valid_mask])) / 2.5)
+            * (1. / cercrp_min_below[valid_mask]))
+
+        demand_e = numpy.empty(root_fraction.shape, dtype=numpy.float32)
+        demand_e[:] = _TARGET_NODATA
+        demand_e[valid_mask] = (
+            demand_above[valid_mask] + demand_below[valid_mask])
+        return demand_e
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in
+            biomass_production_path, fraction_allocated_to_roots_path,
+            cercrp_min_above_path, cercrp_min_below_path],
+        nutrient_demand_op, demand_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+
 def _root_shoot_ratio(
         aligned_inputs, site_param_table, pft_id_set, veg_trait_table,
         sv_reg, year_reg, month_reg):
@@ -2439,7 +2516,8 @@ def _root_shoot_ratio(
                 ratio from annual precipitation
             annual_precip_path (string): path to annual precipitation raster
             month_reg (dict): map of key, path pairs giving paths to
-                intermediate calculated values that are shared between submodels
+                intermediate calculated values that are shared between
+                submodels
             pft_i (int): plant functional type index
             iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
 
@@ -2554,7 +2632,7 @@ def _root_shoot_ratio(
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
         for iel in [1, 2]:
-            for val in ['eavail']:
+            for val in ['eavail', 'demand']:
                 temp_val_dict[
                     '{}_{}_{}'.format(val, pft_i, iel)] = os.path.join(
                         temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
@@ -2622,14 +2700,7 @@ def _root_shoot_ratio(
             temp_val_dict['fracrc_p_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
         for iel in [1, 2]:
-            # evail_iel, available nutrient
-            _calc_available_nutrient(
-                pft_i, iel, veg_trait_table[pft_i], sv_reg, site_param_table,
-                aligned_inputs['site_index'],
-                param_val_dict['favail_{}'.format(iel)],
-                month_reg['tgprod_{}'.format(pft_i)],
-                temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
-            # demand_iel, demand for the nutrient
+            # persistent ratios used here and in plant growth submodel
             calc_ce_ratios(
                 param_val_dict['pramn_1_{}_{}'.format(pft_i, iel)],
                 param_val_dict['pramn_2_{}_{}'.format(pft_i, iel)],
@@ -2643,3 +2714,17 @@ def _root_shoot_ratio(
                 param_val_dict['prbmx_2_{}_{}'.format(pft_i, iel)],
                 year_reg['annual_precip_path'], month_reg,
                 pft_i, iel)
+            # evail_iel, available nutrient
+            _calc_available_nutrient(
+                pft_i, iel, veg_trait_table[pft_i], sv_reg, site_param_table,
+                aligned_inputs['site_index'],
+                param_val_dict['favail_{}'.format(iel)],
+                month_reg['tgprod_{}'.format(pft_i)],
+                temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
+            # demand_iel, demand for the nutrient
+            _calc_nutrient_demand(
+                month_reg['tgprod_{}'.format(pft_i)],
+                temp_val_dict['fracrc_p_{}'.format(pft_i)],
+                month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
+                month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
+                temp_val_dict['demand_{}_{}'.format(pft_i, iel)])
