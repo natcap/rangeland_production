@@ -158,7 +158,11 @@ _YEARLY_FILES = {
 
 # intermediate values for each plant functional type that are shared
 # between submodels, but do not need to be saved as output
-_PFT_INTERMEDIATE_VALUES = ['tgprod']
+_PFT_INTERMEDIATE_VALUES = [
+    'tgprod', 'cercrp_min_above_1', 'cercrp_min_above_2',
+    'cercrp_max_above_1', 'cercrp_max_above_2',
+    'cercrp_min_below_1', 'cercrp_min_below_2',
+    'cercrp_max_below_1', 'cercrp_max_below_2']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -593,7 +597,7 @@ def execute(args):
     month_reg = {}
     for pft_index in pft_id_set:
         for val in _PFT_INTERMEDIATE_VALUES:
-            month_reg['{}_{}_path'.format(
+            month_reg['{}_{}'.format(
                 val, pft_index)] = os.path.join(
                 month_temp_dir, '{}_{}.tif'.format(val, pft_index))
 
@@ -1628,7 +1632,7 @@ def _potential_production(
             calculated values that are shared between submodels
 
     Modifies:
-        The raster indicated by `month_reg['tgprod_<PFT>_path']` for each
+        The raster indicated by `month_reg['tgprod_<PFT>']` for each
             plant functional type (PFT) where growth is scheduled to occur in
             this month
 
@@ -2044,7 +2048,7 @@ def _potential_production(
                 temp_val_dict['potprd_{}'.format(pft_i)],
                 temp_val_dict['h2ogef_1_{}'.format(pft_i)],
                 temp_val_dict['biof_{}'.format(pft_i)]],
-            calc_biof, month_reg['tgprod_{}_path'.format(pft_i)],
+            calc_biof, month_reg['tgprod_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
@@ -2393,6 +2397,155 @@ def _root_shoot_ratio(
                 ((frtc_1[valid_mask] + frtc_2[valid_mask]) / 2.0)))
         return fracrc_p
 
+    def calc_ce_ratios(
+            pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
+            pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
+            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
+            pft_i, iel):
+        """Calculate minimum and maximum carbon to nutrient ratios.
+
+        Minimum and maximum C/E ratios are used to calculate demand for a
+        nutrient by a plant functional type. This function calculates the
+        ratios for above- and belowground plant portions, for one plant
+        functional type and one nutrient. Fltce.f
+
+        Parameters:
+            pramn_1_path (string): path to raster containing the parameter
+                pramn_1, the minimum aboveground ratio with zero biomass
+            pramn_2_path (string): path to raster containing the parameter
+                pramn_2, the minimum aboveground ratio with biomass greater
+                than or equal to biomax
+            aglivc_path (string): path to raster containing carbon in
+                aboveground live biomass
+            biomax_path (string): path to raster containing the parameter
+                biomax, the biomass above which the ratio equals pramn_2
+                or pramx_2
+            pramx_1_path (string): path to raster containing the parameter
+                pramx_1, the maximum aboveground ratio with zero biomass
+            pramx_2_path (string): path to raster containing the parameter
+                pramx_2, the maximum aboveground ratio with biomass greater
+                than or equal to biomax
+            prbmn_1_path (string): path to raster containing the parameter
+                prbmn_1, intercept of regression to predict minimum
+                belowground ratio from annual precipitation
+            prbmn_2_path (string): path to raster containing the parameter
+                prbmn_2, slope of regression to predict minimum belowground
+                ratio from annual precipitation
+            prbmx_1_path (string): path to raster containing the parameter
+                prbmx_1, intercept of regression to predict maximum belowground
+                ratio from annual precipitation
+            prbmx_2_path (string): path to raster containing the parameter
+                prbmx_2, slope of regression to predict maximum belowground
+                ratio from annual precipitation
+            annual_precip_path (string): path to annual precipitation raster
+            month_reg (dict): map of key, path pairs giving paths to
+                intermediate calculated values that are shared between submodels
+            pft_i (int): plant functional type index
+            iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
+
+        Modifies:
+            rasters indicated by
+                `month_reg['cercrp_min_above_<iel>_<pft_i>']`,
+                `month_reg['cercrp_max_above_<iel>_<pft_i>']`,
+                `month_reg['cercrp_min_below_<iel>_<pft_i>']`,
+                `month_reg['cercrp_max_below_<iel>_<pft_i>']`,
+
+        Returns:
+            None
+        """
+        def calc_above_ratio(pra_1, pra_2, aglivc, biomax):
+            """Calculate carbon to nutrient ratio for aboveground material.
+
+            Parameters:
+                pra_1 (numpy.ndarray): parameter, minimum or maximum ratio
+                    with zero biomass
+                pra_2 (numpy.ndarray): parameter, minimum or maximum ratio
+                    with biomass greater than or equal to biomax
+                aglivc (numpy.ndarray): state variable, carbon in aboveground
+                    live material
+                biomax (numpy:ndarray): parameter, biomass above which the
+                    ratio equals pra_2
+
+            Returns:
+                cercrp_above, carbon to nutrient ratio for aboveground
+                    material
+            """
+            valid_mask = (
+                (pra_1 != _IC_NODATA)
+                & (pra_2 != _IC_NODATA)
+                & (aglivc != aglivc_nodata)
+                & (biomax != _IC_NODATA))
+
+            cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
+            cercrp_above[:] = _TARGET_NODATA
+
+            cercrp_above[valid_mask] = numpy.minimum(
+                (pra_1[valid_mask] + (pra_2[valid_mask] - pra_1[valid_mask])
+                    * 2.5 * aglivc[valid_mask] / biomax[valid_mask]),
+                pra_2[valid_mask])
+            return cercrp_above
+
+        def calc_below_ratio(prb_1, prb_2, annual_precip):
+            """Calculate carbon to nutrient ratio for belowground material.
+
+            Parameters:
+                prb_1 (numpy.ndarray): parameter, intercept of regression
+                    to predict ratio from annual precipitation
+                prb_2 (numpy.ndarray): parameter, slope of regression to
+                    predict ratio from annual precipitation
+                annual_precip (numpy.ndarray): precipitation in twelve
+                    months including the current month
+
+            Returns:
+                cercrp_below, carbon to nutrient ratio for belowground
+                    material
+            """
+            valid_mask = (
+                (prb_1 != _IC_NODATA)
+                & (prb_2 != _IC_NODATA)
+                & (annual_precip != annual_precip_nodata))
+
+            cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
+            cercrp_below[:] = _TARGET_NODATA
+
+            cercrp_below[valid_mask] = (
+                prb_1[valid_mask]
+                + (prb_2[valid_mask] * annual_precip[valid_mask]))
+            return cercrp_below
+
+        aglivc_nodata = pygeoprocessing.get_raster_info(
+            aglivc_path)['nodata'][0]
+        annual_precip_nodata = pygeoprocessing.get_raster_info(
+            annual_precip_path)['nodata'][0]
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                pramn_1_path, pramn_2_path, aglivc_path, biomax_path]],
+            calc_above_ratio,
+            month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                pramx_1_path, pramx_2_path, aglivc_path, biomax_path]],
+            calc_above_ratio,
+            month_reg['cercrp_max_above_{}_{}'.format(iel, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                prbmn_1_path, prbmn_2_path, annual_precip_path]],
+            calc_below_ratio,
+            month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                prbmx_1_path, prbmx_2_path, annual_precip_path]],
+            calc_below_ratio,
+            month_reg['cercrp_max_below_{}_{}'.format(iel, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
     # temporary intermediate rasters for these calculations
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
@@ -2424,7 +2577,7 @@ def _root_shoot_ratio(
     for pft_i in pft_id_set:  # TODO or just do_PFT?
         for val in [
                 'frtcindx', 'cfrtcw_1', 'cfrtcw_2', 'cfrtcn_1', 'cfrtcn_2',
-                'frtc_1', 'frtc_2']:
+                'frtc_1', 'frtc_2', 'biomax']:
             target_path = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
             param_val_dict['{}_{}'.format(val, pft_i)] = target_path
@@ -2432,6 +2585,18 @@ def _root_shoot_ratio(
             pygeoprocessing.new_raster_from_base(
                 aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
                 [_IC_NODATA], fill_value_list=[fill_val])
+        for iel in [1, 2]:  # TODO move these values to internal to interior functions?
+            for val in [
+                    'pramn_1', 'pramn_2', 'pramx_1', 'pramx_2', 'prbmn_1',
+                    'prbmn_2', 'prbmx_1', 'prbmx_2']:
+                target_path = os.path.join(
+                    temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
+                param_val_dict[
+                    '{}_{}_{}'.format(val, pft_i, iel)] = target_path
+                fill_val = veg_trait_table[pft_i]['{}_{}'.format(val, iel)]
+                pygeoprocessing.new_raster_from_base(
+                    aligned_inputs['site_index'], target_path,
+                    gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
 
     # the parameter favail_2 must be calculated from current mineral N in
     # surface layer
@@ -2462,7 +2627,19 @@ def _root_shoot_ratio(
                 pft_i, iel, veg_trait_table[pft_i], sv_reg, site_param_table,
                 aligned_inputs['site_index'],
                 param_val_dict['favail_{}'.format(iel)],
-                month_reg['tgprod_{}_path'.format(pft_i)],
+                month_reg['tgprod_{}'.format(pft_i)],
                 temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
             # demand_iel, demand for the nutrient
-
+            calc_ce_ratios(
+                param_val_dict['pramn_1_{}_{}'.format(pft_i, iel)],
+                param_val_dict['pramn_2_{}_{}'.format(pft_i, iel)],
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                param_val_dict['biomax_{}'.format(pft_i)],
+                param_val_dict['pramx_1_{}_{}'.format(pft_i, iel)],
+                param_val_dict['pramx_2_{}_{}'.format(pft_i, iel)],
+                param_val_dict['prbmn_1_{}_{}'.format(pft_i, iel)],
+                param_val_dict['prbmn_2_{}_{}'.format(pft_i, iel)],
+                param_val_dict['prbmx_1_{}_{}'.format(pft_i, iel)],
+                param_val_dict['prbmx_2_{}_{}'.format(pft_i, iel)],
+                year_reg['annual_precip_path'], month_reg,
+                pft_i, iel)
