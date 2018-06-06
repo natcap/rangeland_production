@@ -159,7 +159,8 @@ _YEARLY_FILES = {
 # intermediate values for each plant functional type that are shared
 # between submodels, but do not need to be saved as output
 _PFT_INTERMEDIATE_VALUES = [
-    'tgprod', 'cercrp_min_above_1', 'cercrp_min_above_2',
+    'h2ogef_1', 'tgprod',
+    'cercrp_min_above_1', 'cercrp_min_above_2',
     'cercrp_max_above_1', 'cercrp_max_above_2',
     'cercrp_min_below_1', 'cercrp_min_below_2',
     'cercrp_max_below_1', 'cercrp_max_below_2']
@@ -1919,8 +1920,7 @@ def _potential_production(
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
         for val in [
-                'aglivc_weighted', 'stdedc_weighted', 'potprd', 'h2ogef_1',
-                'biof']:
+                'aglivc_weighted', 'stdedc_weighted', 'potprd', 'biof']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
 
@@ -2026,7 +2026,7 @@ def _potential_production(
                 param_val_dict['pprpts_1'],
                 param_val_dict['pprpts_2'],
                 param_val_dict['pprpts_3']],
-            calc_h2ogef_1, temp_val_dict['h2ogef_1_{}'.format(pft_i)],
+            calc_h2ogef_1, month_reg['h2ogef_1_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # biof, the limiting effect of obstruction
@@ -2046,7 +2046,7 @@ def _potential_production(
                 param_val_dict['prdx_1_{}'.format(pft_i)],
                 temp_val_dict['shwave'],
                 temp_val_dict['potprd_{}'.format(pft_i)],
-                temp_val_dict['h2ogef_1_{}'.format(pft_i)],
+                month_reg['h2ogef_1_{}'.format(pft_i)],
                 temp_val_dict['biof_{}'.format(pft_i)]],
             calc_biof, month_reg['tgprod_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
