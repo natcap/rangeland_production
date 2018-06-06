@@ -163,7 +163,8 @@ _PFT_INTERMEDIATE_VALUES = [
     'cercrp_min_above_1', 'cercrp_min_above_2',
     'cercrp_max_above_1', 'cercrp_max_above_2',
     'cercrp_min_below_1', 'cercrp_min_below_2',
-    'cercrp_max_below_1', 'cercrp_max_below_2']
+    'cercrp_max_below_1', 'cercrp_max_below_2',
+    'fracrc']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -444,6 +445,10 @@ def execute(args):
         raise ValueError(
             "Couldn't find trait values for the following plant functional "
             + "types: %s\n\t" + ", ".join(missing_pft_trait_list))
+    frtcindx_set = set([
+        veg_trait_table[k]['frtcindx'] for k in veg_trait_table.iterkeys()])
+    if frtcindx_set.difference(set([0, 1])):
+        raise ValueError("frtcindx parameter contains invalid values")
 
     # track separate state variable files for each PFT
     pft_sv_dict = {}
@@ -2403,13 +2408,13 @@ def _root_shoot_ratio(
 
     def calc_provisional_fracrc(
             annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
-            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2, frtc_1, frtc_2):
+            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2):
         """Calculate provisional fraction of carbon allocated to roots.
 
         A temporary provisional fraction of carbon allocated to roots must be
         calculated prior to calculating plant demand for N and P. The value
         of this provisional fraction depends on whether the plant functional
-        type is modeled as a perennial, annual, or if the "Great Plains"
+        type is modeled as a perennial plant or with the "Great Plains"
         equation of Parton et al. 1987, "Analysis of factors controlling soil
         organic matter levels in Great Plains grasslands", Soil Science
         Society of America Journal. Lines 36-47 cropDynC.f
@@ -2419,8 +2424,7 @@ def _root_shoot_ratio(
                 twelve months including the current month
             frtcindx (numpy.ndarray): parameter, flag indicating whether
                 root:shoot allocation follows the Great Plains equation
-                (frtcindx=0), perennial plant (frtcindx=1), or annual
-                plant (frtcindx=2)
+                (frtcindx=0) or as a perennial plant (frtcindx=1)
             bgppa (numpy.ndarray): parameter, intercept in regression
                 estimating belowground production from annual precipitation
                 if frtcindx=0
@@ -2441,12 +2445,6 @@ def _root_shoot_ratio(
                 allocated to roots under maximum nutrient stress if frtcindx=1
             cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of carbon
                 allocated to roots under no nutrient stress if frtcindx=1
-            frtc_1 (numpy.ndarray): parameter, fraction of carbon allocated
-                to roots at planting without water or nutrient stress,
-                if frtcindx=2
-            frtc_2 (numpy.ndarray): parameter, fraction of carbon allocated
-                to roots at maturity without water or nutrient stress,
-                if frtcindx=2
 
         Returns:
             fracrc_p, provisional fraction of carbon allocated to roots
@@ -2467,11 +2465,8 @@ def _root_shoot_ratio(
         fracrc_p[valid_mask] = numpy.where(
             frtcindx[valid_mask] == 0,
             (1.0 / (1.0 / rtsh[valid_mask] + 1.0)),
-            numpy.where(
-                frtcindx[valid_mask] == 1,
-                ((cfrtcw_1[valid_mask] + cfrtcw_2[valid_mask]
-                    + cfrtcn_1[valid_mask] + cfrtcn_2[valid_mask]) / 4.0),
-                ((frtc_1[valid_mask] + frtc_2[valid_mask]) / 2.0)))
+            ((cfrtcw_1[valid_mask] + cfrtcw_2[valid_mask]
+                + cfrtcn_1[valid_mask] + cfrtcn_2[valid_mask]) / 4.0))
         return fracrc_p
 
     def calc_ce_ratios(
@@ -2624,6 +2619,216 @@ def _root_shoot_ratio(
             month_reg['cercrp_max_below_{}_{}'.format(iel, pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
+    def calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path):
+        """
+        Calculate revised fraction of carbon allocated to roots.
+
+        The revised fraction of carbon allocated to roots includes the
+        impacts of water and nutrient limitation. The method of the
+        revised calculation depends on whether the plant functional
+        type is modeled as a perennial plant or with the "Great Plains"
+        equation of Parton et al. 1987, "Analysis of factors controlling soil
+        organic matter levels in Great Plains grasslands", Soil Science
+        Society of America Journal. Lines 96-104, cropDynC.f, froota.f
+
+        Parameters:
+            frtcindx_path (string): path to raster containing the parameter
+                frtcindx
+            fracrc_p_path (string): path to raster containing provisional
+                fraction of carbon allocated to roots
+            totale_1_path (string): path to raster containing total available
+                nitrogen
+            totale_2_path (string): path to raster containing total available
+                phosphorus
+            demand_1_path (string): path to raster containing nitrogen demand
+            demand_2_path (string): path to raster containing phosphorus demand
+            h2ogef_1_path (string): path to raster containing the limiting
+                effect of water availability on growth
+            cfrtcw_1_path (string): path to raster containing the parameter
+                cfrtcw_1
+            cfrtcw_2_path (string): path to raster containing the parameter
+                cfrtcw_2
+            cfrtcn_1_path (string): path to raster containing the parameter
+                cfrtcn_1
+            cfrtcn_2_path (string): path to raster containing the parameter
+                cfrtcn_2
+            fracrc_r_path (string): path to raster that should contain the
+                result, revised fraction of carbon allocated to roots
+
+        Modifies:
+            the raster indicated by `fracrc_r_path`
+
+        Returns:
+            None
+        """
+        def calc_a2drat(totale, demand):
+            """Calculate the ratio of available nutrient to nutrient demand.
+
+            The ratio of nutrient available to demand for the nutrient is
+            restricted to be between 0 and 1.
+
+            Parameters:
+                totale (numpy.ndarray): nutrient available
+                demand (numpy.ndarray): demand for the nutrient
+
+            Returns:
+                a2drat, the ratio of available nutrient to demand, restricted
+                    to be between 0 and 1
+            """
+            valid_mask = (
+                (totale != _TARGET_NODATA)
+                & (demand != _TARGET_NODATA))
+
+            a2drat = numpy.empty(totale.shape, dtype=numpy.float32)
+            a2drat[:] = _TARGET_NODATA
+
+            a2drat[valid_mask] = numpy.minimum(
+                1., (totale[valid_mask] / demand[valid_mask]))
+            a2drat[valid_mask] = numpy.maximum(0., a2drat[valid_mask])
+            return a2drat
+
+        def calc_perennial_fracrc(
+                h2ogef, cfrtcw_1, cfrtcw_2, a2drat_1, a2drat_2, cfrtcn_1,
+                cfrtcn_2):
+            """Calculate fraction C allocated to roots for perennial plant.
+
+            The fraction of carbon allocated to roots is determined by
+            water availability, described by h2ogef, and nutrient availability,
+            described by a2drat_1 for nitrogen and a2drat_2 for phosphorus.
+            Lines 114-125 froota.f
+
+            Parameters:
+                h2ogef (numpy.ndarray): the limiting factor of water
+                    availability on growth
+                cfrtcw_1 (numpy.ndarray): parameter, the maximum fraction of
+                    carbon allocated to roots with maximum water stress
+                cfrtcw_2 (numpy.ndarray): parameter, the minimum fraction of
+                    carbon allocated to roots with no water stress
+                a2drat_1 (numpy.ndarray): the ratio of available nitrogen to
+                    nitrogen demand, restricted to be between 0 and 1
+                a2drat_2 (numpy.ndarray): the ratio of available phosphorus to
+                    phosphorus demand, restricted to be between 0 and 1
+                cfrtcn_1 (numpy.ndarray): parameter, maximum fraction of
+                    carbon allocated to roots with maximum nutrient stress
+                cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of
+                    carbon allocated to roots with no nutrient stress
+
+            Returns:
+                fracrc_perennial, revised fraction of C allocated to roots for
+                    a perennial plant
+            """
+            valid_mask = (
+                (h2ogef != _TARGET_NODATA)
+                & (cfrtcw_1 != _TARGET_NODATA)
+                & (cfrtcw_2 != _TARGET_NODATA)
+                & (a2drat_1 != _TARGET_NODATA)
+                & (a2drat_2 != _TARGET_NODATA)
+                & (cfrtcn_1 != _TARGET_NODATA)
+                & (cfrtcn_2 != _TARGET_NODATA))
+
+            h2oeff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+            h2oeff[:] = _TARGET_NODATA
+            h2oeff[valid_mask] = (
+                (cfrtcw_2[valid_mask] - cfrtcw_1[valid_mask])
+                * (h2ogef[valid_mask] - 1.) + cfrtcw_2[valid_mask])
+
+            ntreff_1 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+            ntreff_1[:] = _TARGET_NODATA
+            ntreff_1[valid_mask] = (
+                (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
+                * (a2drat_1[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
+
+            ntreff_2 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+            ntreff_2[:] = _TARGET_NODATA
+            ntreff_1[valid_mask] = (
+                (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
+                * (a2drat_2[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
+
+            ntreff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+            ntreff[:] = _TARGET_NODATA
+            ntreff[valid_mask] = numpy.maximum(
+                ntreff_1[valid_mask], ntreff_2[valid_mask])
+
+            fracrc_perennial = numpy.empty(
+                h2ogef.shape, dtype=numpy.float32)
+            fracrc_perennial[:] = _TARGET_NODATA
+            fracrc_perennial[valid_mask] = numpy.minimum(
+                numpy.maximum(h2oeff[valid_mask], ntreff[valid_mask]), 0.99)
+            return fracrc_perennial
+
+        def revised_fracrc_op(frtcindx, fracrc_p, fracrc_perennial):
+            """
+            Calculate revised fraction of carbon allocated to roots.
+
+            The revised fraction of carbon allocated to roots is calculated
+            according to the parameter frtcindx.  If frtcindx=0 (use the "Great
+            Plains equation"), the revised fraction is equal to the provisional
+            fraction.  If frtcindx=1 (a perennial plant), the revised fraction
+            is calculated from water and nutrient stress.
+
+            Parameters:
+                frtcindx (numpy.ndarray): parameter, indicates whether revised
+                    fraction of carbon allocated to roots should follow the
+                    "Great Plains equation" or the algorithm for a perennial
+                    plant
+                fracrc_p (numpy.ndarray): provisional fraction of carbon
+                    allocated to roots
+                fracrc_perennial (numpy.ndarray): revised fraction of carbon
+                    allocated to roots for a perennial plant
+
+            Returns:
+                fracrc_r, revised fraction of carbon allocated to roots
+            """
+            valid_mask = (
+                (frtcindx != _TARGET_NODATA)
+                & (fracrc_p != _TARGET_NODATA)
+                & (fracrc_perennial != _TARGET_NODATA))
+
+            fracrc_r = numpy.empty(frtcindx.shape, dtype=numpy.float32)
+            fracrc_r[:] = _TARGET_NODATA
+            fracrc_r[valid_mask] = numpy.where(
+                frtcindx[valid_mask] == 0, fracrc_p[valid_mask],
+                fracrc_perennial[valid_mask])
+            return fracrc_r
+
+        # temporary intermediate rasters for this calculation
+        temp_dir = tempfile.mkdtemp()
+        temp_val_dict = {}
+        for val in ['a2drat_1', 'a2drat_2', 'fracrc_perennial']:
+            temp_val_dict[val] = os.path.join(
+                temp_dir, '{}.tif'.format(val))
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [totale_1_path, demand_1_path]],
+            calc_a2drat, temp_val_dict['a2drat_1'], gdal.GDT_Float32,
+            _TARGET_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [totale_2_path, demand_2_path]],
+            calc_a2drat, temp_val_dict['a2drat_2'], gdal.GDT_Float32,
+            _TARGET_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                h2ogef_1_path, cfrtcw_1_path, cfrtcw_2_path,
+                temp_val_dict['a2drat_1'], temp_val_dict['a2drat_2'],
+                cfrtcn_1_path, cfrtcn_2_path]],
+            calc_perennial_fracrc, temp_val_dict['fracrc_perennial'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                frtcindx_path, fracrc_p_path,
+                temp_val_dict['fracrc_perennial']]],
+            revised_fracrc_op, fracrc_r_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # clean up temporary files
+        shutil.rmtree(temp_dir)
+
     # temporary intermediate rasters for these calculations
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
@@ -2655,7 +2860,7 @@ def _root_shoot_ratio(
     for pft_i in pft_id_set:  # TODO or just do_PFT?
         for val in [
                 'frtcindx', 'cfrtcw_1', 'cfrtcw_2', 'cfrtcn_1', 'cfrtcn_2',
-                'frtc_1', 'frtc_2', 'biomax']:
+                'biomax', 'cfrtcw_1', 'cfrtcw_2', 'cfrtcn_1', 'cfrtcn_2']:
             target_path = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
             param_val_dict['{}_{}'.format(val, pft_i)] = target_path
@@ -2693,9 +2898,7 @@ def _root_shoot_ratio(
                 param_val_dict['cfrtcw_1_{}'.format(pft_i)],
                 param_val_dict['cfrtcw_2_{}'.format(pft_i)],
                 param_val_dict['cfrtcn_1_{}'.format(pft_i)],
-                param_val_dict['cfrtcn_2_{}'.format(pft_i)],
-                param_val_dict['frtc_1_{}'.format(pft_i)],
-                param_val_dict['frtc_2_{}'.format(pft_i)]],
+                param_val_dict['cfrtcn_2_{}'.format(pft_i)]],
             calc_provisional_fracrc,
             temp_val_dict['fracrc_p_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -2714,7 +2917,7 @@ def _root_shoot_ratio(
                 param_val_dict['prbmx_2_{}_{}'.format(pft_i, iel)],
                 year_reg['annual_precip_path'], month_reg,
                 pft_i, iel)
-            # evail_iel, available nutrient
+            # eavail_iel, available nutrient
             _calc_available_nutrient(
                 pft_i, iel, veg_trait_table[pft_i], sv_reg, site_param_table,
                 aligned_inputs['site_index'],
@@ -2728,3 +2931,17 @@ def _root_shoot_ratio(
                 month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
                 month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
                 temp_val_dict['demand_{}_{}'.format(pft_i, iel)])
+        # revised fraction of carbon allocated to roots
+        calc_revised_fracrc(
+            param_val_dict['frtcindx_{}'.format(pft_i)],
+            temp_val_dict['fracrc_p_{}'.format(pft_i)],
+            temp_val_dict['eavail_{}_1'.format(pft_i)],
+            temp_val_dict['eavail_{}_2'.format(pft_i)],
+            temp_val_dict['demand_{}_1'.format(pft_i)],
+            temp_val_dict['demand_{}_2'.format(pft_i)],
+            month_reg['h2ogef_1_{}'.format(pft_i)],
+            param_val_dict['cfrtcw_1_{}'.format(pft_i)],
+            param_val_dict['cfrtcw_2_{}'.format(pft_i)],
+            param_val_dict['cfrtcn_1_{}'.format(pft_i)],
+            param_val_dict['cfrtcn_2_{}'.format(pft_i)],
+            month_reg['fracrc_{}'.format(pft_i)])
