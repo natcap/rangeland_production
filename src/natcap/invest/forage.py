@@ -706,10 +706,10 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         density and total modeled soil depth. Lines 220-222, Prelim.f
 
         Parameters:
-            som1c_2 (numpy.ndarray): active organic soil carbon
-            som2c_2 (numpy.ndarray): slow organic soil carbon
-            som3c (numpy.ndarray): passive organic soil carbon
-            bulkd (numpy.ndarray): bulk density of soil
+            som1c_2 (numpy.ndarray): state variable, active organic soil carbon
+            som2c_2 (numpy.ndarray): state variable, slow organic soil carbon
+            som3c (numpy.ndarray): state variable, passive organic soil carbon
+            bulkd (numpy.ndarray): input, bulk density of soil
             edepth (numpy.ndarray): parameter, depth of soil for this
                 calculation
 
@@ -724,7 +724,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
             & (som2c_2 != som2c_2_nodata)
             & (som3c != som3c_nodata)
             & (bulkd != bulkd_nodata)
-            & (edepth != _TARGET_NODATA))
+            & (edepth != _IC_NODATA))
         ompc[valid_mask] = (
             (som1c_2[valid_mask] + som2c_2[valid_mask]
                 + som3c[valid_mask]) * 1.724
@@ -741,11 +741,11 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         Research 15:1633.
 
         Parameters:
-            sand (numpy.ndarray): proportion sand in soil
-            silt (numpy.ndarray): proportion silt in soil
-            clay (numpy.ndarray): proportion clay in soil
-            ompc (numpy.ndarray): estimated total soil organic matter
-            bulkd (numpy.ndarray): bulk density of soil
+            sand (numpy.ndarray): input, proportion sand in soil
+            silt (numpy.ndarray): input, proportion silt in soil
+            clay (numpy.ndarray): input, proportion clay in soil
+            ompc (numpy.ndarray): derived, estimated total soil organic matter
+            bulkd (numpy.ndarray): input, bulk density of soil
 
         Returns:
             afiel, field capacity for this soil layer
@@ -774,11 +774,11 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         Research 15:1633.
 
         Parameters:
-            sand (numpy.ndarray): proportion sand in soil
-            silt (numpy.ndarray): proportion silt in soil
-            clay (numpy.ndarray): proportion clay in soil
-            ompc (numpy.ndarray): estimated total soil organic matter
-            bulkd (numpy.ndarray): bulk density of soil
+            sand (numpy.ndarray): input, proportion sand in soil
+            silt (numpy.ndarray): input, proportion silt in soil
+            clay (numpy.ndarray): input, proportion clay in soil
+            ompc (numpy.ndarray): derived, estimated total soil organic matter
+            bulkd (numpy.ndarray): input, bulk density of soil
 
         Returns:
             awilt, wilting point for this soil layer
@@ -882,7 +882,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
                 site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
-            _TARGET_NODATA)
+            _IC_NODATA)
 
     def calc_wc(afiel_1, awilt_1):
         """Calculate water content of soil layer 1."""
@@ -902,7 +902,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Parameters:
             peftxa (numpy.ndarray): parameter, regression intercept
             peftxb (numpy.ndarray): parameter, regression slope
-            sand (numpy.ndarray): proportion sand in soil
+            sand (numpy.ndarray): input, proportion sand in soil
 
         Returns:
             eftext, coefficient that modifies microbe decomposition rate.
@@ -910,8 +910,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         eftext = numpy.empty(sand.shape, dtype=numpy.float32)
         eftext[:] = _IC_NODATA
         valid_mask = (
-            (peftxa != _TARGET_NODATA)
-            & (peftxb != _TARGET_NODATA)
+            (peftxa != _IC_NODATA)
+            & (peftxb != _IC_NODATA)
             & (sand != sand_nodata))
         eftext[valid_mask] = (
             peftxa[valid_mask] + (peftxb[valid_mask] * sand[valid_mask]))
@@ -934,17 +934,17 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
                 predicting loss to CO2 from active organic soil carbon
             p1co2b_2 (numpy.ndarray): parameter, slope of regression
                 predicting loss to CO2 from active organic soil carbon
-            sand (numpy.ndarray): proportion sand in soil
+            sand (numpy.ndarray): input, proportion sand in soil
 
         Returns:
             p1co2_2, fraction of carbon that flows to CO2 from active
             organic soil carbon
         """
         p1co2_2 = numpy.empty(sand.shape, dtype=numpy.float32)
-        p1co2_2[:] = _IC_NODATA
+        p1co2_2[:] = _TARGET_NODATA
         valid_mask = (
-            (p1co2a_2 != _TARGET_NODATA)
-            & (p1co2b_2 != _TARGET_NODATA)
+            (p1co2a_2 != _IC_NODATA)
+            & (p1co2b_2 != _IC_NODATA)
             & (sand != sand_nodata))
         p1co2_2[valid_mask] = (
             p1co2a_2[valid_mask] + (p1co2b_2[valid_mask] * sand[valid_mask]))
@@ -954,7 +954,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         [(path, 1) for path in [
             param_val_dict['p1co2a_2'],
             param_val_dict['p1co2b_2'], sand_path]],
-        calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _IC_NODATA)
+        calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _TARGET_NODATA)
 
     def calc_fps1s3(ps1s3_1, ps1s3_2, clay):
         """Calculate effect of clay content on decomposition from som1c_2.
@@ -966,7 +966,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Parameters:
             ps1s3_1 (numpy.ndarray): parameter, regression intercept
             ps1s3_2 (numpy.ndarray): parameter, regression slope
-            clay (numpy.ndarray): proportion clay in soil
+            clay (numpy.ndarray): input, proportion clay in soil
 
         Returns:
             fps1s3, coefficient that modifies rate of decomposition
@@ -975,8 +975,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         fps1s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps1s3[:] = _IC_NODATA
         valid_mask = (
-            (ps1s3_1 != _TARGET_NODATA)
-            & (ps1s3_2 != _TARGET_NODATA)
+            (ps1s3_1 != _IC_NODATA)
+            & (ps1s3_2 != _IC_NODATA)
             & (clay != clay_nodata))
         fps1s3[valid_mask] = (
             ps1s3_1[valid_mask] + (ps1s3_2[valid_mask] * clay[valid_mask]))
@@ -997,7 +997,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Parameters:
             ps2s3_1 (numpy.ndarray): parameter, regression intercept
             ps2s3_2 (numpy.ndarray): parameter, regression slope
-            clay (numpy.ndarray): proportion clay in soil
+            clay (numpy.ndarray): input, proportion clay in soil
 
         Returns:
             fps2s3, coefficient that modifies rate of decomposition from
@@ -1006,8 +1006,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         fps2s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps2s3[:] = _IC_NODATA
         valid_mask = (
-            (ps2s3_1 != _TARGET_NODATA)
-            & (ps2s3_2 != _TARGET_NODATA)
+            (ps2s3_1 != _IC_NODATA)
+            & (ps2s3_2 != _IC_NODATA)
             & (clay != clay_nodata))
         fps2s3[valid_mask] = (
             ps2s3_1[valid_mask] + (ps2s3_2[valid_mask] * clay[valid_mask]))
@@ -1028,7 +1028,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Parameters:
             omlech_1 (numpy.ndarray): parameter, regression intercept
             omlech_2 (numpy.ndarray): parameter, regression slope
-            sand (numpy.ndarray): proportion sand in soil
+            sand (numpy.ndarray): input, proportion sand in soil
 
         Returns:
             orglch, the fraction of organic compounds leaching from soil
@@ -1037,8 +1037,8 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         orglch = numpy.empty(sand.shape, dtype=numpy.float32)
         orglch[:] = _IC_NODATA
         valid_mask = (
-            (omlech_1 != _TARGET_NODATA)
-            & (omlech_2 != _TARGET_NODATA)
+            (omlech_1 != _IC_NODATA)
+            & (omlech_2 != _IC_NODATA)
             & (sand != sand_nodata))
         orglch[valid_mask] = (
             omlech_1[valid_mask] + (omlech_2[valid_mask] * sand[valid_mask]))
@@ -1061,13 +1061,14 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
     in aboveground material for the material to decompose. Agdrat.f
 
     Parameters:
-        anps (numpy.ndarray): N or P in the donor material
-        tca (numpy.ndarray): total C in the donor material
-        pcemic_1 (numpy.ndarray): maximum C/<iel> of new material
-        pcemic_2 (numpy.ndarray): minimum C/<iel> of new material
-        pcemic_3 (numpy.ndarray): minimum <iel> content of decomposing
-            material that gives minimum C/<iel> of new material
-        cemicb (numpy.ndarray): slope of the regression line for C/<iel>
+        anps (numpy.ndarray): state variable, N or P in the donor material
+        tca (numpy.ndarray): state variable, total C in the donor material
+        pcemic_1 (numpy.ndarray): parameter, maximum C/<iel> of new material
+        pcemic_2 (numpy.ndarray): parameter, minimum C/<iel> of new material
+        pcemic_3 (numpy.ndarray): parameter, minimum <iel> content of
+            decomposing material that gives minimum C/<iel> of new material
+        cemicb (numpy.ndarray): parameter, slope of the regression line for
+            C/<iel>
 
     Returns:
         agdrat, the C/<iel> ratio of new material
@@ -1123,7 +1124,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
                     (site_code, table) in site_param_table.iteritems()])
             pygeoprocessing.reclassify_raster(
                 (site_index_path, 1), site_to_val, target_path,
-                gdal.GDT_Float32, _TARGET_NODATA)
+                gdal.GDT_Float32, _IC_NODATA)
 
     def calc_rnewas_som1(
             pcemic1_2, pcemic1_1, pcemic1_3, struce_1, strucc_1):
@@ -1152,9 +1153,9 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             into som1 for one nutrient
         """
         valid_mask = (
-            (pcemic1_2 != _TARGET_NODATA)
-            & (pcemic1_1 != _TARGET_NODATA)
-            & (pcemic1_3 != _TARGET_NODATA)
+            (pcemic1_2 != _IC_NODATA)
+            & (pcemic1_1 != _IC_NODATA)
+            & (pcemic1_3 != _IC_NODATA)
             & (struce_1 != struce_1_nodata)
             & (strucc_1 != strucc_1_nodata))
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
@@ -1199,22 +1200,23 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
                 formed from surface active pool
             pcemic1_2 (numpy.ndarray): parameter, minimum C/<iel> ratio for
                 surface active organic pool
-            rnewas1 (numpy.ndarray): C/<iel> ratio for decomposition into som1
+            rnewas1 (numpy.ndarray): derived, C/<iel> ratio for decomposition
+                into som1
 
         Returns:
             rnewas2, required ratio for decomposition of structural material
             into som2 for one nutrient
         """
         valid_mask = (
-            (pcemic2_2 != _TARGET_NODATA)
-            & (pcemic2_1 != _TARGET_NODATA)
-            & (pcemic2_3 != _TARGET_NODATA)
+            (pcemic2_2 != _IC_NODATA)
+            & (pcemic2_1 != _IC_NODATA)
+            & (pcemic2_3 != _IC_NODATA)
             & (struce_1 != struce_1_nodata)
             & (strucc_1 != strucc_1_nodata)
-            & (rad1p_1 != _TARGET_NODATA)
-            & (rad1p_2 != _TARGET_NODATA)
-            & (rad1p_3 != _TARGET_NODATA)
-            & (pcemic1_2 != _TARGET_NODATA)
+            & (rad1p_1 != _IC_NODATA)
+            & (rad1p_2 != _IC_NODATA)
+            & (rad1p_3 != _IC_NODATA)
+            & (pcemic1_2 != _IC_NODATA)
             & (rnewas1 != _TARGET_NODATA))
         cemicb2 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb2[:] = _TARGET_NODATA
@@ -1357,17 +1359,17 @@ def _yearly_tasks(
                 (site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
     def calc_base_N_dep(epnfa_1, epnfa_2, prcann):
         """Calculate base annual atmospheric N deposition.
 
         Parameters:
-            epnfa_1 (numpy.ndarray): intercept of regression predicting
+            epnfa_1 (numpy.ndarray): parameter, intercept of regression
+                predicting atmospheric N deposition from precipitation
+            epnfa_2 (numpy.ndarray): parameter, slope of regression predicting
                 atmospheric N deposition from precipitation
-            epnfa_2 (numpy.ndarray): slope of regression predicting
-                atmospheric N deposition from precipitation
-            prcann (numpy.ndarray): annual precipitation
+            prcann (numpy.ndarray): derived, annual precipitation
 
         Returns:
             baseNdep, annual atmospheric N deposition
@@ -1375,8 +1377,8 @@ def _yearly_tasks(
         baseNdep = numpy.empty(prcann.shape, dtype=numpy.float32)
         baseNdep[:] = 0.
         valid_mask = (
-            (epnfa_1 != _TARGET_NODATA)
-            & (epnfa_2 != _TARGET_NODATA)
+            (epnfa_1 != _IC_NODATA)
+            & (epnfa_2 != _IC_NODATA)
             & (prcann != _TARGET_NODATA))
         baseNdep[valid_mask] = (
             epnfa_1[valid_mask]
@@ -1549,9 +1551,10 @@ def _reference_evapotranspiration(
         Pevap.f
 
         Parameters:
-            max_temp (numpy.ndarray): maximum monthly temperature
-            min_temp (numpy.ndarray): minimum monthly temperature
-            shwave (numpy.ndarray): shortwave radiation outside the atmosphere
+            max_temp (numpy.ndarray): input, maximum monthly temperature
+            min_temp (numpy.ndarray): input, minimum monthly temperature
+            shwave (numpy.ndarray): derived, shortwave radiation outside the
+                atmosphere
             fwloss_4 (numpy.ndarray): parameter, scaling factor for reference
                 evapotranspiration
 
@@ -1566,7 +1569,7 @@ def _reference_evapotranspiration(
             (max_temp != maxtmp_nodata)
             & (min_temp != mintmp_nodata)
             & (shwave != _TARGET_NODATA)
-            & (fwloss_4 != _TARGET_NODATA))
+            & (fwloss_4 != _IC_NODATA))
         trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
         trange[:] = _TARGET_NODATA
         trange[valid_mask] = max_temp[valid_mask] - min_temp[valid_mask]
@@ -1667,15 +1670,17 @@ def _potential_production(
         modified by total standing live biomass. Lines 69-84 Potcrp.f
 
         Parameters:
-            aglivc (numpy.ndarray): sum of aglivc (carbon in aboveground live
-                biomass) across plant functional types
-            pmxbio (numpy.ndarray): maximum biomass impact on temperature
-            maxtmp (numpy.ndarray): average maximum monthly temperature
-            pmxtmp (numpy.ndarray): scaling factor for effect of biomass on
-                monthly maximum temperature
-            mintmp (numpy.ndarray): average minimum monthly temperature
-            pmntmp (numpy.ndarray): scaling factor for effect of biomass on
-                monthly minimum temperature
+            aglivc (numpy.ndarray): derived, sum of aglivc (carbon in
+                aboveground live biomass) across plant functional types
+            pmxbio (numpy.ndarray): parameter, maximum biomass impact on
+                temperature
+            maxtmp (numpy.ndarray): derived, average maximum monthly
+                temperature
+            pmxtmp (numpy.ndarray): parameter, scaling factor for effect of
+                biomass on monthly maximum temperature
+            mintmp (numpy.ndarray): input, average minimum monthly temperature
+            pmntmp (numpy.ndarray): parameter, scaling factor for effect of
+                biomass on monthly minimum temperature
 
         Returns:
             ctemp, effect of soil temperature on potential production
@@ -1723,14 +1728,16 @@ def _potential_production(
         type-specific parameters ppdf_1-4.. Lines 73-84 Potcrp.f
 
         Parameters:
-            ctemp (numpy.ndarray): soil temperature, as calculated from
+            ctemp (numpy.ndarray): derived, soil temperature as calculated from
                 monthly temperature and modified by standing live biomass
-            ppdf_1 (numpy.ndarray): optimum temperature for growth
-            ppdf_2 (numpy.ndarray): maximum temperature for growth
-            ppdf_3 (numpy.ndarray): left curve shape for Poisson Density
-                Function curve describing growth as function of temperature
-            ppdf_4 (numpy.ndarray): right curve shape for Poisson Density
-                Function curve describing growth as function of temperature
+            ppdf_1 (numpy.ndarray): parameter, optimum temperature for growth
+            ppdf_2 (numpy.ndarray): parameter, maximum temperature for growth
+            ppdf_3 (numpy.ndarray): parameter, left curve shape for Poisson
+                Density Function curve describing growth as function of
+                temperature
+            ppdf_4 (numpy.ndarray): parameter, right curve shape for Poisson
+                Density Function curve describing growth as function of
+                temperature
 
         Returns:
             potprd, scaling factor describing potential production limited
@@ -1766,11 +1773,11 @@ def _potential_production(
         Lines 57-64 Potcrp.f
 
         Parameters:
-            pevap (numpy.ndarray): reference evapotranspiration
-            avh2o_1 (numpy.ndarray): water available to this plant functional
-                type for growth
-            precip (numpy.ndarray): precipitation for the current month
-            wc (numpy.ndarray): water content in soil layer 1
+            pevap (numpy.ndarray): derived, reference evapotranspiration
+            avh2o_1 (numpy.ndarray): derived, water available to this plant
+                functional type for growth
+            precip (numpy.ndarray): input, precipitation for the current month
+            wc (numpy.ndarray): derived, water content in soil layer 1
             pprpts_1 (numpy.ndarray): parameter, the minimum ratio of
                 available water to reference evapotranspiration that limits
                 production completely
@@ -1825,11 +1832,11 @@ def _potential_production(
         biok5. Lines 91-120 Potcrp.f
 
         Parameters:
-            sum_stdedc (numpy.ndarray): total carbon in standing dead
+            sum_stdedc (numpy.ndarray): derived, total carbon in standing dead
                 biomass across plant functional types
-            sum_aglivc (numpy.ndarray): total carbin in aboveground live
-                biomass across plant functional types
-            strucc_1 (numpy.ndarray): carbon in surface litter
+            sum_aglivc (numpy.ndarray): derived, total carbon in aboveground
+                live biomass across plant functional types
+            strucc_1 (numpy.ndarray): derived, carbon in surface litter
             pmxbio (numpy.ndarray): parameter, maximum biomass impact on
                 potential production
             biok5 (numpy.ndarray): parameter, level of standing dead biomass
@@ -1890,14 +1897,14 @@ def _potential_production(
         Parameters:
             prdx_1 (numpy.ndarray): parameter, the intrinsic capacity of the
                 plant functional type for growth per unit of solar radiation
-            shwave (numpy.ndarray): shortwave solar radiation outside the
-                atmosphere
-            potprd (numpy.ndarray): scaling factor describing limiting effect
-                of temperature
-            h2ogef_1 (numpy.ndarray): scaling factor describing the limiting
-                effect of soil moisture
-            biof (numpy.ndarray): scaling factor describing the limiting
-                effect of obstruction by standing biomass and litter
+            shwave (numpy.ndarray): derived, shortwave solar radiation outside
+                the atmosphere
+            potprd (numpy.ndarray): parameter, scaling factor describing
+                limiting effect of temperature
+            h2ogef_1 (numpy.ndarray): derived, scaling factor describing the
+                limiting effect of soil moisture
+            biof (numpy.ndarray): derived, scaling factor describing the
+                limiting effect of obstruction by standing biomass and litter
 
         Returns:
             tgprod, total above- and belowground potential biomass production
@@ -2182,8 +2189,8 @@ def _calc_available_nutrient(
                 live biomass
             riint (numpy.ndarray): parameter, intercept used to calculate the
                 impact of root biomass on nutrient availability
-            availm (numpy.ndarray): the sum of mineral nutrient in soil layers
-                accessible by this plant functional type
+            availm (numpy.ndarray): derived, the sum of mineral nutrient in
+                soil layers accessible by this plant functional type
             favail (numpy.ndarray): parameter, fraction of the nutrient
                 available each month to plants
             crpstg (numpy.ndarray): state variable, nutrient in
@@ -2222,12 +2229,12 @@ def _calc_available_nutrient(
         rate of N fixation.
 
         Parameters:
-            eavail_prior (numpy.ndarray): mineral nitrogen available to
-                the plant functional type, calculated with calc_eavail()
+            eavail_prior (numpy.ndarray): derived, mineral nitrogen available
+                to the plant functional type, calculated with calc_eavail()
             snfxmx (numpy.ndarray): parameter, maximum rate of symbiotic
                 nitrogen fixation
-            tgprod (numpy.ndarray): total above- and belowground potential
-                production
+            tgprod (numpy.ndarray): derived, total above- and belowground
+                potential production
 
         Returns:
             eavail, total N available including N fixed by the plant
@@ -2342,13 +2349,14 @@ def _calc_nutrient_demand(
         """Calculate nutrient demand.
 
         Parameters:
-            biomass_production (numpy.ndarray): total biomass production
-            root_fraction (numpy.ndarray): fraction of biomass
+            biomass_production (numpy.ndarray): derived, total biomass
+                production
+            root_fraction (numpy.ndarray): derived, fraction of biomass
                 allocated to roots
-            cercrp_min_above (numpy.ndarray): minimum carbon to nutrient ratio
-                of new aboveground live material
-            cercrp_min_below (numpy.ndarray): minimum carbon to nutrient ratio
-                of new belowground live material
+            cercrp_min_above (numpy.ndarray): derived, minimum carbon to
+                nutrient ratio of new aboveground live material
+            cercrp_min_below (numpy.ndarray): derived, minimum carbon to
+                nutrient ratio of new belowground live material
 
         Returns:
             demand_e, nutrient demand
@@ -2420,8 +2428,8 @@ def _root_shoot_ratio(
         Society of America Journal. Lines 36-47 cropDynC.f
 
         Parameters:
-            annual_precip (numpy.ndarray): sum of monthly precipitation over
-                twelve months including the current month
+            annual_precip (numpy.ndarray): derived, sum of monthly
+                precipitation over twelve months including the current month
             frtcindx (numpy.ndarray): parameter, flag indicating whether
                 root:shoot allocation follows the Great Plains equation
                 (frtcindx=0) or as a perennial plant (frtcindx=1)
@@ -2566,7 +2574,7 @@ def _root_shoot_ratio(
                     to predict ratio from annual precipitation
                 prb_2 (numpy.ndarray): parameter, slope of regression to
                     predict ratio from annual precipitation
-                annual_precip (numpy.ndarray): precipitation in twelve
+                annual_precip (numpy.ndarray): derived, precipitation in twelve
                     months including the current month
 
             Returns:
@@ -2671,8 +2679,8 @@ def _root_shoot_ratio(
             restricted to be between 0 and 1.
 
             Parameters:
-                totale (numpy.ndarray): nutrient available
-                demand (numpy.ndarray): demand for the nutrient
+                totale (numpy.ndarray): derived, nutrient available
+                demand (numpy.ndarray): derived, demand for the nutrient
 
             Returns:
                 a2drat, the ratio of available nutrient to demand, restricted
@@ -2701,16 +2709,18 @@ def _root_shoot_ratio(
             Lines 114-125 froota.f
 
             Parameters:
-                h2ogef (numpy.ndarray): the limiting factor of water
+                h2ogef (numpy.ndarray): derived, the limiting factor of water
                     availability on growth
                 cfrtcw_1 (numpy.ndarray): parameter, the maximum fraction of
                     carbon allocated to roots with maximum water stress
                 cfrtcw_2 (numpy.ndarray): parameter, the minimum fraction of
                     carbon allocated to roots with no water stress
-                a2drat_1 (numpy.ndarray): the ratio of available nitrogen to
-                    nitrogen demand, restricted to be between 0 and 1
-                a2drat_2 (numpy.ndarray): the ratio of available phosphorus to
-                    phosphorus demand, restricted to be between 0 and 1
+                a2drat_1 (numpy.ndarray): derived, the ratio of available
+                    nitrogen to nitrogen demand, restricted to be between 0
+                    and 1
+                a2drat_2 (numpy.ndarray): derived, the ratio of available
+                    phosphorus to phosphorus demand, restricted to be between
+                    0 and 1
                 cfrtcn_1 (numpy.ndarray): parameter, maximum fraction of
                     carbon allocated to roots with maximum nutrient stress
                 cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of
@@ -2722,12 +2732,12 @@ def _root_shoot_ratio(
             """
             valid_mask = (
                 (h2ogef != _TARGET_NODATA)
-                & (cfrtcw_1 != _TARGET_NODATA)
-                & (cfrtcw_2 != _TARGET_NODATA)
+                & (cfrtcw_1 != _IC_NODATA)
+                & (cfrtcw_2 != _IC_NODATA)
                 & (a2drat_1 != _TARGET_NODATA)
                 & (a2drat_2 != _TARGET_NODATA)
-                & (cfrtcn_1 != _TARGET_NODATA)
-                & (cfrtcn_2 != _TARGET_NODATA))
+                & (cfrtcn_1 != _IC_NODATA)
+                & (cfrtcn_2 != _IC_NODATA))
 
             h2oeff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
             h2oeff[:] = _TARGET_NODATA
@@ -2760,8 +2770,7 @@ def _root_shoot_ratio(
             return fracrc_perennial
 
         def revised_fracrc_op(frtcindx, fracrc_p, fracrc_perennial):
-            """
-            Calculate revised fraction of carbon allocated to roots.
+            """Calculate revised fraction of carbon allocated to roots.
 
             The revised fraction of carbon allocated to roots is calculated
             according to the parameter frtcindx.  If frtcindx=0 (use the "Great
@@ -2774,16 +2783,16 @@ def _root_shoot_ratio(
                     fraction of carbon allocated to roots should follow the
                     "Great Plains equation" or the algorithm for a perennial
                     plant
-                fracrc_p (numpy.ndarray): provisional fraction of carbon
-                    allocated to roots
-                fracrc_perennial (numpy.ndarray): revised fraction of carbon
-                    allocated to roots for a perennial plant
+                fracrc_p (numpy.ndarray): derived, provisional fraction of
+                    carbon allocated to roots
+                fracrc_perennial (numpy.ndarray): derived, fraction of
+                    carbon allocated to roots for a perennial plant
 
             Returns:
                 fracrc_r, revised fraction of carbon allocated to roots
             """
             valid_mask = (
-                (frtcindx != _TARGET_NODATA)
+                (frtcindx != _IC_NODATA)
                 & (fracrc_p != _TARGET_NODATA)
                 & (fracrc_perennial != _TARGET_NODATA))
 
