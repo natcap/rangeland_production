@@ -159,12 +159,12 @@ _YEARLY_FILES = {
 # intermediate values for each plant functional type that are shared
 # between submodels, but do not need to be saved as output
 _PFT_INTERMEDIATE_VALUES = [
-    'h2ogef_1', 'tgprod',
+    'h2ogef_1', 'tgprod_pot_prod',
     'cercrp_min_above_1', 'cercrp_min_above_2',
     'cercrp_max_above_1', 'cercrp_max_above_2',
     'cercrp_min_below_1', 'cercrp_min_below_2',
     'cercrp_max_below_1', 'cercrp_max_below_2',
-    'fracrc']
+    'tgprod', 'rtsh']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -640,8 +640,8 @@ def execute(args):
             pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
 
         _root_shoot_ratio(
-            aligned_inputs, site_param_table, pft_id_set, veg_trait_table,
-            sv_reg, year_reg, month_reg)
+            aligned_inputs, site_param_table, current_month, pft_id_set,
+            veg_trait_table, sv_reg, year_reg, month_reg)
 
 
 def sum_positive_rasters(*raster_list):
@@ -685,19 +685,6 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     Returns:
         None
     """
-    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
-    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
-    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
-    bulkd_nodata = pygeoprocessing.get_raster_info(bulk_d_path)['nodata'][0]
-    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
-    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
-    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
-
-    # temporary intermediate rasters for this calculation
-    temp_dir = tempfile.mkdtemp()
-    edepth_path = os.path.join(temp_dir, 'edepth.tif')
-    ompc_path = os.path.join(temp_dir, 'ompc.tif')
-
     def calc_ompc(som1c_2, som2c_2, som3c, bulkd, edepth):
         """Estimate total soil organic matter.
 
@@ -801,7 +788,12 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         """Decrease estimated organic matter in each subsequent layer."""
         return ompc * 0.85
 
-    # temporary raster from site parameter 'edepth'
+    # temporary intermediate rasters for calculating field capacity and
+    # wilting point
+    temp_dir = tempfile.mkdtemp()
+    edepth_path = os.path.join(temp_dir, 'edepth.tif')
+    ompc_path = os.path.join(temp_dir, 'ompc.tif')
+
     site_to_edepth = dict(
         [(site_code, float(table['edepth'])) for
          (site_code, table) in site_param_table.iteritems()])
@@ -809,6 +801,14 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     pygeoprocessing.reclassify_raster(
         (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
         _TARGET_NODATA)
+
+    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
+    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
+    bulkd_nodata = pygeoprocessing.get_raster_info(bulk_d_path)['nodata'][0]
+    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
+    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
+    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
 
     # estimate total soil organic matter
     pygeoprocessing.raster_calculator(
@@ -869,7 +869,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
     clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
 
-    # temporary intermediate rasters for these calculations
+    # temporary intermediate rasters for persistent parameters calculation
     temp_dir = tempfile.mkdtemp()
     param_val_dict = {}
     for val in[
@@ -1109,7 +1109,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     strucc_1_nodata = pygeoprocessing.get_raster_info(
             sv_reg['strucc_1_path'])['nodata'][0]
 
-    # temporary parameter rasters for these calculations
+    # temporary parameter rasters for structural ratios calculations
     temp_dir = tempfile.mkdtemp()
     param_val_dict = {}
     for iel in [1, 2]:
@@ -1617,7 +1617,9 @@ def _potential_production(
     Potential production of each plant functional type is calculated
     as total potential production given incoming solar radiation,
     limited by temperature, soil moisture, and obstruction by biomass and
-    litter. Lines 57-148 Potcrp.f
+    litter. Further modification of potential production according to
+    limitation by water and nutrient availability is calculated in the
+    root:shoot ratio submodel. Lines 57-148 Potcrp.f
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
@@ -1641,7 +1643,7 @@ def _potential_production(
             calculated values that are shared between submodels
 
     Modifies:
-        The raster indicated by `month_reg['tgprod_<PFT>']` for each
+        The raster indicated by `month_reg['tgprod_pot_prod_<PFT>']` for each
             plant functional type (PFT) where growth is scheduled to occur in
             this month
 
@@ -1885,7 +1887,7 @@ def _potential_production(
                 1.))
         return biof
 
-    def calc_tgprod(prdx_1, shwave, potprd, h2ogef_1, biof):
+    def calc_tgprod_pot_prod(prdx_1, shwave, potprd, h2ogef_1, biof):
         """Calculate total potential production.
 
         Total above- and belowground potential biomass production is calculated
@@ -1907,7 +1909,8 @@ def _potential_production(
                 limiting effect of obstruction by standing biomass and litter
 
         Returns:
-            tgprod, total above- and belowground potential biomass production
+            tgprod_pot_prod, total above- and belowground potential biomass
+                production
         """
         valid_mask = (
             (prdx_1 != _IC_NODATA)
@@ -1915,15 +1918,15 @@ def _potential_production(
             & (potprd != _TARGET_NODATA)
             & (h2ogef_1 != _TARGET_NODATA)
             & (biof != _TARGET_NODATA))
-        tgprod = numpy.empty(prdx.shape, dtype=numpy.float32)
-        tgprod[:] = _TARGET_NODATA
+        tgprod_pot_prod = numpy.empty(prdx_1.shape, dtype=numpy.float32)
+        tgprod_pot_prod[:] = _TARGET_NODATA
 
-        tgprod[valid_mask] = (
+        tgprod_pot_prod[valid_mask] = (
             prdx_1[valid_mask] * shwave[valid_mask] * potprd[valid_mask]
             * h2ogef_1[valid_mask] * biof[valid_mask])
-        return tgprod
+        return tgprod_pot_prod
 
-    # temporary intermediate rasters for these calculations
+    # temporary intermediate rasters for calculating total potential production
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
     # site-level temporary calculated values
@@ -1936,7 +1939,7 @@ def _potential_production(
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
 
-    # temporary parameter rasters for these calculations
+    # temporary parameter rasters for calculating total potential production
     param_val_dict = {}
     # site-level parameters
     for val in [
@@ -2060,7 +2063,8 @@ def _potential_production(
                 temp_val_dict['potprd_{}'.format(pft_i)],
                 month_reg['h2ogef_1_{}'.format(pft_i)],
                 temp_val_dict['biof_{}'.format(pft_i)]],
-            calc_biof, month_reg['tgprod_{}'.format(pft_i)],
+            calc_tgprod_pot_prod,
+            month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
@@ -2258,7 +2262,7 @@ def _calc_available_nutrient(
     crpstg_nodata = pygeoprocessing.get_raster_info(
         sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)])['nodata'][0]
 
-    # temporary intermediate rasters for this calculation
+    # temporary intermediate rasters for calculating available nutrient
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
     for val in ['availm']:
@@ -2396,23 +2400,51 @@ def _calc_nutrient_demand(
 
 
 def _root_shoot_ratio(
-        aligned_inputs, site_param_table, pft_id_set, veg_trait_table,
-        sv_reg, year_reg, month_reg):
-    """Calculate root:shoot ratio and response to grazing.
+        aligned_inputs, site_param_table, current_month, pft_id_set,
+        veg_trait_table, sv_reg, year_reg, month_reg):
+    """Calculate final potential production and root:shoot ratio.
 
-    CropDynC.f
-    TODO finish this docstring.
+    Final potential production and root:shoot ratio is calculated according
+    to nutrient availability and demand for the nutrient, and the impact of
+    defoliation by herbivores. CropDynC.f
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including the site spatial index raster
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        pft_id_set (set): set of integers identifying plant functional types
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        year_reg (dict): map of key, path pairs giving paths to rasters that
+            are modified once per year, including annual precipitation
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+
+    Modifies:
+        The raster indicated by `month_reg['tgprod_<PFT>']` for each
+            plant functional type (PFT)
+        The raster indicated by `month_reg['rtsh_<PFT>']` for each
+            plant functional type (PFT)
+
+    Returns:
+        None
     """
     # if growth does not occur this month for all PFTs,
-    # skip the rest of the function TODO what about effect of grazing???
-    # TODO do we need this? if not, need to fill in
-    # month_reg['tgprod_<PFT>_path'] with some default null value?
-    # do_PFT = []
-    # for pft_index in pft_id_set:
-    #     if str(current_month) in veg_trait_table[pft_index]['growth_months']:
-    #         do_PFT.append(pft_index)
-    # if not do_PFT:
-    #     return
+    # skip the rest of the function
+    do_PFT = []
+    for pft_index in pft_id_set:
+        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
+            do_PFT.append(pft_index)
+        else:
+            month_reg['tgprod_{}_path'.format(pft_index)] = None
+            month_reg['rtsh_{}_path'.format(pft_index)] = None
+    if not do_PFT:
+        return
 
     def calc_provisional_fracrc(
             annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
@@ -2701,7 +2733,7 @@ def _root_shoot_ratio(
         def calc_perennial_fracrc(
                 h2ogef, cfrtcw_1, cfrtcw_2, a2drat_1, a2drat_2, cfrtcn_1,
                 cfrtcn_2):
-            """Calculate fraction C allocated to roots for perennial plant.
+            """Calculate fraction C allocated to roots for a perennial plant.
 
             The fraction of carbon allocated to roots is determined by
             water availability, described by h2ogef, and nutrient availability,
@@ -2803,7 +2835,7 @@ def _root_shoot_ratio(
                 fracrc_perennial[valid_mask])
             return fracrc_r
 
-        # temporary intermediate rasters for this calculation
+        # temporary intermediate rasters for calculating revised fracrc
         temp_dir = tempfile.mkdtemp()
         temp_val_dict = {}
         for val in ['a2drat_1', 'a2drat_2', 'fracrc_perennial']:
@@ -2838,11 +2870,225 @@ def _root_shoot_ratio(
         # clean up temporary files
         shutil.rmtree(temp_dir)
 
-    # temporary intermediate rasters for these calculations
+    def calc_final_tgprod_rtsh(
+            tgprod_pot_prod_path, fracrc_path, flgrem_path, grzeff_path,
+            gremb_path, tgprod_path, rtsh_path):
+        """Calculate final potential production and root:shoot ratio.
+
+        Final potential production and root:shoot ratio include the impact of
+        grazing. First calculate final aboveground production including the
+        impact of grazing; then calculate rtsh, the final root:shoot ratio
+        including the impact of grazing; then calculate tgprod, final total
+        potential production, from final aboveground production and final
+        root:shoot ratio. Grazrst.f
+
+        Parameters:
+            tgprod_pot_prod_path (string): path to raster containing total
+                potential biomass production restricted by water and nutrient
+                availability, prior to effects of grazing
+            fracrc_path (string): path to raster containing the fraction of
+                carbon production allocated to roots according to restriction
+                by water and nutrient availability, prior to effects of
+                grazing
+            flgrem_path (string): path to raster containing the fraction of
+                live aboveground biomass removed by herbivores according to
+                diet selection in the previous step
+            grzeff_path (string): path to raster containing the parameter
+                grzeff, the effect of defolation on production and root:shoot
+                ratio
+            gremb_path (string): path to raster containing the parameter
+                gremb, the grazing effect multiplier
+            tgprod_path (string): path to raster containing final total
+                potential production
+            rtsh_path (string): path to raster containing final root:shoot
+                ratio
+
+        Modifies:
+            The raster indicated by tgprod_path
+            The raster indicated by rtsh_path
+
+        Returns:
+            None
+        """
+        def grazing_effect_on_aboveground_production(
+                tgprod, fracrc, flgrem, grzeff):
+            """Adjust aboveground production with the impact of grazing.
+
+            Removal of biomass by herbivores directly impacts potential
+            aboveground production according to the amount of biomass removed
+            and the parameter grzeff, which acts as a switch to determine the
+            effect. If grzeff=0, 3, or 4, aboveground production is not
+            changed. If grzeff=1 or 6, production decreases linearly with
+            biomass removed; if grzeff=2 or 5, biomass removed has a quadratic
+            impact on production. Grazrst.f
+
+            Parameters:
+                tgprod (numpy.ndarray): derived, total potential biomass
+                    production restricted by water and nutrient availability
+                fracrc (numpy.ndarray): derived, fraction of carbon allocated
+                    to roots according to water and nutrient availability
+                flgrem (numpy.ndarray): derived, fraction of live biomass
+                    removed by grazing in previous monthly step
+                grzeff (numpy.ndarray): parameter, the effect of defoliation on
+                    production and root:shoot ratio
+
+            Returns:
+                agprod, aboveground production impacted by grazing
+            """
+            valid_mask = (
+                (tgprod != _TARGET_NODATA)
+                & (fracrc != _TARGET_NODATA)
+                & (flgrem != _IC_NODATA)
+                & (grzeff != _IC_NODATA))
+
+            agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
+            agprod_prior[:] = _TARGET_NODATA
+            agprod_prior[valid_mask] = (
+                tgprod[valid_mask] * (1. - fracrc[valid_mask]))
+
+            linear_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
+            linear_effect[:] = _TARGET_NODATA
+            linear_effect[valid_mask] = numpy.maximum(
+                (1. - (2.21*flgrem[valid_mask])) * agprod_prior[valid_mask],
+                0.02)
+
+            quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
+            quadratic_effect[:] = _TARGET_NODATA
+            quadratic_effect[valid_mask] = numpy.maximum(
+                (1. + 2.6*flgrem[valid_mask]
+                    - (5.83*(numpy.power(flgrem[valid_mask], 2))))
+                * agprod_prior[valid_mask],
+                0.02)
+
+            no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
+            linear_mask = (valid_mask & numpy.isin(grzeff, [1, 6]))
+            quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 5]))
+
+            agprod = numpy.empty(tgprod.shape, dtype=numpy.float32)
+            agprod[:] = _TARGET_NODATA
+            agprod[no_effect_mask] = agprod_prior[no_effect_mask]
+            agprod[linear_mask] = linear_effect[linear_mask]
+            agprod[quadratic_mask] = quadratic_effect[quadratic_mask]
+            return agprod
+
+        def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
+            """Adjust root:shoot ratio according to the impact of grazing.
+
+            Removal of biomass by herbivores directly impacts the root:shoot
+            ratio of production according to the amount of biomass removed and
+            the parameter grzeff, which acts as a switch to determine the
+            effect. If grzeff=0 or 1, the root:shoot ratio is not changed.
+            If grzeff=2 or 3, biomass removed has a quadratic impact on the
+            root:shoot ratio. If grzeff=4, 5, or 6, biomass removed has a
+            linear effect on the root:shoot ratio. The parameter gremb
+            multiplies the linear impact of grazing when grzeff=4, 5 or 6.
+            Grzrst.f
+
+            Parameters:
+                fracrc (numpy.ndarray): derived, fraction of carbon allocated
+                    to roots according to water and nutrient availability
+                flgrem (numpy.ndarray): derived, fraction of live biomass
+                    removed by grazing in previous monthly step
+                grzeff (numpy.ndarray): parameter, the effect of defoliation on
+                    production and root:shoot ratio
+                grzemb (numpy.ndarray): parameter, grazing effect multiplier
+
+            Returns:
+                rtsh, root:shoot ratio impacted by grazing
+            """
+            valid_mask = (
+                (fracrc != _TARGET_NODATA)
+                & (flgrem != _TARGET_NODATA)
+                & (grzeff != _IC_NODATA)
+                & (gremb != _IC_NODATA))
+
+            rtsh_prior = numpy.empty(fracrc.shape, dtype=numpy.float32)
+            rtsh_prior[:] = _TARGET_NODATA
+            rtsh_prior[valid_mask] = (
+                fracrc[valid_mask] / (1. - fracrc[valid_mask]))
+
+            quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
+            quadratic_effect[:] = _TARGET_NODATA
+            quadratic_effect[valid_mask] = (
+                rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask]
+                - 11.78 * numpy.power(flgrem[valid_mask], 2))
+
+            linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
+            linear_effect[:] = _TARGET_NODATA
+            linear_effect[valid_mask] = (
+                1. - (flgrem[valid_mask] * gremb[valid_mask]))
+
+            no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 1]))
+            quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 3]))
+            linear_mask = (valid_mask & numpy.isin(grzeff, [4, 5, 6]))
+
+            rtsh = numpy.empty(fracrc.shape, dtype=numpy.float32)
+            rtsh[:] = _TARGET_NODATA
+            rtsh[no_effect_mask] = rtsh_prior[no_effect_mask]
+            rtsh[quadratic_mask] = quadratic_effect[quadratic_mask]
+            rtsh[linear_mask] = linear_effect[linear_mask]
+            return rtsh
+
+        def calc_tgprod_final(rtsh, agprod):
+            """Calculate final total potential production.
+
+            Final total potential production is calculated from aboveground
+            production impacted by grazing and the final root:shoot ratio
+            impacted by grazing.
+
+            Parameters:
+                rtsh (numpy.ndarray): derived, final root:shoot ratio impacted
+                    by grazing
+                agprod (numpy.ndarray): derived, final aboveground potential
+                    production impacted by grazing
+
+            Returns:
+                tgprod, final total potential production
+            """
+            valid_mask = (
+                (rtsh != _TARGET_NODATA)
+                & (agprod != _TARGET_NODATA))
+            tgprod = numpy.empty(rtsh.shape, dtype=numpy.float32)
+            tgprod[:] = _TARGET_NODATA
+            tgprod[valid_mask] = (
+                agprod[valid_mask] + (rtsh[valid_mask] * agprod[valid_mask]))
+            return tgprod
+
+        # temporary intermediate rasters for grazing effect
+        temp_dir = tempfile.mkdtemp()
+        agprod_path = os.path.join(temp_dir, 'agprod.tif')
+
+        # grazing effect on aboveground production
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                tgprod_pot_prod_path, fracrc_path, flgrem_path,
+                grzeff_path],
+            grazing_effect_on_aboveground_production,
+            agprod_path, gdal.GDT_Float32, _TARGET_NODATA)
+        # grazing effect on final root:shoot ratio
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                fracrc_path, flgrem_path, grzeff_path, gremb_path],
+            grazing_effect_on_root_shoot,
+            month_reg['rtsh_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        # final total potential production
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                month_reg['rtsh_{}'.format(pft_i)],
+                agprod_path],
+            calc_tgprod_final,
+            month_reg['tgprod_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # clean up temporary files
+        shutil.rmtree(temp_dir)
+
+    # temporary intermediate rasters for root:shoot submodel
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
-    for pft_i in pft_id_set:  # TODO or just for those in do_PFT ??
-        for val in ['fracrc_p']:
+    for pft_i in do_PFT:
+        for val in ['fracrc_p', 'fracrc']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
         for iel in [1, 2]:
@@ -2851,7 +3097,7 @@ def _root_shoot_ratio(
                     '{}_{}_{}'.format(val, pft_i, iel)] = os.path.join(
                         temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
 
-    # temporary parameter rasters for these calculations
+    # temporary parameter rasters for root:shoot submodel
     param_val_dict = {}
     # site-level parameters
     for val in [
@@ -2866,10 +3112,11 @@ def _root_shoot_ratio(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
     # PFT-level parameters
-    for pft_i in pft_id_set:  # TODO or just do_PFT?
+    for pft_i in do_PFT:
         for val in [
                 'frtcindx', 'cfrtcw_1', 'cfrtcw_2', 'cfrtcn_1', 'cfrtcn_2',
-                'biomax', 'cfrtcw_1', 'cfrtcw_2', 'cfrtcn_1', 'cfrtcn_2']:
+                'biomax', 'cfrtcw_1', 'cfrtcw_2', 'cfrtcn_1', 'cfrtcn_2',
+                'grzeff', 'gremb']:
             target_path = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
             param_val_dict['{}_{}'.format(val, pft_i)] = target_path
@@ -2877,7 +3124,7 @@ def _root_shoot_ratio(
             pygeoprocessing.new_raster_from_base(
                 aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
                 [_IC_NODATA], fill_value_list=[fill_val])
-        for iel in [1, 2]:  # TODO move these values to internal to interior functions?
+        for iel in [1, 2]:
             for val in [
                     'pramn_1', 'pramn_2', 'pramx_1', 'pramx_2', 'prbmn_1',
                     'prbmn_2', 'prbmx_1', 'prbmx_2']:
@@ -2931,11 +3178,11 @@ def _root_shoot_ratio(
                 pft_i, iel, veg_trait_table[pft_i], sv_reg, site_param_table,
                 aligned_inputs['site_index'],
                 param_val_dict['favail_{}'.format(iel)],
-                month_reg['tgprod_{}'.format(pft_i)],
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
             # demand_iel, demand for the nutrient
             _calc_nutrient_demand(
-                month_reg['tgprod_{}'.format(pft_i)],
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 temp_val_dict['fracrc_p_{}'.format(pft_i)],
                 month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
                 month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
@@ -2953,4 +3200,22 @@ def _root_shoot_ratio(
             param_val_dict['cfrtcw_2_{}'.format(pft_i)],
             param_val_dict['cfrtcn_1_{}'.format(pft_i)],
             param_val_dict['cfrtcn_2_{}'.format(pft_i)],
-            month_reg['fracrc_{}'.format(pft_i)])
+            temp_val_dict['fracrc_{}'.format(pft_i)])
+        # final potential production and root:shoot ratio accounting for
+        # impacts of grazing
+        # for now: TODO how to store flgrem and fdgrem?
+        flgrem_path = os.path.join(temp_dir, 'flgrem.tif')
+        pygeoprocessing.new_raster_from_base(
+            param_val_dict['grzeff_{}'.format(pft_i)], flgrem_path,
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.05])
+        calc_final_tgprod_rtsh(
+            month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+            temp_val_dict['fracrc_{}'.format(pft_i)],
+            flgrem_path,
+            param_val_dict['grzeff_{}'.format(pft_i)],
+            param_val_dict['gremb_{}'.format(pft_i)],
+            month_reg['tgprod_{}'.format(pft_i)],
+            month_reg['rtsh_{}'.format(pft_i)])
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
