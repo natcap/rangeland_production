@@ -650,6 +650,206 @@ def sum_positive_rasters(*raster_list):
         return numpy.sum(masked_list, axis=0)
 
 
+def _calc_ompc(
+        som1c_2_path, som2c_2_path, som3c_path, bulkd_path, edepth_path,
+        ompc_path):
+    """Estimate total soil organic matter.
+
+    Total soil organic matter is the sum of soil carbon across
+    slow, active, and passive compartments, weighted by bulk
+    density and total modeled soil depth. Lines 220-222, Prelim.f
+
+    Parameters:
+        som1c_2_path (string): path to active organic soil carbon raster
+        som2c_2_path (string): path to slow organic soil carbon raster
+        som3c_path (string): path to passive organic soil carbon raster
+        bulkd_path (string): path to bulk density of soil raster
+        edepth (string): path to depth of soil raster
+        ompc_path (string): path to result, total soil organic matter
+
+    Modifies:
+        the raster indicated by `ompc_path`
+
+    Returns:
+        None
+    """
+    def ompc_op(som1c_2, som2c_2, som3c, bulkd, edepth):
+        """Estimate total soil organic matter.
+
+        Total soil organic matter is the sum of soil carbon across
+        slow, active, and passive compartments, weighted by bulk
+        density and total modeled soil depth. Lines 220-222, Prelim.f
+
+        Parameters:
+            som1c_2_path (string): state variable, active organic soil carbon
+            som2c_2_path (string): state variable, slow organic soil carbon
+            som3c_path (string): state variable, passive organic soil carbon
+            bulkd_path (string): input, bulk density of soil
+            edepth_path (string): parameter, depth of soil for this
+                calculation
+
+        Returns:
+            ompc, total soil organic matter weighted by bulk
+            density.
+        """
+        ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
+        ompc[:] = _TARGET_NODATA
+        valid_mask = (
+            (som1c_2 != som1c_2_nodata)
+            & (som2c_2 != som2c_2_nodata)
+            & (som3c != som3c_nodata)
+            & (bulkd != bulkd_nodata)
+            & (edepth != _IC_NODATA))
+        ompc[valid_mask] = (
+            (som1c_2[valid_mask] + som2c_2[valid_mask]
+                + som3c[valid_mask]) * 1.724
+            / (10000. * bulkd[valid_mask] * edepth[valid_mask]))
+        return ompc
+
+    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
+    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
+    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
+    bulkd_nodata = pygeoprocessing.get_raster_info(bulkd_path)['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            som1c_2_path, som2c_2_path, som3c_path,
+            bulkd_path, edepth_path]],
+        ompc_op, ompc_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+
+def _calc_afiel(
+        sand_path, silt_path, clay_path, ompc_path, bulkd_path, afiel_path):
+    """Calculate field capacity for one soil layer.
+
+    Parameters:
+        sand_path (string): path to proportion sand in soil raster
+        silt_path (string): path to proportion silt in soil raster
+        clay_path (string): path to proportion clay in soil raster
+        ompc_path (string): path to estimated total soil organic matter raster
+        bulkd_path (string): path to bulk density of soil raster
+        afiel_path (string): path to result raster, field capacity for this
+            soil layer
+
+    Modifies:
+        the raster indicated by `afiel_path`
+
+    Returns:
+        None
+    """
+    def afiel_op(sand, silt, clay, ompc, bulkd):
+        """Calculate field capacity for one soil layer.
+
+        Field capacity, maximum soil moisture retention capacity,
+        from Gupta and Larson 1979, 'Estimating soil and water
+        retention characteristics from particle size distribution,
+        organic matter percent and bulk density'. Water Resources
+        Research 15:1633.
+
+        Parameters:
+            sand_path (string): input, proportion sand in soil
+            silt_path (string): input, proportion silt in soil
+            clay_path (string): input, proportion clay in soil
+            ompc_path (string): derived, estimated total soil organic matter
+            bulkd_path (string): input, bulk density of soil
+
+        Returns:
+            afiel, field capacity for this soil layer
+        """
+        afiel = numpy.empty(sand.shape, dtype=numpy.float32)
+        afiel[:] = _TARGET_NODATA
+        valid_mask = (
+            (sand != sand_nodata)
+            & (silt != silt_nodata)
+            & (clay != clay_nodata)
+            & (ompc != _TARGET_NODATA)
+            & (bulkd != bulkd_nodata))
+        afiel[valid_mask] = (
+            0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask]
+            + 0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask]
+            + -0.1434 * bulkd[valid_mask])
+        return afiel
+
+    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
+    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
+    bulkd_nodata = pygeoprocessing.get_raster_info(bulkd_path)['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            sand_path, silt_path, clay_path, ompc_path, bulkd_path]],
+        afiel_op, afiel_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+
+def _calc_awilt(
+        sand_path, silt_path, clay_path, ompc_path, bulkd_path, awilt_path):
+    """Calculate wilting point for one soil layer.
+
+    Wilting point, minimum soil water required by plants before
+    wilting, from Gupta and Larson 1979, 'Estimating soil and
+    water retention characteristics from particle size distribution,
+    organic matter percent and bulk density'. Water Resources
+    Research 15:1633.
+
+    Parameters:
+        sand_path (string): path to proportion sand in soil raster
+        silt_path (string): path to proportion silt in soil raster
+        clay_path (string): path to proportion clay in soil raster
+        ompc_path (string): path to estimated total soil organic matter raster
+        bulkd_path (string): path to bulk density of soil raster
+        awilt_path (string): path to result raster, wilting point for this
+            soil layer
+
+    Modifies:
+        the raster indicated by `awilt_path`
+
+    Returns:
+        None
+    """
+    def awilt_op(sand, silt, clay, ompc, bulkd):
+        """Calculate wilting point for one soil layer.
+
+        Wilting point, minimum soil water required by plants before
+        wilting, from Gupta and Larson 1979, 'Estimating soil and
+        water retention characteristics from particle size distribution,
+        organic matter percent and bulk density'. Water Resources
+        Research 15:1633.
+
+        Parameters:
+            sand_path (string): input, proportion sand in soil
+            silt_path (string): input, proportion silt in soil
+            clay_path (string): input, proportion clay in soil
+            ompc_path (string): derived, estimated total soil organic matter
+            bulkd_path (string): input, bulk density of soil
+
+        Returns:
+            awilt, wilting point for this soil layer
+        """
+        awilt = numpy.empty(sand.shape, dtype=numpy.float32)
+        awilt[:] = _TARGET_NODATA
+        valid_mask = (
+            (sand != sand_nodata)
+            & (silt != silt_nodata)
+            & (clay != clay_nodata)
+            & (ompc != _TARGET_NODATA)
+            & (bulkd != bulkd_nodata))
+        awilt[valid_mask] = (
+            -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask]
+            + 0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask]
+            + 0.02671 * bulkd[valid_mask])
+        return awilt
+
+    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
+    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
+    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
+    bulkd_nodata = pygeoprocessing.get_raster_info(bulkd_path)['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            sand_path, silt_path, clay_path, ompc_path, bulkd_path]],
+        awilt_op, awilt_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+
 def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
                  som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
                  bulk_d_path, pp_reg):
@@ -685,108 +885,35 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     Returns:
         None
     """
-    def calc_ompc(som1c_2, som2c_2, som3c, bulkd, edepth):
-        """Estimate total soil organic matter.
+    def decrement_ompc(ompc_orig_path, ompc_dec_path):
+        """Decrease estimated organic matter to 85% of its value.
 
-        Total soil organic matter is the sum of soil carbon across
-        slow, active, and passive compartments, weighted by bulk
-        density and total modeled soil depth. Lines 220-222, Prelim.f
-
-        Parameters:
-            som1c_2 (numpy.ndarray): state variable, active organic soil carbon
-            som2c_2 (numpy.ndarray): state variable, slow organic soil carbon
-            som3c (numpy.ndarray): state variable, passive organic soil carbon
-            bulkd (numpy.ndarray): input, bulk density of soil
-            edepth (numpy.ndarray): parameter, depth of soil for this
-                calculation
-
-        Returns:
-            ompc, total soil organic matter weighted by bulk
-            density.
-        """
-        ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
-        ompc[:] = _TARGET_NODATA
-        valid_mask = (
-            (som1c_2 != som1c_2_nodata)
-            & (som2c_2 != som2c_2_nodata)
-            & (som3c != som3c_nodata)
-            & (bulkd != bulkd_nodata)
-            & (edepth != _IC_NODATA))
-        ompc[valid_mask] = (
-            (som1c_2[valid_mask] + som2c_2[valid_mask]
-                + som3c[valid_mask]) * 1.724
-            / (10000. * bulkd[valid_mask] * edepth[valid_mask]))
-        return ompc
-
-    def calc_afiel(sand, silt, clay, ompc, bulkd):
-        """Calculate field capacity for one soil layer.
-
-        Field capacity, maximum soil moisture retention capacity,
-        from Gupta and Larson 1979, 'Estimating soil and water
-        retention characteristics from particle size distribution,
-        organic matter percent and bulk density'. Water Resources
-        Research 15:1633.
+        In each subsequent soil layer, estimated organic matter is decreased
+        by 15%, to 85% of its previous value.
 
         Parameters:
-            sand (numpy.ndarray): input, proportion sand in soil
-            silt (numpy.ndarray): input, proportion silt in soil
-            clay (numpy.ndarray): input, proportion clay in soil
-            ompc (numpy.ndarray): derived, estimated total soil organic matter
-            bulkd (numpy.ndarray): input, bulk density of soil
+            ompc_orig_path (string): path to estimated soil organic matter
+                raster
+            ompc_dec_path (string): path to result raster, estimated soil
+                organic matter decreased to 85% of its previous value
+
+        Modifies:
+            the raster indicated by `ompc_dec_path`
 
         Returns:
-            afiel, field capacity for this soil layer
+            None
         """
-        afiel = numpy.empty(sand.shape, dtype=numpy.float32)
-        afiel[:] = _TARGET_NODATA
-        valid_mask = (
-            (sand != sand_nodata)
-            & (silt != silt_nodata)
-            & (clay != clay_nodata)
-            & (ompc != _TARGET_NODATA)
-            & (bulkd != bulkd_nodata))
-        afiel[valid_mask] = (
-            0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask]
-            + 0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask]
-            + -0.1434 * bulkd[valid_mask])
-        return afiel
+        def decrement_op(ompc_orig):
+            """Reduce organic matter to 85% of its previous value."""
+            ompc_dec = numpy.empty(ompc_orig.shape, dtype=numpy.float32)
+            ompc_dec[:] = _TARGET_NODATA
+            valid_mask = (ompc_orig != _TARGET_NODATA)
+            ompc_dec[valid_mask] = ompc_orig[valid_mask] * 0.85
+            return ompc_dec
 
-    def calc_awilt(sand, silt, clay, ompc, bulkd):
-        """Calculate wilting point for one soil layer.
-
-        Wilting point, minimum soil water required by plants before
-        wilting, from Gupta and Larson 1979, 'Estimating soil and
-        water retention characteristics from particle size distribution,
-        organic matter percent and bulk density'. Water Resources
-        Research 15:1633.
-
-        Parameters:
-            sand (numpy.ndarray): input, proportion sand in soil
-            silt (numpy.ndarray): input, proportion silt in soil
-            clay (numpy.ndarray): input, proportion clay in soil
-            ompc (numpy.ndarray): derived, estimated total soil organic matter
-            bulkd (numpy.ndarray): input, bulk density of soil
-
-        Returns:
-            awilt, wilting point for this soil layer
-        """
-        awilt = numpy.empty(sand.shape, dtype=numpy.float32)
-        awilt[:] = _TARGET_NODATA
-        valid_mask = (
-            (sand != sand_nodata)
-            & (silt != silt_nodata)
-            & (clay != clay_nodata)
-            & (ompc != _TARGET_NODATA)
-            & (bulkd != bulkd_nodata))
-        awilt[valid_mask] = (
-            -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask]
-            + 0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask]
-            + 0.02671 * bulkd[valid_mask])
-        return awilt
-
-    def decrement_ompc(ompc):
-        """Decrease estimated organic matter in each subsequent layer."""
-        return ompc * 0.85
+        pygeoprocessing.raster_calculator(
+            [(ompc_orig_path, 1)], decrement_op, ompc_dec_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
 
     # temporary intermediate rasters for calculating field capacity and
     # wilting point
@@ -802,38 +929,24 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
         (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
         _TARGET_NODATA)
 
-    sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
-    silt_nodata = pygeoprocessing.get_raster_info(silt_path)['nodata'][0]
-    clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
-    bulkd_nodata = pygeoprocessing.get_raster_info(bulk_d_path)['nodata'][0]
-    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
-    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
-    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
-
     # estimate total soil organic matter
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [
-            som1c_2_path, som2c_2_path, som3c_path,
-            bulk_d_path, edepth_path]],
-        calc_ompc, ompc_path, gdal.GDT_Float32, _TARGET_NODATA)
+    _calc_ompc(
+        som1c_2_path, som2c_2_path, som3c_path, bulk_d_path, edepth_path,
+        ompc_path)
 
     # calculate field capacity and wilting point for each soil layer,
     # decreasing organic matter content by 85% with each layer
     for lyr in xrange(1, 10):
         afiel_path = pp_reg['afiel_{}_path'.format(lyr)]
         awilt_path = pp_reg['awilt_{}_path'.format(lyr)]
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                sand_path, silt_path, clay_path, ompc_path, bulk_d_path]],
-            calc_afiel, afiel_path, gdal.GDT_Float32, _TARGET_NODATA)
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                sand_path, silt_path, clay_path, ompc_path, bulk_d_path]],
-            calc_awilt, awilt_path, gdal.GDT_Float32, _TARGET_NODATA)
+        _calc_afiel(
+            sand_path, silt_path, clay_path, ompc_path, bulk_d_path,
+            afiel_path)
+        _calc_awilt(
+            sand_path, silt_path, clay_path, ompc_path, bulk_d_path,
+            awilt_path)
         ompc_dec_path = os.path.join(temp_dir, 'ompc{}.tif'.format(lyr))
-        pygeoprocessing.raster_calculator(
-            [(ompc_path, 1)], decrement_ompc, ompc_dec_path, gdal.GDT_Float32,
-            _TARGET_NODATA)
+        decrement_ompc(ompc_path, ompc_dec_path)
         ompc_path = ompc_dec_path
 
     # clean up temporary files
