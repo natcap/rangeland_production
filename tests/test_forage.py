@@ -82,7 +82,7 @@ class foragetests(unittest.TestCase):
                 "Sample input directory not found at %s" % SAMPLE_DATA)
 
         args = foragetests.generate_base_args(self.workspace_dir)
-        forage.execute(args)
+        # forage.execute(args)
 
     def test_shortwave_radiation(self):
         """Test calculation of shortwave radiation outside the atmosphere.
@@ -133,8 +133,419 @@ class foragetests(unittest.TestCase):
         for offset_map, raster_block in pygeoprocessing.iterblocks(
                 shwave_path):
             result_set.update(numpy.unique(raster_block))
-        assert len(result_set) == 1, """One unique value expected in shortwave
-            radiation raster"""
+        assert len(result_set) == 1, (
+            "One unique value expected in shortwave radiation raster")
         test_result = list(result_set)[0]
-        assert abs(test_result - 990.7401) < 0.01, """Test result does not
-            match expected value"""
+        assert abs(test_result - 990.7401) < 0.01, (
+            "Test result does not match expected value")
+
+    def test_calc_ompc(self):
+        """Test the function _calc_ompc against value calculated by hand.
+
+        Use one set of inputs to test the estimation of total organic
+        matter against a result calculated by hand.
+
+        Raises:
+            AssertionError if the raster created by `_calc_ompc`
+                contains more than one unique value
+            AssertionError if the value returned by `_calc_ompc' is
+                not within 0.0001 of the value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        def create_test_raster(target_path, fill_value):
+            """Create a single-pixel raster with value `fill_value`."""
+            geotransform = [0, 1, 0, 44.5, 0, 1]
+            n_cols = 1
+            n_rows = 1
+            n_bands = 1
+            datatype = gdal.GDT_Float32
+            projection = osr.SpatialReference()
+            projection.SetWellKnownGeogCS('WGS84')
+            driver = gdal.GetDriverByName('GTiff')
+            target_raster = driver.Create(
+                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+                datatype)
+            target_raster.SetProjection(projection.ExportToWkt())
+            target_raster.SetGeoTransform(geotransform)
+            target_band = target_raster.GetRasterBand(1)
+            target_band.SetNoDataValue(_TARGET_NODATA)
+            target_band.Fill(fill_value)
+            target_raster = None
+
+        som1c_2_path = os.path.join(self.workspace_dir, 'som1c_2.tif')
+        som2c_2_path = os.path.join(self.workspace_dir, 'som2c_2.tif')
+        som3c_path = os.path.join(self.workspace_dir, 'som3c.tif')
+        bulk_d_path = os.path.join(self.workspace_dir, 'bulkd.tif')
+        edepth_path = os.path.join(self.workspace_dir, 'edepth.tif')
+
+        create_test_raster(som1c_2_path, 42.109)
+        create_test_raster(som2c_2_path, 959.1091)
+        create_test_raster(som3c_path, 588.0574)
+        create_test_raster(bulk_d_path, 1.5)
+        create_test_raster(edepth_path, 0.2)
+
+        ompc_path = os.path.join(self.workspace_dir, 'ompc.tif')
+
+        forage._calc_ompc(
+            som1c_2_path, som2c_2_path, som3c_path, bulk_d_path, edepth_path,
+            ompc_path)
+
+        # assert the value in the raster `ompc_path` is equal to value
+        # calculated by hand
+        result_set = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                ompc_path):
+            result_set.update(numpy.unique(raster_block))
+        assert len(result_set) == 1, (
+            "One unique value expected in organic matter raster")
+        test_result = list(result_set)[0]
+        assert abs(test_result - 0.913304) < 0.0001, (
+            "Test result does not match expected value")
+
+    def test_calc_afiel(self):
+        """Test the function _calc_afiel against value calculated by hand.
+
+        Use one set of inputs to test the estimation of field capacity against
+        a result calculated by hand.
+
+        Raises:
+            AssertionError if the raster created by `_calc_afiel`
+                contains more than one unique value
+            AssertionError if the value returned by `_calc_afiel' is
+                not within 0.0001 of the value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        def create_test_raster(target_path, fill_value):
+            """Create a single-pixel raster with value `fill_value`."""
+            geotransform = [0, 1, 0, 44.5, 0, 1]
+            n_cols = 1
+            n_rows = 1
+            n_bands = 1
+            datatype = gdal.GDT_Float32
+            projection = osr.SpatialReference()
+            projection.SetWellKnownGeogCS('WGS84')
+            driver = gdal.GetDriverByName('GTiff')
+            target_raster = driver.Create(
+                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+                datatype)
+            target_raster.SetProjection(projection.ExportToWkt())
+            target_raster.SetGeoTransform(geotransform)
+            target_band = target_raster.GetRasterBand(1)
+            target_band.SetNoDataValue(_TARGET_NODATA)
+            target_band.Fill(fill_value)
+            target_raster = None
+
+        sand_path = os.path.join(self.workspace_dir, 'sand.tif')
+        silt_path = os.path.join(self.workspace_dir, 'silt.tif')
+        clay_path = os.path.join(self.workspace_dir, 'clay.tif')
+        ompc_path = os.path.join(self.workspace_dir, 'ompc.tif')
+        bulkd_path = os.path.join(self.workspace_dir, 'bulkd.tif')
+
+        create_test_raster(sand_path, 0.39)
+        create_test_raster(silt_path, 0.41)
+        create_test_raster(clay_path, 0.2)
+        create_test_raster(ompc_path, 0.913304)
+        create_test_raster(bulkd_path, 1.5)
+
+        afiel_path = os.path.join(self.workspace_dir, 'afiel.tif')
+
+        forage._calc_afiel(
+            sand_path, silt_path, clay_path, ompc_path, bulkd_path, afiel_path)
+
+        # assert the value in the raster `afiel_path` is equal to value
+        # calculated by hand
+        result_set = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                afiel_path):
+            result_set.update(numpy.unique(raster_block))
+        assert len(result_set) == 1, (
+            "One unique value expected in organic matter raster")
+        test_result = list(result_set)[0]
+        assert abs(test_result - 0.30895) < 0.0001, (
+            "Test result does not match expected value")
+
+    def test_calc_awilt(self):
+        """Test the function _calc_awilt against value calculated by hand.
+
+        Use one set of inputs to test the estimation of wilting point against
+        a result calculated by hand.
+
+        Raises:
+            AssertionError if the raster created by `_calc_awilt`
+                contains more than one unique value
+            AssertionError if the value returned by `_calc_awilt' is
+                not within 0.0001 of the value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        def create_test_raster(target_path, fill_value):
+            """Create a single-pixel raster with value `fill_value`."""
+            geotransform = [0, 1, 0, 44.5, 0, 1]
+            n_cols = 1
+            n_rows = 1
+            n_bands = 1
+            datatype = gdal.GDT_Float32
+            projection = osr.SpatialReference()
+            projection.SetWellKnownGeogCS('WGS84')
+            driver = gdal.GetDriverByName('GTiff')
+            target_raster = driver.Create(
+                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+                datatype)
+            target_raster.SetProjection(projection.ExportToWkt())
+            target_raster.SetGeoTransform(geotransform)
+            target_band = target_raster.GetRasterBand(1)
+            target_band.SetNoDataValue(_TARGET_NODATA)
+            target_band.Fill(fill_value)
+            target_raster = None
+
+        sand_path = os.path.join(self.workspace_dir, 'sand.tif')
+        silt_path = os.path.join(self.workspace_dir, 'silt.tif')
+        clay_path = os.path.join(self.workspace_dir, 'clay.tif')
+        ompc_path = os.path.join(self.workspace_dir, 'ompc.tif')
+        bulkd_path = os.path.join(self.workspace_dir, 'bulkd.tif')
+
+        create_test_raster(sand_path, 0.39)
+        create_test_raster(silt_path, 0.41)
+        create_test_raster(clay_path, 0.2)
+        create_test_raster(ompc_path, 0.913304)
+        create_test_raster(bulkd_path, 1.5)
+
+        awilt_path = os.path.join(self.workspace_dir, 'awilt.tif')
+
+        forage._calc_awilt(
+            sand_path, silt_path, clay_path, ompc_path, bulkd_path, awilt_path)
+
+        # assert the value in the raster `awilt_path` is equal to value
+        # calculated by hand
+        result_set = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                awilt_path):
+            result_set.update(numpy.unique(raster_block))
+        assert len(result_set) == 1, (
+            "One unique value expected in organic matter raster")
+        test_result = list(result_set)[0]
+        assert abs(test_result - 0.201988) < 0.0001, (
+            "Test result does not match expected value")
+
+    def test_afiel_awilt(self):
+        """Test that values calculated by _afiel_awilt are reasonable.
+
+        Use the function `_afiel_awilt` to calculate field capacity and wilting
+        point from randomly generated inputs. Test that calculated field
+        capacity and calculated wilting point are in the range [0.01, 0.9].
+        Introduce nodata values into the input rasters and test that calculated
+        field capacity and wilting point remain in the range [0.01, 0.9].
+
+        Raises:
+            AssertionError if calculated field capacity is outside the
+                acceptable range
+            AssertionError if calculated wilting point is outside the
+                acceptable range
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        def create_random_raster(target_path, lower_bound, upper_bound):
+            """Create a small raster of random floats.
+
+            The raster will have 10 rows and 10 columns and will be in the
+            unprojected coordinate system WGS 1984. The values in the raster
+            will be between `lower_bound` (included) and `upper_bound`
+            (excluded).
+
+            Parameters:
+                target_path (string): path to result raster
+                lower_bound (float): lower limit of range of random values
+                    (included)
+                upper_bound (float): upper limit of range of random values
+                    (excluded)
+
+            Returns:
+                None
+            """
+            geotransform = [0, 1, 0, 44.5, 0, 1]
+            n_cols = 10
+            n_rows = 10
+            n_bands = 1
+            datatype = gdal.GDT_Float32
+            projection = osr.SpatialReference()
+            projection.SetWellKnownGeogCS('WGS84')
+            driver = gdal.GetDriverByName('GTiff')
+            target_raster = driver.Create(
+                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+                datatype)
+            target_raster.SetProjection(projection.ExportToWkt())
+            target_raster.SetGeoTransform(geotransform)
+            target_band = target_raster.GetRasterBand(1)
+            target_band.SetNoDataValue(_TARGET_NODATA)
+
+            random_array = numpy.random.uniform(
+                lower_bound, upper_bound, (n_rows, n_cols))
+            target_band.WriteArray(random_array)
+            target_raster = None
+
+        def create_complementary_raster(
+                raster1_path, raster2_path, result_raster_path):
+            """Create a raster to sum inputs to 1.
+
+            The sum of the two input rasters and the result raster will be
+            1.
+
+            Parameters:
+                raster1_path (string): path to raster of floast between 0 and 1
+                raster2_path (string): path to raster of floast between 0 and 1
+                result_raster_path (string): path to result raster
+
+            Modifies:
+                the raster indicated by `result_raster_path
+
+            Returns:
+                None
+            """
+            def complement_op(input1, input2):
+                """Generate an array that adds to 1 with input1 and input2."""
+                result_raster = numpy.empty(input1.shape, dtype=numpy.float32)
+                result_raster[:] = _TARGET_NODATA
+                valid_mask = (
+                    (input1 != _TARGET_NODATA)
+                    & (input2 != _TARGET_NODATA))
+
+                result_raster[valid_mask] = (
+                    1. - (input1[valid_mask] + input2[valid_mask]))
+                return result_raster
+
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [raster1_path, raster2_path]],
+                complement_op, result_raster_path, gdal.GDT_Float32,
+                _TARGET_NODATA)
+
+        def insert_nodata_values(target_raster):
+            """Insert nodata at arbitrary locations in `target_raster`."""
+            def insert_op(prior_copy):
+                modified_copy = prior_copy
+                n_vals = numpy.random.randint(
+                    0, (prior_copy.shape[0] * prior_copy.shape[1]))
+                insertions = 0
+                while insertions < n_vals:
+                    row = numpy.random.randint(0, prior_copy.shape[0])
+                    col = numpy.random.randint(0, prior_copy.shape[1])
+                    modified_copy[row, col] = _TARGET_NODATA
+                    insertions += 1
+                return modified_copy
+
+            prior_copy = os.path.join(
+                self.workspace_dir, 'prior_to_insert_nodata.tif')
+            shutil.copyfile(target_raster, prior_copy)
+
+            pygeoprocessing.raster_calculator(
+                [(prior_copy, 1)],
+                insert_op, target_raster,
+                gdal.GDT_Float32, _TARGET_NODATA)
+
+            os.remove(prior_copy)
+
+        def assert_all_values_within_range(
+                raster_to_test, minimum_acceptable_value,
+                maximum_acceptable_value):
+            """Test that raster contains values within acceptable range.
+
+            The values within `raster_to_test` that are not null must be
+            greater than or equal to `minimum_acceptable_value` and
+            less than or equal to `maximum_acceptable_value`.
+
+            Raises:
+                AssertionError if values are outside acceptable range
+
+            Returns:
+                None
+            """
+            for offset_map, raster_block in pygeoprocessing.iterblocks(
+                    raster_to_test):
+                min_val = numpy.amin(
+                    raster_block[raster_block != _TARGET_NODATA])
+                assert min_val >= minimum_acceptable_value, (
+                    "Raster contains values smaller than acceptable minimum")
+                max_val = numpy.amax(
+                    raster_block[raster_block != _TARGET_NODATA])
+                assert max_val <= maximum_acceptable_value, (
+                    "Raster contains values larger than acceptable maximum")
+
+        site_param_table = {1: {'edepth': 0.2}}
+        pp_reg = {
+            'afiel_1_path': os.path.join(self.workspace_dir, 'afiel_1.tif'),
+            'afiel_2_path': os.path.join(self.workspace_dir, 'afiel_2.tif'),
+            'afiel_3_path': os.path.join(self.workspace_dir, 'afiel_3.tif'),
+            'afiel_4_path': os.path.join(self.workspace_dir, 'afiel_4.tif'),
+            'afiel_5_path': os.path.join(self.workspace_dir, 'afiel_5.tif'),
+            'afiel_6_path': os.path.join(self.workspace_dir, 'afiel_6.tif'),
+            'afiel_7_path': os.path.join(self.workspace_dir, 'afiel_7.tif'),
+            'afiel_8_path': os.path.join(self.workspace_dir, 'afiel_8.tif'),
+            'afiel_9_path': os.path.join(self.workspace_dir, 'afiel_9.tif'),
+            'awilt_1_path': os.path.join(self.workspace_dir, 'awilt_1.tif'),
+            'awilt_2_path': os.path.join(self.workspace_dir, 'awilt_2.tif'),
+            'awilt_3_path': os.path.join(self.workspace_dir, 'awilt_3.tif'),
+            'awilt_4_path': os.path.join(self.workspace_dir, 'awilt_4.tif'),
+            'awilt_5_path': os.path.join(self.workspace_dir, 'awilt_5.tif'),
+            'awilt_6_path': os.path.join(self.workspace_dir, 'awilt_6.tif'),
+            'awilt_7_path': os.path.join(self.workspace_dir, 'awilt_7.tif'),
+            'awilt_8_path': os.path.join(self.workspace_dir, 'awilt_8.tif'),
+            'awilt_9_path': os.path.join(self.workspace_dir, 'awilt_9.tif')
+            }
+
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+        som1c_2_path = os.path.join(self.workspace_dir, 'som1c_2.tif')
+        som2c_2_path = os.path.join(self.workspace_dir, 'som2c_2.tif')
+        som3c_path = os.path.join(self.workspace_dir, 'som3c.tif')
+        sand_path = os.path.join(self.workspace_dir, 'sand.tif')
+        silt_path = os.path.join(self.workspace_dir, 'silt.tif')
+        clay_path = os.path.join(self.workspace_dir, 'clay.tif')
+        bulk_d_path = os.path.join(self.workspace_dir, 'bulkd.tif')
+
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(som1c_2_path, 35., 55.)
+        create_random_raster(som2c_2_path, 500., 1500.)
+        create_random_raster(som3c_path, 300., 600.)
+        create_random_raster(sand_path, 0., 0.5)
+        create_random_raster(silt_path, 0., 0.5)
+        create_random_raster(bulk_d_path, 0.8, 1.8)
+        create_complementary_raster(sand_path, silt_path, clay_path)
+
+        minimum_acceptable_value = 0.01
+        maximum_acceptable_value = 0.9
+
+        forage._afiel_awilt(
+            site_index_path, site_param_table, som1c_2_path,
+            som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
+            bulk_d_path, pp_reg)
+
+        for key, path in pp_reg.iteritems():
+            assert_all_values_within_range(
+                path, minimum_acceptable_value,
+                maximum_acceptable_value)
+
+        for input_raster in [
+                site_index_path, som1c_2_path, som2c_2_path, som3c_path,
+                sand_path, silt_path, clay_path, bulk_d_path]:
+            insert_nodata_values(input_raster)
+            forage._afiel_awilt(
+                site_index_path, site_param_table, som1c_2_path,
+                som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
+                bulk_d_path, pp_reg)
+            for key, path in pp_reg.iteritems():
+                assert_all_values_within_range(
+                    path, minimum_acceptable_value,
+                    maximum_acceptable_value)
+
