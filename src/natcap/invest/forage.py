@@ -975,6 +975,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         pp_reg['p1co2_2_path']
         pp_reg['fps1s3_path']
         pp_reg['fps2s3_path']
+        pp_reg['wc_path']
 
     Returns:
         None
@@ -1054,7 +1055,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             organic soil carbon
         """
         p1co2_2 = numpy.empty(sand.shape, dtype=numpy.float32)
-        p1co2_2[:] = _TARGET_NODATA
+        p1co2_2[:] = _IC_NODATA
         valid_mask = (
             (p1co2a_2 != _IC_NODATA)
             & (p1co2b_2 != _IC_NODATA)
@@ -1067,7 +1068,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         [(path, 1) for path in [
             param_val_dict['p1co2a_2'],
             param_val_dict['p1co2b_2'], sand_path]],
-        calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _TARGET_NODATA)
+        calc_p1co2_2, pp_reg['p1co2_2_path'], gdal.GDT_Float32, _IC_NODATA)
 
     def calc_fps1s3(ps1s3_1, ps1s3_2, clay):
         """Calculate effect of clay content on decomposition from som1c_2.
