@@ -1187,8 +1187,24 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
     Returns:
         agdrat, the C/<iel> ratio of new material
     """
-    econt = numpy.where(tca > 0., anps / (tca * 2.5), 0.)
-    agdrat = numpy.where(econt > pcemic_3, pcemic_2, pcemic_1 + econt * cemicb)
+    valid_mask = (
+        (anps != _TARGET_NODATA)
+        & (tca != _TARGET_NODATA)
+        & (pcemic_1 != _IC_NODATA)
+        & (pcemic_2 != _IC_NODATA)
+        & (pcemic_3 != _IC_NODATA)
+        & (cemicb != _IC_NODATA))
+    econt = numpy.empty(anps.shape, dtype=numpy.float32)
+    econt[:] = _TARGET_NODATA
+    econt[valid_mask] = numpy.where(
+        tca[valid_mask] > 0., anps[valid_mask] / (tca[valid_mask] * 2.5), 0.)
+
+    agdrat = numpy.empty(anps.shape, dtype=numpy.float32)
+    agdrat[:] = _TARGET_NODATA
+    agdrat[valid_mask] = numpy.where(
+        econt[valid_mask] > pcemic_3[valid_mask],
+        pcemic_2[valid_mask],
+        pcemic_1[valid_mask] + econt[valid_mask] * cemicb[valid_mask])
     return agdrat
 
 
@@ -1275,8 +1291,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
-            pcemic1_2[valid_mask]
-            - pcemic1_1[valid_mask]/pcemic1_3[valid_mask])
+            (pcemic1_2[valid_mask] - pcemic1_1[valid_mask])
+            / pcemic1_3[valid_mask])
 
         rnewas1 = _aboveground_ratio(
             struce_1, strucc_1, pcemic1_1, pcemic1_2, pcemic1_3, cemicb1)
@@ -1335,8 +1351,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         cemicb2 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb2[:] = _TARGET_NODATA
         cemicb2[valid_mask] = (
-            pcemic2_2[valid_mask]
-            - pcemic2_1[valid_mask]/pcemic2_3[valid_mask])
+            (pcemic2_2[valid_mask] - pcemic2_1[valid_mask])
+            / pcemic2_3[valid_mask])
 
         rnewas2 = _aboveground_ratio(
             struce_1, strucc_1, pcemic2_1, pcemic2_2, pcemic2_3, cemicb2)
