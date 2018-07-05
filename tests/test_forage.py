@@ -14,7 +14,9 @@ import pygeoprocessing
 
 SAMPLE_DATA = "C:/Users/ginge/Documents/NatCap/sample_inputs"
 REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
+
 _TARGET_NODATA = -1.0
+_IC_NODATA = numpy.finfo('float32').min
 
 
 class foragetests(unittest.TestCase):
@@ -432,7 +434,7 @@ class foragetests(unittest.TestCase):
                 complement_op, result_raster_path, gdal.GDT_Float32,
                 _TARGET_NODATA)
 
-        def insert_nodata_values(target_raster):
+        def insert_nodata_values_into_raster(target_raster, nodata_value):
             """Insert nodata at arbitrary locations in `target_raster`."""
             def insert_op(prior_copy):
                 modified_copy = prior_copy
@@ -442,7 +444,7 @@ class foragetests(unittest.TestCase):
                 while insertions < n_vals:
                     row = numpy.random.randint(0, prior_copy.shape[0])
                     col = numpy.random.randint(0, prior_copy.shape[1])
-                    modified_copy[row, col] = _TARGET_NODATA
+                    modified_copy[row, col] = nodata_value
                     insertions += 1
                 return modified_copy
 
@@ -453,13 +455,13 @@ class foragetests(unittest.TestCase):
             pygeoprocessing.raster_calculator(
                 [(prior_copy, 1)],
                 insert_op, target_raster,
-                gdal.GDT_Float32, _TARGET_NODATA)
+                gdal.GDT_Float32, nodata_value)
 
             os.remove(prior_copy)
 
-        def assert_all_values_within_range(
+        def assert_all_values_in_raster_within_range(
                 raster_to_test, minimum_acceptable_value,
-                maximum_acceptable_value):
+                maximum_acceptable_value, nodata_value):
             """Test that raster contains values within acceptable range.
 
             The values within `raster_to_test` that are not null must be
@@ -474,14 +476,18 @@ class foragetests(unittest.TestCase):
             """
             for offset_map, raster_block in pygeoprocessing.iterblocks(
                     raster_to_test):
+                if len(raster_block[raster_block != nodata_value]) == 0:
+                    continue
                 min_val = numpy.amin(
-                    raster_block[raster_block != _TARGET_NODATA])
+                    raster_block[raster_block != nodata_value])
                 assert min_val >= minimum_acceptable_value, (
-                    "Raster contains values smaller than acceptable minimum")
+                    "Raster contains values smaller than acceptable "
+                    + "minimum: {}, {}".format(raster_to_test, min_val))
                 max_val = numpy.amax(
-                    raster_block[raster_block != _TARGET_NODATA])
+                    raster_block[raster_block != nodata_value])
                 assert max_val <= maximum_acceptable_value, (
-                    "Raster contains values larger than acceptable maximum")
+                    "Raster contains values larger than acceptable "
+                    + "maximum: {}, {}".format(raster_to_test, max_val))
 
         site_param_table = {1: {'edepth': 0.2}}
         pp_reg = {
@@ -525,6 +531,7 @@ class foragetests(unittest.TestCase):
 
         minimum_acceptable_value = 0.01
         maximum_acceptable_value = 0.9
+        nodata_value = _TARGET_NODATA
 
         forage._afiel_awilt(
             site_index_path, site_param_table, som1c_2_path,
@@ -532,20 +539,311 @@ class foragetests(unittest.TestCase):
             bulk_d_path, pp_reg)
 
         for key, path in pp_reg.iteritems():
-            assert_all_values_within_range(
+            assert_all_values_in_raster_within_range(
                 path, minimum_acceptable_value,
-                maximum_acceptable_value)
+                maximum_acceptable_value, nodata_value)
 
         for input_raster in [
                 site_index_path, som1c_2_path, som2c_2_path, som3c_path,
                 sand_path, silt_path, clay_path, bulk_d_path]:
-            insert_nodata_values(input_raster)
+            insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
             forage._afiel_awilt(
                 site_index_path, site_param_table, som1c_2_path,
                 som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
                 bulk_d_path, pp_reg)
             for key, path in pp_reg.iteritems():
-                assert_all_values_within_range(
+                assert_all_values_in_raster_within_range(
                     path, minimum_acceptable_value,
-                    maximum_acceptable_value)
+                    maximum_acceptable_value, nodata_value)
 
+    def test_persistent_params(self):
+        """Test that values calculated by persistent_params are reasonable.
+
+        Use the function `persistent_params` to calculate wc, eftext, p1co2_2,
+        fps1s3, and fps2s3 from randomly generated inputs. Test that each of
+        the calculated quantities are within the range [0, 1].  Introduce
+        nodata values into the inputs and test that calculated values
+        remain inside the specified ranges.
+
+        Raises:
+            AssertionError if wc is outside the range [0, 1]
+            AssertionError if eftext is outside the range [0, 1]
+            AssertionError if p1co2_2 is outside the range [0, 1]
+            AssertionError if fps1s3 is outside the range [0, 1]
+            AssertionError if fps2s3 is outside the range [0, 1]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        def create_random_raster(target_path, lower_bound, upper_bound):
+            """Create a small raster of random floats.
+
+            The raster will have 10 rows and 10 columns and will be in the
+            unprojected coordinate system WGS 1984. The values in the raster
+            will be between `lower_bound` (included) and `upper_bound`
+            (excluded).
+
+            Parameters:
+                target_path (string): path to result raster
+                lower_bound (float): lower limit of range of random values
+                    (included)
+                upper_bound (float): upper limit of range of random values
+                    (excluded)
+
+            Returns:
+                None
+            """
+            geotransform = [0, 1, 0, 44.5, 0, 1]
+            n_cols = 10
+            n_rows = 10
+            n_bands = 1
+            datatype = gdal.GDT_Float32
+            projection = osr.SpatialReference()
+            projection.SetWellKnownGeogCS('WGS84')
+            driver = gdal.GetDriverByName('GTiff')
+            target_raster = driver.Create(
+                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+                datatype)
+            target_raster.SetProjection(projection.ExportToWkt())
+            target_raster.SetGeoTransform(geotransform)
+            target_band = target_raster.GetRasterBand(1)
+            target_band.SetNoDataValue(_TARGET_NODATA)
+
+            random_array = numpy.random.uniform(
+                lower_bound, upper_bound, (n_rows, n_cols))
+            target_band.WriteArray(random_array)
+            target_raster = None
+
+        def insert_nodata_values_into_raster(target_raster, nodata_value):
+            """Insert nodata at arbitrary locations in `target_raster`."""
+            def insert_op(prior_copy):
+                modified_copy = prior_copy
+                n_vals = numpy.random.randint(
+                    0, (prior_copy.shape[0] * prior_copy.shape[1]))
+                insertions = 0
+                while insertions < n_vals:
+                    row = numpy.random.randint(0, prior_copy.shape[0])
+                    col = numpy.random.randint(0, prior_copy.shape[1])
+                    modified_copy[row, col] = nodata_value
+                    insertions += 1
+                return modified_copy
+
+            prior_copy = os.path.join(
+                self.workspace_dir, 'prior_to_insert_nodata.tif')
+            shutil.copyfile(target_raster, prior_copy)
+
+            pygeoprocessing.raster_calculator(
+                [(prior_copy, 1)],
+                insert_op, target_raster,
+                gdal.GDT_Float32, nodata_value)
+
+            os.remove(prior_copy)
+
+        def assert_all_values_in_raster_within_range(
+                raster_to_test, minimum_acceptable_value,
+                maximum_acceptable_value, nodata_value):
+            """Test that raster contains values within acceptable range.
+
+            The values within `raster_to_test` that are not null must be
+            greater than or equal to `minimum_acceptable_value` and
+            less than or equal to `maximum_acceptable_value`.
+
+            Raises:
+                AssertionError if values are outside acceptable range
+
+            Returns:
+                None
+            """
+            for offset_map, raster_block in pygeoprocessing.iterblocks(
+                    raster_to_test):
+                if len(raster_block[raster_block != nodata_value]) == 0:
+                    continue
+                min_val = numpy.amin(
+                    raster_block[raster_block != nodata_value])
+                assert min_val >= minimum_acceptable_value, (
+                    "Raster contains values smaller than acceptable "
+                    + "minimum: {}, {}".format(raster_to_test, min_val))
+                max_val = numpy.amax(
+                    raster_block[raster_block != nodata_value])
+                assert max_val <= maximum_acceptable_value, (
+                    "Raster contains values larger than acceptable "
+                    + "maximum: {}, {}".format(raster_to_test, max_val))
+
+        site_param_table = {
+            1: {
+                'peftxa': numpy.random.uniform(0.15, 0.35),
+                'peftxb': numpy.random.uniform(0.65, 0.85),
+                'p1co2a_2': numpy.random.uniform(0.1, 0.2),
+                'p1co2b_2': numpy.random.uniform(0.58, 0.78),
+                'ps1s3_1': numpy.random.uniform(0.58, 0.78),
+                'ps1s3_2': numpy.random.uniform(0.02, 0.04),
+                'ps2s3_1': numpy.random.uniform(0.58, 0.78),
+                'ps2s3_2': numpy.random.uniform(0.001, 0.005),
+                'omlech_1': numpy.random.uniform(0.01, 0.05),
+                'omlech_2': numpy.random.uniform(0.6, 0.18)},
+                }
+
+        pp_reg = {
+            'afiel_1_path': os.path.join(self.workspace_dir, 'afiel_1.tif'),
+            'awilt_1_path': os.path.join(self.workspace_dir, 'awilt.tif'),
+            'wc_path': os.path.join(self.workspace_dir, 'wc.tif'),
+            'eftext_path': os.path.join(self.workspace_dir, 'eftext.tif'),
+            'p1co2_2_path': os.path.join(self.workspace_dir, 'p1co2_2.tif'),
+            'fps1s3_path': os.path.join(self.workspace_dir, 'fps1s3.tif'),
+            'fps2s3_path': os.path.join(self.workspace_dir, 'fps2s3.tif'),
+        }
+
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+        sand_path = os.path.join(self.workspace_dir, 'sand.tif')
+        clay_path = os.path.join(self.workspace_dir, 'clay.tif')
+
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(sand_path, 0., 0.5)
+        create_random_raster(clay_path, 0., 0.5)
+        create_random_raster(pp_reg['afiel_1_path'], 0.5, 0.9)
+        create_random_raster(pp_reg['awilt_1_path'], 0.01, 0.49)
+
+        acceptable_range_dict = {
+            'wc_path': {
+                'minimum_acceptable_value': 0,
+                'maximum_acceptable_value': 1,
+                'nodata_value': _TARGET_NODATA,
+                },
+            'eftext_path': {
+                'minimum_acceptable_value': 0,
+                'maximum_acceptable_value': 1,
+                'nodata_value': _IC_NODATA,
+                },
+            'p1co2_2_path': {
+                'minimum_acceptable_value': 0,
+                'maximum_acceptable_value': 1,
+                'nodata_value': _IC_NODATA,
+                },
+            'fps1s3_path': {
+                'minimum_acceptable_value': 0,
+                'maximum_acceptable_value': 1,
+                'nodata_value': _IC_NODATA,
+                },
+            'fps2s3_path': {
+                'minimum_acceptable_value': 0,
+                'maximum_acceptable_value': 1,
+                'nodata_value': _IC_NODATA,
+                },
+        }
+
+        forage._persistent_params(
+            site_index_path, site_param_table, sand_path, clay_path, pp_reg)
+
+        for path, ranges in acceptable_range_dict.iteritems():
+            assert_all_values_in_raster_within_range(
+                pp_reg[path], ranges['minimum_acceptable_value'],
+                ranges['maximum_acceptable_value'],
+                ranges['nodata_value'])
+
+        for input_raster in [
+                site_index_path, sand_path, clay_path]:
+            insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
+            forage._persistent_params(
+                site_index_path, site_param_table, sand_path, clay_path,
+                pp_reg)
+
+            for path, ranges in acceptable_range_dict.iteritems():
+                assert_all_values_in_raster_within_range(
+                    pp_reg[path], ranges['minimum_acceptable_value'],
+                    ranges['maximum_acceptable_value'],
+                    ranges['nodata_value'])
+
+    def test_aboveground_ratio(self):
+        """Test that values calculated by `aboveground_ratio` are valid.
+
+        Use the function `aboveground_ratio` to calculate the C/N or P
+        ratio of decomposing aboveground material from random inputs. Test
+        that the calculated ratio, agdrat, is within the range [1, 150].
+        Introduce nodata values into the inputs and test that calculated
+        agdrat remains inside the range [1, 150].
+
+        Raises:
+            AssertionError if agdrat is outside the range [1, 150]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        def assert_all_values_in_array_within_range(
+                array_to_test, minimum_acceptable_value,
+                maximum_acceptable_value, nodata_value):
+            """Test that array contains values within acceptable range.
+
+            The values within `array_to_test` that are not null must be
+            greater than or equal to `minimum_acceptable_value` and
+            less than or equal to `maximum_acceptable_value`.
+
+            Raises:
+                AssertionError if values are outside acceptable range
+
+            Returns:
+                None
+            """
+            if len(array_to_test[array_to_test != nodata_value]) == 0:
+                pass
+            min_val = numpy.amin(
+                array_to_test[array_to_test != nodata_value])
+            assert min_val >= minimum_acceptable_value, (
+                "Array contains values smaller than acceptable minimum")
+            max_val = numpy.amax(
+                array_to_test[array_to_test != nodata_value])
+            assert max_val <= maximum_acceptable_value, (
+                "Array contains values larger than acceptable maximum")
+
+        def insert_nodata_values_into_array(target_array, nodata_value):
+            """Insert nodata at arbitrary locations in `target_array`."""
+            modified_array = target_array
+            n_vals = numpy.random.randint(
+                0, (target_array.shape[0] * target_array.shape[1]))
+            insertions = 0
+            while insertions < n_vals:
+                row = numpy.random.randint(0, target_array.shape[0])
+                col = numpy.random.randint(0, target_array.shape[1])
+                modified_array[row, col] = nodata_value
+                insertions += 1
+            return modified_array
+
+        array_shape = (10, 10)
+
+        tca = numpy.random.uniform(300, 700, array_shape)
+        anps = numpy.random.uniform(1, numpy.amin(tca), array_shape)
+        pcemic_1 = numpy.random.uniform(12, 20, array_shape)
+        pcemic_2 = numpy.random.uniform(3, 11, array_shape)
+        pcemic_3 = numpy.random.uniform(0.001, 0.1, array_shape)
+        cemicb = (pcemic_2 - pcemic_1) / pcemic_3
+
+        minimum_acceptable_agdrat = 0.01
+        maximum_acceptable_agdrat = 1000
+        agdrat_nodata = _TARGET_NODATA
+
+        agdrat = forage._aboveground_ratio(
+            anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+
+        assert_all_values_in_array_within_range(
+            agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
+            agdrat_nodata)
+
+        for input_array in [anps, tca]:
+            insert_nodata_values_into_array(input_array, _TARGET_NODATA)
+            agdrat = forage._aboveground_ratio(
+                anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+
+            assert_all_values_in_array_within_range(
+                agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
+                agdrat_nodata)
+        for input_array in [pcemic_1, pcemic_2, pcemic_3, cemicb]:
+            insert_nodata_values_into_array(input_array, _IC_NODATA)
+            agdrat = forage._aboveground_ratio(
+                anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+
+            assert_all_values_in_array_within_range(
+                agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
+                agdrat_nodata)
