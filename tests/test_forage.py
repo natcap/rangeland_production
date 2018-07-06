@@ -705,51 +705,108 @@ class foragetests(unittest.TestCase):
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
 
-    # def test_structural_ratios(self):
-    #     """Test that values calculated by `_structural_ratios` are valid.
+    def test_structural_ratios(self):
+        """Test that values calculated by `_structural_ratios` are valid.
 
-    #     Use the function `_structural_ratios` to calculate rnewas_1_1,
-    #     rnewas_1_2, rnewas_2_1, rnewas_2_2, rnewbs_1_2, and rnewbs_2_2 from
-    #     randomly generated inputs. Test that each of the calculated quantities
-    #     are within the range [??, ??].  Introduce nodata values into the inputs
-    #     and test that calculated values remain inside the specified ranges.
+        Use the function `_structural_ratios` to calculate rnewas_1_1,
+        rnewas_1_2, rnewas_2_1, rnewas_2_2, rnewbs_1_2, and rnewbs_2_2 from
+        randomly generated inputs. Test that each of the calculated quantities
+        are within the range [??, ??].  Introduce nodata values into the inputs
+        and test that calculated values remain inside the specified ranges.
 
-    #     Raises:
-    #         AssertionError if rnewas_1_1 is outside the range ____
-    #         AssertionError if rnewas_1_2 is outside the range ____
-    #         AssertionError if rnewas_2_1 is outside the range ____
-    #         AssertionError if rnewas_2_2 is outside the range ____
-    #         AssertionError if rnewbs_1_2 is outside the range ____
-    #         AssertionError if rnewbs_2_2 is outside the range ____
+        Raises:
+            AssertionError if rnewas_1_1 is outside the range ____
+            AssertionError if rnewas_1_2 is outside the range ____
+            AssertionError if rnewas_2_1 is outside the range ____
+            AssertionError if rnewas_2_2 is outside the range ____
+            AssertionError if rnewbs_1_2 is outside the range ____
+            AssertionError if rnewbs_2_2 is outside the range ____
 
-    #     Returns:
-    #         None
-    #     """
-    #     from natcap.invest import forage
+        Returns:
+            None
+        """
+        from natcap.invest import forage
 
-    #     site_param_table = {
-    #         1: {
-    #             'pcemic1_2': numpy.random.uniform(0.15, 0.35),
-    #             'pcemic1_1': numpy.random.uniform(0.65, 0.85),
-    #             'pcemic1_3': numpy.random.uniform(0.1, 0.2),
-    #             'pcemic2_2': numpy.random.uniform(0.58, 0.78),
-    #             'pcemic2_1': numpy.random.uniform(0.58, 0.78),
-    #             'pcemic2_3': numpy.random.uniform(0.02, 0.04),
-    #             'rad1p_1': numpy.random.uniform(0.58, 0.78),
-    #             'rad1p_2': numpy.random.uniform(0.001, 0.005),
-    #             'rad1p_3': numpy.random.uniform(0.01, 0.05),
-    #             'varat1_1': numpy.random.uniform(0.6, 0.18),
-    #             'varat22_1': numpy.random.uniform(0.6, 0.18)},
-    #             }
+        site_param_table = {
+            1: {
+                'pcemic1_2_1': numpy.random.uniform(5, 12),
+                'pcemic1_1_1': numpy.random.uniform(13, 23),
+                'pcemic1_3_1': numpy.random.uniform(0.01, 0.05),
+                'pcemic2_2_1': numpy.random.uniform(5, 12),
+                'pcemic2_1_1': numpy.random.uniform(13, 23),
+                'pcemic2_3_1': numpy.random.uniform(0.01, 0.05),
+                'rad1p_1_1': numpy.random.uniform(8, 16),
+                'rad1p_2_1': numpy.random.uniform(2, 5),
+                'rad1p_3_1': numpy.random.uniform(2, 5),
+                'varat1_1_1': numpy.random.uniform(12, 16),
+                'varat22_1_1': numpy.random.uniform(15, 25),
 
-    #     pp_reg = {
-    #         'afiel_1_path': os.path.join(self.workspace_dir, 'afiel_1.tif'),
-    #         'awilt_1_path': os.path.join(self.workspace_dir, 'awilt.tif'),
-    #         'wc_path': os.path.join(self.workspace_dir, 'wc.tif'),
-    #         'eftext_path': os.path.join(self.workspace_dir, 'eftext.tif'),
-    #         'p1co2_2_path': os.path.join(self.workspace_dir, 'p1co2_2.tif'),
-    #         'fps1s3_path': os.path.join(self.workspace_dir, 'fps1s3.tif'),
-    #         'fps2s3_path': os.path.join(self.workspace_dir, 'fps2s3.tif'),
-    #     }
+                'pcemic1_2_2': numpy.random.uniform(90, 110),
+                'pcemic1_1_2': numpy.random.uniform(170, 230),
+                'pcemic1_3_2': numpy.random.uniform(0.0005, 0.0025),
+                'pcemic2_2_2': numpy.random.uniform(75, 125),
+                'pcemic2_1_2': numpy.random.uniform(200, 300),
+                'pcemic2_3_2': numpy.random.uniform(0.0005, 0.0025),
+                'rad1p_1_2': numpy.random.uniform(200, 300),
+                'rad1p_2_2': numpy.random.uniform(3, 7),
+                'rad1p_3_2': numpy.random.uniform(50, 150),
+                'varat1_1_2': numpy.random.uniform(125, 175),
+                'varat22_1_2': numpy.random.uniform(350, 450)},
+                }
 
-    #     forage._structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg)
+        sv_reg = {
+            'strucc_1_path': os.path.join(self.workspace_dir, 'strucc_1.tif'),
+            'struce_1_1_path': os.path.join(
+                self.workspace_dir, 'struce_1_1.tif'),
+            'struce_1_2_path': os.path.join(
+                self.workspace_dir, 'struce_1_2.tif'),
+
+        }
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(sv_reg['strucc_1_path'], 120, 180)
+        create_random_raster(sv_reg['struce_1_1_path'], 0.5, 1)
+        create_random_raster(sv_reg['struce_1_2_path'], 0.1, 0.5)
+
+        pp_reg = {
+            'rnewas_1_1_path': os.path.join(
+                self.workspace_dir, 'rnewas_1_1.tif'),
+            'rnewas_1_2_path': os.path.join(
+                self.workspace_dir, 'rnewas_1_2.tif'),
+            'rnewas_2_1_path': os.path.join(
+                self.workspace_dir, 'rnewas_2_1.tif'),
+            'rnewas_2_2_path': os.path.join(
+                self.workspace_dir, 'rnewas_2_2.tif'),
+            'rnewbs_1_1_path': os.path.join(
+                self.workspace_dir, 'rnewbs_1_2.tif'),
+            'rnewbs_1_2_path': os.path.join(
+                self.workspace_dir, 'rnewbs_2_2.tif'),
+            'rnewbs_2_1_path': os.path.join(
+                self.workspace_dir, 'rnewbs_1_2.tif'),
+            'rnewbs_2_2_path': os.path.join(
+                self.workspace_dir, 'rnewbs_2_2.tif'),
+        }
+
+        minimum_acceptable_value = 1
+        maximum_acceptable_value = 1200
+        nodata_value = _TARGET_NODATA
+
+        forage._structural_ratios(
+            site_index_path, site_param_table, sv_reg, pp_reg)
+
+        for key, path in pp_reg.iteritems():
+            assert_all_values_in_raster_within_range(
+                path, minimum_acceptable_value,
+                maximum_acceptable_value, nodata_value)
+
+        for input_raster in [
+                site_index_path, sv_reg['strucc_1_path'],
+                sv_reg['struce_1_1_path'], sv_reg['struce_1_2_path']]:
+            insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
+            forage._structural_ratios(
+                site_index_path, site_param_table, sv_reg, pp_reg)
+
+            for key, path in pp_reg.iteritems():
+                assert_all_values_in_raster_within_range(
+                    path, minimum_acceptable_value,
+                    maximum_acceptable_value, nodata_value)

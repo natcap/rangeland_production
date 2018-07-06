@@ -1230,7 +1230,9 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         pp_reg['rnewas_1_2_path']
         pp_reg['rnewas_2_1_path']
         pp_reg['rnewas_2_2_path']
+        pp_reg['rnewbs_1_1_path']
         pp_reg['rnewbs_1_2_path']
+        pp_reg['rnewbs_2_2_path']
         pp_reg['rnewbs_2_2_path']
 
     Returns:
