@@ -19,6 +19,201 @@ _TARGET_NODATA = -1.0
 _IC_NODATA = numpy.finfo('float32').min
 
 
+def create_random_raster(target_path, lower_bound, upper_bound):
+    """Create a small raster of random floats.
+
+    The raster will have 10 rows and 10 columns and will be in the
+    unprojected coordinate system WGS 1984. The values in the raster
+    will be between `lower_bound` (included) and `upper_bound`
+    (excluded).
+
+    Parameters:
+        target_path (string): path to result raster
+        lower_bound (float): lower limit of range of random values
+            (included)
+        upper_bound (float): upper limit of range of random values
+            (excluded)
+
+    Returns:
+        None
+    """
+    geotransform = [0, 1, 0, 44.5, 0, 1]
+    n_cols = 10
+    n_rows = 10
+    n_bands = 1
+    datatype = gdal.GDT_Float32
+    projection = osr.SpatialReference()
+    projection.SetWellKnownGeogCS('WGS84')
+    driver = gdal.GetDriverByName('GTiff')
+    target_raster = driver.Create(
+        target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+        datatype)
+    target_raster.SetProjection(projection.ExportToWkt())
+    target_raster.SetGeoTransform(geotransform)
+    target_band = target_raster.GetRasterBand(1)
+    target_band.SetNoDataValue(_TARGET_NODATA)
+
+    random_array = numpy.random.uniform(
+        lower_bound, upper_bound, (n_rows, n_cols))
+    target_band.WriteArray(random_array)
+    target_raster = None
+
+
+def create_complementary_raster(
+        raster1_path, raster2_path, result_raster_path):
+    """Create a raster to sum inputs to 1.
+
+    The sum of the two input rasters and the result raster will be
+    1.
+
+    Parameters:
+        raster1_path (string): path to raster of floast between 0 and 1
+        raster2_path (string): path to raster of floast between 0 and 1
+        result_raster_path (string): path to result raster
+
+    Modifies:
+        the raster indicated by `result_raster_path
+
+    Returns:
+        None
+    """
+    def complement_op(input1, input2):
+        """Generate an array that adds to 1 with input1 and input2."""
+        result_raster = numpy.empty(input1.shape, dtype=numpy.float32)
+        result_raster[:] = _TARGET_NODATA
+        valid_mask = (
+            (input1 != _TARGET_NODATA)
+            & (input2 != _TARGET_NODATA))
+
+        result_raster[valid_mask] = (
+            1. - (input1[valid_mask] + input2[valid_mask]))
+        return result_raster
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [raster1_path, raster2_path]],
+        complement_op, result_raster_path, gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+
+def insert_nodata_values_into_raster(target_raster, nodata_value):
+    """Insert nodata at arbitrary locations in `target_raster`."""
+    def insert_op(prior_copy):
+        modified_copy = prior_copy
+        n_vals = numpy.random.randint(
+            0, (prior_copy.shape[0] * prior_copy.shape[1]))
+        insertions = 0
+        while insertions < n_vals:
+            row = numpy.random.randint(0, prior_copy.shape[0])
+            col = numpy.random.randint(0, prior_copy.shape[1])
+            modified_copy[row, col] = nodata_value
+            insertions += 1
+        return modified_copy
+
+    prior_copy = os.path.join(
+        os.path.dirname(target_raster), 'prior_to_insert_nodata.tif')
+    shutil.copyfile(target_raster, prior_copy)
+
+    pygeoprocessing.raster_calculator(
+        [(prior_copy, 1)],
+        insert_op, target_raster,
+        gdal.GDT_Float32, nodata_value)
+
+    os.remove(prior_copy)
+
+
+def assert_all_values_in_raster_within_range(
+        raster_to_test, minimum_acceptable_value,
+        maximum_acceptable_value, nodata_value):
+    """Test that `raster_to_test` contains values within acceptable range.
+
+    The values within `raster_to_test` that are not null must be
+    greater than or equal to `minimum_acceptable_value` and
+    less than or equal to `maximum_acceptable_value`.
+
+    Raises:
+        AssertionError if values are outside acceptable range
+
+    Returns:
+        None
+    """
+    for offset_map, raster_block in pygeoprocessing.iterblocks(
+            raster_to_test):
+        if len(raster_block[raster_block != nodata_value]) == 0:
+            continue
+        min_val = numpy.amin(
+            raster_block[raster_block != nodata_value])
+        assert min_val >= minimum_acceptable_value, (
+            "Raster contains values smaller than acceptable "
+            + "minimum: {}, {}".format(raster_to_test, min_val))
+        max_val = numpy.amax(
+            raster_block[raster_block != nodata_value])
+        assert max_val <= maximum_acceptable_value, (
+            "Raster contains values larger than acceptable "
+            + "maximum: {}, {}".format(raster_to_test, max_val))
+
+
+def create_constant_raster(target_path, fill_value):
+    """Create a single-pixel raster with value `fill_value`."""
+    geotransform = [0, 1, 0, 44.5, 0, 1]
+    n_cols = 1
+    n_rows = 1
+    n_bands = 1
+    datatype = gdal.GDT_Float32
+    projection = osr.SpatialReference()
+    projection.SetWellKnownGeogCS('WGS84')
+    driver = gdal.GetDriverByName('GTiff')
+    target_raster = driver.Create(
+        target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+        datatype)
+    target_raster.SetProjection(projection.ExportToWkt())
+    target_raster.SetGeoTransform(geotransform)
+    target_band = target_raster.GetRasterBand(1)
+    target_band.SetNoDataValue(_TARGET_NODATA)
+    target_band.Fill(fill_value)
+    target_raster = None
+
+
+def assert_all_values_in_array_within_range(
+        array_to_test, minimum_acceptable_value,
+        maximum_acceptable_value, nodata_value):
+    """Test that `array_to_test` contains values within acceptable range.
+
+    The values within `array_to_test` that are not null must be
+    greater than or equal to `minimum_acceptable_value` and
+    less than or equal to `maximum_acceptable_value`.
+
+    Raises:
+        AssertionError if values are outside acceptable range
+
+    Returns:
+        None
+    """
+    if len(array_to_test[array_to_test != nodata_value]) == 0:
+        pass
+    min_val = numpy.amin(
+        array_to_test[array_to_test != nodata_value])
+    assert min_val >= minimum_acceptable_value, (
+        "Array contains values smaller than acceptable minimum")
+    max_val = numpy.amax(
+        array_to_test[array_to_test != nodata_value])
+    assert max_val <= maximum_acceptable_value, (
+        "Array contains values larger than acceptable maximum")
+
+
+def insert_nodata_values_into_array(target_array, nodata_value):
+    """Insert nodata at arbitrary locations in `target_array`."""
+    modified_array = target_array
+    n_vals = numpy.random.randint(
+        0, (target_array.shape[0] * target_array.shape[1]))
+    insertions = 0
+    while insertions < n_vals:
+        row = numpy.random.randint(0, target_array.shape[0])
+        col = numpy.random.randint(0, target_array.shape[1])
+        modified_array[row, col] = nodata_value
+        insertions += 1
+    return modified_array
+
+
 class foragetests(unittest.TestCase):
     """Regression tests for InVEST forage model."""
 
@@ -107,23 +302,7 @@ class foragetests(unittest.TestCase):
         template_raster = os.path.join(
             self.workspace_dir, 'template_raster.tif')
 
-        # create_test_raster of 1 pixel
-        geotransform = [0, 1, 0, 44.5, 0, 1]
-        n_cols = 1
-        n_rows = 1
-        n_bands = 1
-        datatype = gdal.GDT_Float32
-        projection = osr.SpatialReference()
-        projection.SetWellKnownGeogCS('WGS84')
-        driver = gdal.GetDriverByName('GTiff')
-        target_raster = driver.Create(
-            template_raster.encode('utf-8'), n_cols, n_rows, n_bands, datatype)
-        target_raster.SetProjection(projection.ExportToWkt())
-        target_raster.SetGeoTransform(geotransform)
-        target_band = target_raster.GetRasterBand(1)
-        target_band.SetNoDataValue(_TARGET_NODATA)
-        target_band.Fill(fill_value)
-        target_raster = None
+        create_constant_raster(template_raster, fill_value)
 
         month = 5
         shwave_path = os.path.join(self.workspace_dir, 'shwave.tif')
@@ -142,7 +321,7 @@ class foragetests(unittest.TestCase):
             "Test result does not match expected value")
 
     def test_calc_ompc(self):
-        """Test the function _calc_ompc against value calculated by hand.
+        """Test the function `_calc_ompc` against value calculated by hand.
 
         Use one set of inputs to test the estimation of total organic
         matter against a result calculated by hand.
@@ -158,37 +337,17 @@ class foragetests(unittest.TestCase):
         """
         from natcap.invest import forage
 
-        def create_test_raster(target_path, fill_value):
-            """Create a single-pixel raster with value `fill_value`."""
-            geotransform = [0, 1, 0, 44.5, 0, 1]
-            n_cols = 1
-            n_rows = 1
-            n_bands = 1
-            datatype = gdal.GDT_Float32
-            projection = osr.SpatialReference()
-            projection.SetWellKnownGeogCS('WGS84')
-            driver = gdal.GetDriverByName('GTiff')
-            target_raster = driver.Create(
-                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
-                datatype)
-            target_raster.SetProjection(projection.ExportToWkt())
-            target_raster.SetGeoTransform(geotransform)
-            target_band = target_raster.GetRasterBand(1)
-            target_band.SetNoDataValue(_TARGET_NODATA)
-            target_band.Fill(fill_value)
-            target_raster = None
-
         som1c_2_path = os.path.join(self.workspace_dir, 'som1c_2.tif')
         som2c_2_path = os.path.join(self.workspace_dir, 'som2c_2.tif')
         som3c_path = os.path.join(self.workspace_dir, 'som3c.tif')
         bulk_d_path = os.path.join(self.workspace_dir, 'bulkd.tif')
         edepth_path = os.path.join(self.workspace_dir, 'edepth.tif')
 
-        create_test_raster(som1c_2_path, 42.109)
-        create_test_raster(som2c_2_path, 959.1091)
-        create_test_raster(som3c_path, 588.0574)
-        create_test_raster(bulk_d_path, 1.5)
-        create_test_raster(edepth_path, 0.2)
+        create_constant_raster(som1c_2_path, 42.109)
+        create_constant_raster(som2c_2_path, 959.1091)
+        create_constant_raster(som3c_path, 588.0574)
+        create_constant_raster(bulk_d_path, 1.5)
+        create_constant_raster(edepth_path, 0.2)
 
         ompc_path = os.path.join(self.workspace_dir, 'ompc.tif')
 
@@ -209,7 +368,7 @@ class foragetests(unittest.TestCase):
             "Test result does not match expected value")
 
     def test_calc_afiel(self):
-        """Test the function _calc_afiel against value calculated by hand.
+        """Test the function `_calc_afiel` against value calculated by hand.
 
         Use one set of inputs to test the estimation of field capacity against
         a result calculated by hand.
@@ -225,37 +384,17 @@ class foragetests(unittest.TestCase):
         """
         from natcap.invest import forage
 
-        def create_test_raster(target_path, fill_value):
-            """Create a single-pixel raster with value `fill_value`."""
-            geotransform = [0, 1, 0, 44.5, 0, 1]
-            n_cols = 1
-            n_rows = 1
-            n_bands = 1
-            datatype = gdal.GDT_Float32
-            projection = osr.SpatialReference()
-            projection.SetWellKnownGeogCS('WGS84')
-            driver = gdal.GetDriverByName('GTiff')
-            target_raster = driver.Create(
-                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
-                datatype)
-            target_raster.SetProjection(projection.ExportToWkt())
-            target_raster.SetGeoTransform(geotransform)
-            target_band = target_raster.GetRasterBand(1)
-            target_band.SetNoDataValue(_TARGET_NODATA)
-            target_band.Fill(fill_value)
-            target_raster = None
-
         sand_path = os.path.join(self.workspace_dir, 'sand.tif')
         silt_path = os.path.join(self.workspace_dir, 'silt.tif')
         clay_path = os.path.join(self.workspace_dir, 'clay.tif')
         ompc_path = os.path.join(self.workspace_dir, 'ompc.tif')
         bulkd_path = os.path.join(self.workspace_dir, 'bulkd.tif')
 
-        create_test_raster(sand_path, 0.39)
-        create_test_raster(silt_path, 0.41)
-        create_test_raster(clay_path, 0.2)
-        create_test_raster(ompc_path, 0.913304)
-        create_test_raster(bulkd_path, 1.5)
+        create_constant_raster(sand_path, 0.39)
+        create_constant_raster(silt_path, 0.41)
+        create_constant_raster(clay_path, 0.2)
+        create_constant_raster(ompc_path, 0.913304)
+        create_constant_raster(bulkd_path, 1.5)
 
         afiel_path = os.path.join(self.workspace_dir, 'afiel.tif')
 
@@ -275,7 +414,7 @@ class foragetests(unittest.TestCase):
             "Test result does not match expected value")
 
     def test_calc_awilt(self):
-        """Test the function _calc_awilt against value calculated by hand.
+        """Test the function `_calc_awilt` against value calculated by hand.
 
         Use one set of inputs to test the estimation of wilting point against
         a result calculated by hand.
@@ -291,37 +430,17 @@ class foragetests(unittest.TestCase):
         """
         from natcap.invest import forage
 
-        def create_test_raster(target_path, fill_value):
-            """Create a single-pixel raster with value `fill_value`."""
-            geotransform = [0, 1, 0, 44.5, 0, 1]
-            n_cols = 1
-            n_rows = 1
-            n_bands = 1
-            datatype = gdal.GDT_Float32
-            projection = osr.SpatialReference()
-            projection.SetWellKnownGeogCS('WGS84')
-            driver = gdal.GetDriverByName('GTiff')
-            target_raster = driver.Create(
-                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
-                datatype)
-            target_raster.SetProjection(projection.ExportToWkt())
-            target_raster.SetGeoTransform(geotransform)
-            target_band = target_raster.GetRasterBand(1)
-            target_band.SetNoDataValue(_TARGET_NODATA)
-            target_band.Fill(fill_value)
-            target_raster = None
-
         sand_path = os.path.join(self.workspace_dir, 'sand.tif')
         silt_path = os.path.join(self.workspace_dir, 'silt.tif')
         clay_path = os.path.join(self.workspace_dir, 'clay.tif')
         ompc_path = os.path.join(self.workspace_dir, 'ompc.tif')
         bulkd_path = os.path.join(self.workspace_dir, 'bulkd.tif')
 
-        create_test_raster(sand_path, 0.39)
-        create_test_raster(silt_path, 0.41)
-        create_test_raster(clay_path, 0.2)
-        create_test_raster(ompc_path, 0.913304)
-        create_test_raster(bulkd_path, 1.5)
+        create_constant_raster(sand_path, 0.39)
+        create_constant_raster(silt_path, 0.41)
+        create_constant_raster(clay_path, 0.2)
+        create_constant_raster(ompc_path, 0.913304)
+        create_constant_raster(bulkd_path, 1.5)
 
         awilt_path = os.path.join(self.workspace_dir, 'awilt.tif')
 
@@ -341,7 +460,7 @@ class foragetests(unittest.TestCase):
             "Test result does not match expected value")
 
     def test_afiel_awilt(self):
-        """Test that values calculated by _afiel_awilt are reasonable.
+        """Test that values calculated by `_afiel_awilt` are reasonable.
 
         Use the function `_afiel_awilt` to calculate field capacity and wilting
         point from randomly generated inputs. Test that calculated field
@@ -359,135 +478,6 @@ class foragetests(unittest.TestCase):
             None
         """
         from natcap.invest import forage
-
-        def create_random_raster(target_path, lower_bound, upper_bound):
-            """Create a small raster of random floats.
-
-            The raster will have 10 rows and 10 columns and will be in the
-            unprojected coordinate system WGS 1984. The values in the raster
-            will be between `lower_bound` (included) and `upper_bound`
-            (excluded).
-
-            Parameters:
-                target_path (string): path to result raster
-                lower_bound (float): lower limit of range of random values
-                    (included)
-                upper_bound (float): upper limit of range of random values
-                    (excluded)
-
-            Returns:
-                None
-            """
-            geotransform = [0, 1, 0, 44.5, 0, 1]
-            n_cols = 10
-            n_rows = 10
-            n_bands = 1
-            datatype = gdal.GDT_Float32
-            projection = osr.SpatialReference()
-            projection.SetWellKnownGeogCS('WGS84')
-            driver = gdal.GetDriverByName('GTiff')
-            target_raster = driver.Create(
-                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
-                datatype)
-            target_raster.SetProjection(projection.ExportToWkt())
-            target_raster.SetGeoTransform(geotransform)
-            target_band = target_raster.GetRasterBand(1)
-            target_band.SetNoDataValue(_TARGET_NODATA)
-
-            random_array = numpy.random.uniform(
-                lower_bound, upper_bound, (n_rows, n_cols))
-            target_band.WriteArray(random_array)
-            target_raster = None
-
-        def create_complementary_raster(
-                raster1_path, raster2_path, result_raster_path):
-            """Create a raster to sum inputs to 1.
-
-            The sum of the two input rasters and the result raster will be
-            1.
-
-            Parameters:
-                raster1_path (string): path to raster of floast between 0 and 1
-                raster2_path (string): path to raster of floast between 0 and 1
-                result_raster_path (string): path to result raster
-
-            Modifies:
-                the raster indicated by `result_raster_path
-
-            Returns:
-                None
-            """
-            def complement_op(input1, input2):
-                """Generate an array that adds to 1 with input1 and input2."""
-                result_raster = numpy.empty(input1.shape, dtype=numpy.float32)
-                result_raster[:] = _TARGET_NODATA
-                valid_mask = (
-                    (input1 != _TARGET_NODATA)
-                    & (input2 != _TARGET_NODATA))
-
-                result_raster[valid_mask] = (
-                    1. - (input1[valid_mask] + input2[valid_mask]))
-                return result_raster
-
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in [raster1_path, raster2_path]],
-                complement_op, result_raster_path, gdal.GDT_Float32,
-                _TARGET_NODATA)
-
-        def insert_nodata_values_into_raster(target_raster, nodata_value):
-            """Insert nodata at arbitrary locations in `target_raster`."""
-            def insert_op(prior_copy):
-                modified_copy = prior_copy
-                n_vals = numpy.random.randint(
-                    0, (prior_copy.shape[0] * prior_copy.shape[1]))
-                insertions = 0
-                while insertions < n_vals:
-                    row = numpy.random.randint(0, prior_copy.shape[0])
-                    col = numpy.random.randint(0, prior_copy.shape[1])
-                    modified_copy[row, col] = nodata_value
-                    insertions += 1
-                return modified_copy
-
-            prior_copy = os.path.join(
-                self.workspace_dir, 'prior_to_insert_nodata.tif')
-            shutil.copyfile(target_raster, prior_copy)
-
-            pygeoprocessing.raster_calculator(
-                [(prior_copy, 1)],
-                insert_op, target_raster,
-                gdal.GDT_Float32, nodata_value)
-
-            os.remove(prior_copy)
-
-        def assert_all_values_in_raster_within_range(
-                raster_to_test, minimum_acceptable_value,
-                maximum_acceptable_value, nodata_value):
-            """Test that raster contains values within acceptable range.
-
-            The values within `raster_to_test` that are not null must be
-            greater than or equal to `minimum_acceptable_value` and
-            less than or equal to `maximum_acceptable_value`.
-
-            Raises:
-                AssertionError if values are outside acceptable range
-
-            Returns:
-                None
-            """
-            for offset_map, raster_block in pygeoprocessing.iterblocks(
-                    raster_to_test):
-                if len(raster_block[raster_block != nodata_value]) == 0:
-                    continue
-                min_val = numpy.amin(
-                    raster_block[raster_block != nodata_value])
-                assert min_val >= minimum_acceptable_value, (
-                    "Raster contains values smaller than acceptable "
-                    + "minimum: {}, {}".format(raster_to_test, min_val))
-                max_val = numpy.amax(
-                    raster_block[raster_block != nodata_value])
-                assert max_val <= maximum_acceptable_value, (
-                    "Raster contains values larger than acceptable "
-                    + "maximum: {}, {}".format(raster_to_test, max_val))
 
         site_param_table = {1: {'edepth': 0.2}}
         pp_reg = {
@@ -557,7 +547,7 @@ class foragetests(unittest.TestCase):
                     maximum_acceptable_value, nodata_value)
 
     def test_persistent_params(self):
-        """Test that values calculated by persistent_params are reasonable.
+        """Test that values calculated by `persistent_params` are reasonable.
 
         Use the function `persistent_params` to calculate wc, eftext, p1co2_2,
         fps1s3, and fps2s3 from randomly generated inputs. Test that each of
@@ -576,100 +566,6 @@ class foragetests(unittest.TestCase):
             None
         """
         from natcap.invest import forage
-
-        def create_random_raster(target_path, lower_bound, upper_bound):
-            """Create a small raster of random floats.
-
-            The raster will have 10 rows and 10 columns and will be in the
-            unprojected coordinate system WGS 1984. The values in the raster
-            will be between `lower_bound` (included) and `upper_bound`
-            (excluded).
-
-            Parameters:
-                target_path (string): path to result raster
-                lower_bound (float): lower limit of range of random values
-                    (included)
-                upper_bound (float): upper limit of range of random values
-                    (excluded)
-
-            Returns:
-                None
-            """
-            geotransform = [0, 1, 0, 44.5, 0, 1]
-            n_cols = 10
-            n_rows = 10
-            n_bands = 1
-            datatype = gdal.GDT_Float32
-            projection = osr.SpatialReference()
-            projection.SetWellKnownGeogCS('WGS84')
-            driver = gdal.GetDriverByName('GTiff')
-            target_raster = driver.Create(
-                target_path.encode('utf-8'), n_cols, n_rows, n_bands,
-                datatype)
-            target_raster.SetProjection(projection.ExportToWkt())
-            target_raster.SetGeoTransform(geotransform)
-            target_band = target_raster.GetRasterBand(1)
-            target_band.SetNoDataValue(_TARGET_NODATA)
-
-            random_array = numpy.random.uniform(
-                lower_bound, upper_bound, (n_rows, n_cols))
-            target_band.WriteArray(random_array)
-            target_raster = None
-
-        def insert_nodata_values_into_raster(target_raster, nodata_value):
-            """Insert nodata at arbitrary locations in `target_raster`."""
-            def insert_op(prior_copy):
-                modified_copy = prior_copy
-                n_vals = numpy.random.randint(
-                    0, (prior_copy.shape[0] * prior_copy.shape[1]))
-                insertions = 0
-                while insertions < n_vals:
-                    row = numpy.random.randint(0, prior_copy.shape[0])
-                    col = numpy.random.randint(0, prior_copy.shape[1])
-                    modified_copy[row, col] = nodata_value
-                    insertions += 1
-                return modified_copy
-
-            prior_copy = os.path.join(
-                self.workspace_dir, 'prior_to_insert_nodata.tif')
-            shutil.copyfile(target_raster, prior_copy)
-
-            pygeoprocessing.raster_calculator(
-                [(prior_copy, 1)],
-                insert_op, target_raster,
-                gdal.GDT_Float32, nodata_value)
-
-            os.remove(prior_copy)
-
-        def assert_all_values_in_raster_within_range(
-                raster_to_test, minimum_acceptable_value,
-                maximum_acceptable_value, nodata_value):
-            """Test that raster contains values within acceptable range.
-
-            The values within `raster_to_test` that are not null must be
-            greater than or equal to `minimum_acceptable_value` and
-            less than or equal to `maximum_acceptable_value`.
-
-            Raises:
-                AssertionError if values are outside acceptable range
-
-            Returns:
-                None
-            """
-            for offset_map, raster_block in pygeoprocessing.iterblocks(
-                    raster_to_test):
-                if len(raster_block[raster_block != nodata_value]) == 0:
-                    continue
-                min_val = numpy.amin(
-                    raster_block[raster_block != nodata_value])
-                assert min_val >= minimum_acceptable_value, (
-                    "Raster contains values smaller than acceptable "
-                    + "minimum: {}, {}".format(raster_to_test, min_val))
-                max_val = numpy.amax(
-                    raster_block[raster_block != nodata_value])
-                assert max_val <= maximum_acceptable_value, (
-                    "Raster contains values larger than acceptable "
-                    + "maximum: {}, {}".format(raster_to_test, max_val))
 
         site_param_table = {
             1: {
@@ -772,45 +668,6 @@ class foragetests(unittest.TestCase):
         """
         from natcap.invest import forage
 
-        def assert_all_values_in_array_within_range(
-                array_to_test, minimum_acceptable_value,
-                maximum_acceptable_value, nodata_value):
-            """Test that array contains values within acceptable range.
-
-            The values within `array_to_test` that are not null must be
-            greater than or equal to `minimum_acceptable_value` and
-            less than or equal to `maximum_acceptable_value`.
-
-            Raises:
-                AssertionError if values are outside acceptable range
-
-            Returns:
-                None
-            """
-            if len(array_to_test[array_to_test != nodata_value]) == 0:
-                pass
-            min_val = numpy.amin(
-                array_to_test[array_to_test != nodata_value])
-            assert min_val >= minimum_acceptable_value, (
-                "Array contains values smaller than acceptable minimum")
-            max_val = numpy.amax(
-                array_to_test[array_to_test != nodata_value])
-            assert max_val <= maximum_acceptable_value, (
-                "Array contains values larger than acceptable maximum")
-
-        def insert_nodata_values_into_array(target_array, nodata_value):
-            """Insert nodata at arbitrary locations in `target_array`."""
-            modified_array = target_array
-            n_vals = numpy.random.randint(
-                0, (target_array.shape[0] * target_array.shape[1]))
-            insertions = 0
-            while insertions < n_vals:
-                row = numpy.random.randint(0, target_array.shape[0])
-                col = numpy.random.randint(0, target_array.shape[1])
-                modified_array[row, col] = nodata_value
-                insertions += 1
-            return modified_array
-
         array_shape = (10, 10)
 
         tca = numpy.random.uniform(300, 700, array_shape)
@@ -847,3 +704,52 @@ class foragetests(unittest.TestCase):
             assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
+
+    # def test_structural_ratios(self):
+    #     """Test that values calculated by `_structural_ratios` are valid.
+
+    #     Use the function `_structural_ratios` to calculate rnewas_1_1,
+    #     rnewas_1_2, rnewas_2_1, rnewas_2_2, rnewbs_1_2, and rnewbs_2_2 from
+    #     randomly generated inputs. Test that each of the calculated quantities
+    #     are within the range [??, ??].  Introduce nodata values into the inputs
+    #     and test that calculated values remain inside the specified ranges.
+
+    #     Raises:
+    #         AssertionError if rnewas_1_1 is outside the range ____
+    #         AssertionError if rnewas_1_2 is outside the range ____
+    #         AssertionError if rnewas_2_1 is outside the range ____
+    #         AssertionError if rnewas_2_2 is outside the range ____
+    #         AssertionError if rnewbs_1_2 is outside the range ____
+    #         AssertionError if rnewbs_2_2 is outside the range ____
+
+    #     Returns:
+    #         None
+    #     """
+    #     from natcap.invest import forage
+
+    #     site_param_table = {
+    #         1: {
+    #             'pcemic1_2': numpy.random.uniform(0.15, 0.35),
+    #             'pcemic1_1': numpy.random.uniform(0.65, 0.85),
+    #             'pcemic1_3': numpy.random.uniform(0.1, 0.2),
+    #             'pcemic2_2': numpy.random.uniform(0.58, 0.78),
+    #             'pcemic2_1': numpy.random.uniform(0.58, 0.78),
+    #             'pcemic2_3': numpy.random.uniform(0.02, 0.04),
+    #             'rad1p_1': numpy.random.uniform(0.58, 0.78),
+    #             'rad1p_2': numpy.random.uniform(0.001, 0.005),
+    #             'rad1p_3': numpy.random.uniform(0.01, 0.05),
+    #             'varat1_1': numpy.random.uniform(0.6, 0.18),
+    #             'varat22_1': numpy.random.uniform(0.6, 0.18)},
+    #             }
+
+    #     pp_reg = {
+    #         'afiel_1_path': os.path.join(self.workspace_dir, 'afiel_1.tif'),
+    #         'awilt_1_path': os.path.join(self.workspace_dir, 'awilt.tif'),
+    #         'wc_path': os.path.join(self.workspace_dir, 'wc.tif'),
+    #         'eftext_path': os.path.join(self.workspace_dir, 'eftext.tif'),
+    #         'p1co2_2_path': os.path.join(self.workspace_dir, 'p1co2_2.tif'),
+    #         'fps1s3_path': os.path.join(self.workspace_dir, 'fps1s3.tif'),
+    #         'fps2s3_path': os.path.join(self.workspace_dir, 'fps2s3.tif'),
+    #     }
+
+    #     forage._structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg)
