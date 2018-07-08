@@ -788,7 +788,7 @@ class foragetests(unittest.TestCase):
         }
 
         minimum_acceptable_value = 1
-        maximum_acceptable_value = 1200
+        maximum_acceptable_value = 1500
         nodata_value = _TARGET_NODATA
 
         forage._structural_ratios(
@@ -810,3 +810,108 @@ class foragetests(unittest.TestCase):
                 assert_all_values_in_raster_within_range(
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
+
+    def test_yearly_tasks(self):
+        """Test that `_yearly_tasks` return reasonable values.
+
+        Use `_yearly_tasks` to calculate annual precipitation and annual
+        atmospheric N deposition from random inputs. Test that the function
+        fails if fewer than 12 months of precipitation are supplied. Test that
+        the function fails if the dates of precipitation inputs do not fill
+        the 12 months surrounding the current month. Test that annual
+        precipitation falls inside the range [0, 72]. Test that annual
+        atmospheric N deposition falls inside the range [0, 37]. Introduce
+        nodata values into input rasters and test that atmospheric N deposition
+        remains within the specified range.
+
+        Raises:
+            AssertionError if `_yearly_tasks` does not fail with fewer than 12
+                months of precipitation rasters supplied
+            AssertionError if `_yearly_tasks` does not fail with precipitation
+                rasters supplied not within 12 months of current month
+            AssertionError if calculated annual precipitation is outside the
+                range [0, 72]
+            AssertionError if calculated annual N deposition is outside the
+                range [0, 37]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        month_index = numpy.random.randint(0, 100)
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+        site_param_table = {
+            1: {
+                'epnfa_1': numpy.random.uniform(0, 1),
+                'epnfa_2': numpy.random.uniform(0, 0.5),
+                }
+            }
+
+        complete_aligned_inputs = {
+            'precip_{}'.format(month): os.path.join(
+                self.workspace_dir, 'precip_{}.tif'.format(month)) for
+            month in xrange(month_index, month_index + 12)
+        }
+
+        year_reg = {
+            'annual_precip_path': os.path.join(
+                self.workspace_dir, 'annual_precip.tif'),
+            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif')
+        }
+
+        create_random_raster(site_index_path, 1, 1)
+        for key, path in complete_aligned_inputs.iteritems():
+            create_random_raster(path, 0, 6)
+
+        # fewer than 12 months of precip rasters
+        modified_inputs = complete_aligned_inputs.copy()
+        removed_key = modified_inputs.pop('precip_{}'.format(
+            numpy.random.randint(month_index, month_index + 13)))
+        with self.assertRaises(KeyError):
+            forage._yearly_tasks(
+                site_index_path, site_param_table, modified_inputs,
+                month_index, year_reg)
+
+        # 12 months of precip rasters supplied, but outside 12 month window of
+        # current month
+        modified_inputs['precip_{}'.format(month_index + 13)] = os.path.join(
+            'precip_{}.tif'.format(month_index + 13))
+        with self.assertRaises(KeyError):
+            forage._yearly_tasks(
+                site_index_path, site_param_table, modified_inputs,
+                month_index, year_reg)
+
+        # complete intact inputs
+        minimum_acceptable_annual_precip = 0
+        maximum_acceptabe_annual_precip = 72
+        precip_nodata = _TARGET_NODATA
+
+        minimum_acceptable_Ndep = 0
+        maximum_acceptable_Ndep = 37
+        Ndep_nodata = _TARGET_NODATA
+
+        forage._yearly_tasks(
+            site_index_path, site_param_table, complete_aligned_inputs,
+            month_index, year_reg)
+        assert_all_values_in_raster_within_range(
+            year_reg['annual_precip_path'], minimum_acceptable_annual_precip,
+            maximum_acceptabe_annual_precip, precip_nodata)
+        assert_all_values_in_raster_within_range(
+            year_reg['baseNdep_path'], minimum_acceptable_Ndep,
+            maximum_acceptable_Ndep, Ndep_nodata)
+
+        input_raster_list = [site_index_path] + [
+            path for key, path in complete_aligned_inputs.iteritems()]
+        for input_raster in input_raster_list:
+            insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
+            forage._yearly_tasks(
+                site_index_path, site_param_table, complete_aligned_inputs,
+                month_index, year_reg)
+            assert_all_values_in_raster_within_range(
+                year_reg['annual_precip_path'],
+                minimum_acceptable_annual_precip,
+                maximum_acceptabe_annual_precip, precip_nodata)
+            assert_all_values_in_raster_within_range(
+                year_reg['baseNdep_path'], minimum_acceptable_Ndep,
+                maximum_acceptable_Ndep, Ndep_nodata)
