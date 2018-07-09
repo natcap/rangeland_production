@@ -971,11 +971,12 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
 
     Modifies the persistent parameter rasters indexed by the following
     keys:
+        pp_reg['wc_path']
         pp_reg['eftext_path']
         pp_reg['p1co2_2_path']
         pp_reg['fps1s3_path']
         pp_reg['fps2s3_path']
-        pp_reg['wc_path']
+        pp_reg['orglch_path']
 
     Returns:
         None
@@ -1162,7 +1163,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         [(path, 1) for path in [
             param_val_dict['omlech_1'], param_val_dict['omlech_2'],
             sand_path]],
-        calc_orglch, pp_reg['fps2s3_path'], gdal.GDT_Float32, _IC_NODATA)
+        calc_orglch, pp_reg['orglch_path'], gdal.GDT_Float32, _IC_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -1232,7 +1233,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         pp_reg['rnewas_2_2_path']
         pp_reg['rnewbs_1_1_path']
         pp_reg['rnewbs_1_2_path']
-        pp_reg['rnewbs_2_2_path']
+        pp_reg['rnewbs_2_1_path']
         pp_reg['rnewbs_2_2_path']
 
     Returns:
