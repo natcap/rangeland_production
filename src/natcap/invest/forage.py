@@ -1471,9 +1471,21 @@ def _yearly_tasks(
             raise KeyError("Insufficient precipitation rasters were found")
         offset = offset + 1
 
+    precip_nodata = set([])
+    for precip_raster in annual_precip_rasters:
+        precip_nodata.update(
+            set([pygeoprocessing.get_raster_info(precip_raster)['nodata'][0]]))
+    if len(precip_nodata) > 1:
+        raise ValueError("Precipitation rasters include >1 nodata value")
+    precip_nodata = list(precip_nodata)[0]
+
     def raster_sum(*raster_list):
         """Add the rasters in raster_list element-wise."""
-        return numpy.sum(raster_list, axis=0)
+        sum_of_rasters = numpy.sum(raster_list, axis=0)
+        masked_sum = numpy.where(
+            (numpy.any(numpy.array(raster_list) == precip_nodata, axis=0)),
+            _TARGET_NODATA, sum_of_rasters)
+        return masked_sum
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in annual_precip_rasters],
