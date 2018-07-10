@@ -520,7 +520,7 @@ class foragetests(unittest.TestCase):
         create_complementary_raster(sand_path, silt_path, clay_path)
 
         minimum_acceptable_value = 0.01
-        maximum_acceptable_value = 0.9
+        maximum_acceptable_value = 0.7
         nodata_value = _TARGET_NODATA
 
         forage._afiel_awilt(
@@ -578,7 +578,7 @@ class foragetests(unittest.TestCase):
                 'ps2s3_1': numpy.random.uniform(0.58, 0.78),
                 'ps2s3_2': numpy.random.uniform(0.001, 0.005),
                 'omlech_1': numpy.random.uniform(0.01, 0.05),
-                'omlech_2': numpy.random.uniform(0.6, 0.18)},
+                'omlech_2': numpy.random.uniform(0.06, 0.18)},
                 }
 
         pp_reg = {
@@ -589,6 +589,7 @@ class foragetests(unittest.TestCase):
             'p1co2_2_path': os.path.join(self.workspace_dir, 'p1co2_2.tif'),
             'fps1s3_path': os.path.join(self.workspace_dir, 'fps1s3.tif'),
             'fps2s3_path': os.path.join(self.workspace_dir, 'fps2s3.tif'),
+            'orglch_path': os.path.join(self.workspace_dir, 'orglch.tif'),
         }
 
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
@@ -603,28 +604,33 @@ class foragetests(unittest.TestCase):
 
         acceptable_range_dict = {
             'wc_path': {
-                'minimum_acceptable_value': 0,
-                'maximum_acceptable_value': 1,
+                'minimum_acceptable_value': 0.01,
+                'maximum_acceptable_value': 0.89,
                 'nodata_value': _TARGET_NODATA,
                 },
             'eftext_path': {
-                'minimum_acceptable_value': 0,
-                'maximum_acceptable_value': 1,
+                'minimum_acceptable_value': 0.15,
+                'maximum_acceptable_value': 0.775,
                 'nodata_value': _IC_NODATA,
                 },
             'p1co2_2_path': {
-                'minimum_acceptable_value': 0,
-                'maximum_acceptable_value': 1,
+                'minimum_acceptable_value': 0.1,
+                'maximum_acceptable_value': 0.59,
                 'nodata_value': _IC_NODATA,
                 },
             'fps1s3_path': {
-                'minimum_acceptable_value': 0,
-                'maximum_acceptable_value': 1,
+                'minimum_acceptable_value': 0.58,
+                'maximum_acceptable_value': 0.8,
                 'nodata_value': _IC_NODATA,
                 },
             'fps2s3_path': {
-                'minimum_acceptable_value': 0,
-                'maximum_acceptable_value': 1,
+                'minimum_acceptable_value': 0.58,
+                'maximum_acceptable_value': 0.7825,
+                'nodata_value': _IC_NODATA,
+                },
+            'orglch_path': {
+                'minimum_acceptable_value': 0.01,
+                'maximum_acceptable_value': 0.14,
                 'nodata_value': _IC_NODATA,
                 },
         }
@@ -652,9 +658,9 @@ class foragetests(unittest.TestCase):
                     ranges['nodata_value'])
 
     def test_aboveground_ratio(self):
-        """Test that values calculated by `aboveground_ratio` are valid.
+        """Test that values calculated by `_aboveground_ratio` are valid.
 
-        Use the function `aboveground_ratio` to calculate the C/N or P
+        Use the function `_aboveground_ratio` to calculate the C/N or P
         ratio of decomposing aboveground material from random inputs. Test
         that the calculated ratio, agdrat, is within the range [1, 150].
         Introduce nodata values into the inputs and test that calculated
@@ -677,8 +683,8 @@ class foragetests(unittest.TestCase):
         pcemic_3 = numpy.random.uniform(0.001, 0.1, array_shape)
         cemicb = (pcemic_2 - pcemic_1) / pcemic_3
 
-        minimum_acceptable_agdrat = 0.01
-        maximum_acceptable_agdrat = 1000
+        minimum_acceptable_agdrat = 2.285
+        maximum_acceptable_agdrat = numpy.amax(pcemic_1)
         agdrat_nodata = _TARGET_NODATA
 
         agdrat = forage._aboveground_ratio(
@@ -711,16 +717,19 @@ class foragetests(unittest.TestCase):
         Use the function `_structural_ratios` to calculate rnewas_1_1,
         rnewas_1_2, rnewas_2_1, rnewas_2_2, rnewbs_1_2, and rnewbs_2_2 from
         randomly generated inputs. Test that each of the calculated quantities
-        are within the range [??, ??].  Introduce nodata values into the inputs
-        and test that calculated values remain inside the specified ranges.
+        are within the range [1, 1500].  Introduce nodata values into the
+        inputs and test that calculated values remain inside the specified
+        ranges.
 
         Raises:
-            AssertionError if rnewas_1_1 is outside the range ____
-            AssertionError if rnewas_1_2 is outside the range ____
-            AssertionError if rnewas_2_1 is outside the range ____
-            AssertionError if rnewas_2_2 is outside the range ____
-            AssertionError if rnewbs_1_2 is outside the range ____
-            AssertionError if rnewbs_2_2 is outside the range ____
+            AssertionError if rnewas_1_1 is outside the range [1, 1500]
+            AssertionError if rnewas_1_2 is outside the range [1, 1500]
+            AssertionError if rnewas_2_1 is outside the range [1, 1500]
+            AssertionError if rnewas_2_2 is outside the range [1, 1500]
+            AssertionError if rnewbs_1_1 is outside the range [1, 1500]
+            AssertionError if rnewbs_2_2 is outside the range [1, 1500]
+            AssertionError if rnewbs_2_1 is outside the range [1, 1500]
+            AssertionError if rnewbs_2_2 is outside the range [1, 1500]
 
         Returns:
             None
@@ -778,11 +787,11 @@ class foragetests(unittest.TestCase):
             'rnewas_2_2_path': os.path.join(
                 self.workspace_dir, 'rnewas_2_2.tif'),
             'rnewbs_1_1_path': os.path.join(
-                self.workspace_dir, 'rnewbs_1_2.tif'),
+                self.workspace_dir, 'rnewbs_1_1.tif'),
             'rnewbs_1_2_path': os.path.join(
-                self.workspace_dir, 'rnewbs_2_2.tif'),
-            'rnewbs_2_1_path': os.path.join(
                 self.workspace_dir, 'rnewbs_1_2.tif'),
+            'rnewbs_2_1_path': os.path.join(
+                self.workspace_dir, 'rnewbs_2_1.tif'),
             'rnewbs_2_2_path': os.path.join(
                 self.workspace_dir, 'rnewbs_2_2.tif'),
         }
@@ -867,7 +876,7 @@ class foragetests(unittest.TestCase):
         # fewer than 12 months of precip rasters
         modified_inputs = complete_aligned_inputs.copy()
         removed_key = modified_inputs.pop('precip_{}'.format(
-            numpy.random.randint(month_index, month_index + 13)))
+            numpy.random.randint(month_index, month_index + 12)))
         with self.assertRaises(KeyError):
             forage._yearly_tasks(
                 site_index_path, site_param_table, modified_inputs,
@@ -915,3 +924,57 @@ class foragetests(unittest.TestCase):
             assert_all_values_in_raster_within_range(
                 year_reg['baseNdep_path'], minimum_acceptable_Ndep,
                 maximum_acceptable_Ndep, Ndep_nodata)
+
+    def test_reference_evapotranspiration(self):
+        """Test that `_reference_evapotranspiration` returns valid results.
+
+        Use the function `_reference_evapotranspiration` to calculate reference
+        evapotranspiration (ET) from random inputs. Test that the calculated
+        reference ET is within the range [0, 31]. Introduce nodata values into
+        the inputs and test that the result remains inside the range [0, 31].
+
+        Raises:
+            AssertionError if reference evapotranspiration is outside the range
+                [0, 31]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        max_temp_path = os.path.join(self.workspace_dir, 'max_temp.tif')
+        min_temp_path = os.path.join(self.workspace_dir, 'min_temp.tif')
+        shwave_path = os.path.join(self.workspace_dir, 'shwave.tif')
+        fwloss_4_path = os.path.join(self.workspace_dir, 'fwloss_4.tif')
+
+        create_random_raster(max_temp_path, 0, 40)
+        create_random_raster(min_temp_path, -20, 20)
+        create_random_raster(shwave_path, 0, 1125)
+        create_random_raster(fwloss_4_path, 0, 1)
+
+        pevap_path = os.path.join(self.workspace_dir, 'pevap.tif')
+
+        minimum_acceptable_ET = 0
+        maximum_acceptable_ET = 31
+        ET_nodata = _TARGET_NODATA
+
+        forage._reference_evapotranspiration(
+            max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
+            pevap_path)
+
+        assert_all_values_in_raster_within_range(
+            pevap_path, minimum_acceptable_ET, maximum_acceptable_ET,
+            ET_nodata)
+
+        insert_nodata_values_into_raster(max_temp_path, _IC_NODATA)
+        insert_nodata_values_into_raster(min_temp_path, _IC_NODATA)
+        insert_nodata_values_into_raster(shwave_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(fwloss_4_path, _IC_NODATA)
+
+        forage._reference_evapotranspiration(
+            max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
+            pevap_path)
+
+        assert_all_values_in_raster_within_range(
+            pevap_path, minimum_acceptable_ET, maximum_acceptable_ET,
+            ET_nodata)
