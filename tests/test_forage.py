@@ -189,7 +189,7 @@ def assert_all_values_in_array_within_range(
         None
     """
     if len(array_to_test[array_to_test != nodata_value]) == 0:
-        pass
+        return
     min_val = numpy.amin(
         array_to_test[array_to_test != nodata_value])
     assert min_val >= minimum_acceptable_value, (
@@ -930,12 +930,12 @@ class foragetests(unittest.TestCase):
 
         Use the function `_reference_evapotranspiration` to calculate reference
         evapotranspiration (ET) from random inputs. Test that the calculated
-        reference ET is within the range [0, 31]. Introduce nodata values into
+        reference ET is within the range [0, 32]. Introduce nodata values into
         the inputs and test that the result remains inside the range [0, 31].
 
         Raises:
             AssertionError if reference evapotranspiration is outside the range
-                [0, 31]
+                [0, 32]
 
         Returns:
             None
@@ -955,7 +955,7 @@ class foragetests(unittest.TestCase):
         pevap_path = os.path.join(self.workspace_dir, 'pevap.tif')
 
         minimum_acceptable_ET = 0
-        maximum_acceptable_ET = 31
+        maximum_acceptable_ET = 32
         ET_nodata = _TARGET_NODATA
 
         forage._reference_evapotranspiration(
@@ -978,3 +978,155 @@ class foragetests(unittest.TestCase):
         assert_all_values_in_raster_within_range(
             pevap_path, minimum_acceptable_ET, maximum_acceptable_ET,
             ET_nodata)
+
+    def test_potential_production(self):
+        """Test that `_potential_production` returns valid results.
+
+        Use the function `_potential_production` to calculate h2ogef_1 and
+        total potential production from random inputs. Test that h2ogef_1, the
+        limiting factor of water availability on growth, is inside the range
+        [0.009, 1]. Test that total production is inside the range [0, 675].
+        Introduce nodata values into inputs and test that h2ogef_1 and
+        potential production remain inside the specified ranges.
+
+        Raises:
+            AssertionError if h2ogef_1 is outside the range [0.009, 1]
+            AssertionError if total potential production is outside the range
+                [0, 675]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        month_index = 10
+        current_month = 6
+        pft_id_set = set([1, 2])
+
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site_index.tif'),
+            'max_temp_{}'.format(current_month): os.path.join(
+                self.workspace_dir, 'max_temp.tif'),
+            'min_temp_{}'.format(current_month): os.path.join(
+                self.workspace_dir, 'min_temp.tif'),
+            'precip_{}'.format(month_index): os.path.join(
+                self.workspace_dir, 'precip.tif'),
+        }
+        create_random_raster(aligned_inputs['site_index'], 1, 1)
+        create_random_raster(
+            aligned_inputs['max_temp_{}'.format(current_month)], 10, 30)
+        create_random_raster(
+            aligned_inputs['min_temp_{}'.format(current_month)], -10, 9)
+        create_random_raster(
+            aligned_inputs['precip_{}'.format(month_index)], 0, 6)
+
+        for pft_i in pft_id_set:
+            aligned_inputs['pft_{}'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'pft_{}.tif'.format(pft_i))
+            create_random_raster(
+                aligned_inputs['pft_{}'.format(pft_i)], 0, 1)
+
+        site_param_table = {
+            1: {
+                'pmxbio': numpy.random.uniform(500, 700),
+                'pmxtmp': numpy.random.uniform(-0.0025, 0),
+                'pmntmp': numpy.random.uniform(0, 0.01),
+                'fwloss_4': numpy.random.uniform(0, 1),
+                'pprpts_1': numpy.random.uniform(0, 1),
+                'pprpts_2': numpy.random.uniform(0.5, 1.5),
+                'pprpts_3': numpy.random.uniform(0, 1),
+            }
+        }
+        veg_trait_table = {}
+        for pft_i in pft_id_set:
+            veg_trait_table[pft_i] = {
+                'ppdf_1': numpy.random.uniform(10, 30),
+                'ppdf_2': numpy.random.uniform(31, 50),
+                'ppdf_3': numpy.random.uniform(0, 1),
+                'ppdf_4': numpy.random.uniform(0, 10),
+                'biok5': numpy.random.uniform(0, 2000),
+                'prdx_1': numpy.random.uniform(0.1, 0.6),
+                'growth_months': ['3', '4', '5', '6'],
+            }
+
+        sv_reg = {
+            'strucc_1_path': os.path.join(self.workspace_dir, 'strucc_1.tif'),
+        }
+        create_random_raster(sv_reg['strucc_1_path'], 0, 200)
+        for pft_i in pft_id_set:
+            sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglivc_{}.tif'.format(pft_i))
+            create_random_raster(
+                sv_reg['aglivc_{}_path'.format(pft_i)], 0, 50)
+            sv_reg['stdedc_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'stdedc_{}.tif'.format(pft_i))
+            create_random_raster(
+                sv_reg['stdedc_{}_path'.format(pft_i)], 0, 50)
+            sv_reg['avh2o_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'avh2o_1_{}.tif'.format(pft_i))
+            create_random_raster(
+                sv_reg['avh2o_1_{}_path'.format(pft_i)], 0, 3.5)
+
+        pp_reg = {
+            'wc_path': os.path.join(self.workspace_dir, 'wc.tif')
+        }
+        create_random_raster(pp_reg['wc_path'], 0.01, 0.9)
+
+        month_reg = {}
+        for pft_i in pft_id_set:
+            month_reg['h2ogef_1_{}'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'h2ogef_1_{}.tif'.format(pft_i))
+            month_reg['tgprod_pot_prod_{}'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'tgprod_pot_prod_{}.tif'.format(pft_i))
+
+        minimum_acceptable_h2ogef_1 = 0.009
+        maximum_acceptable_h2ogef_1 = 1
+
+        minimum_acceptable_potential_production = 0
+        maximum_acceptable_potential_production = 675
+
+        forage._potential_production(
+            aligned_inputs, site_param_table, current_month, month_index,
+            pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
+
+        for pft_i in pft_id_set:
+            assert_all_values_in_raster_within_range(
+                month_reg['h2ogef_1_{}'.format(pft_i)],
+                minimum_acceptable_h2ogef_1,
+                maximum_acceptable_h2ogef_1, _TARGET_NODATA)
+            assert_all_values_in_raster_within_range(
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                minimum_acceptable_potential_production,
+                maximum_acceptable_potential_production, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(
+            aligned_inputs['site_index'], _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            -9999)
+        insert_nodata_values_into_raster(
+            aligned_inputs['min_temp_{}'.format(current_month)],
+            _IC_NODATA)
+        insert_nodata_values_into_raster(
+            aligned_inputs['pft_{}'.format(list(pft_id_set)[0])],
+            _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            sv_reg['aglivc_{}_path'.format(list(pft_id_set)[0])], _IC_NODATA)
+        insert_nodata_values_into_raster(
+            sv_reg['avh2o_1_{}_path'.format(list(pft_id_set)[1])],
+            _TARGET_NODATA)
+        insert_nodata_values_into_raster(pp_reg['wc_path'], _TARGET_NODATA)
+
+        forage._potential_production(
+            aligned_inputs, site_param_table, current_month, month_index,
+            pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
+
+        for pft_i in pft_id_set:
+            assert_all_values_in_raster_within_range(
+                month_reg['h2ogef_1_{}'.format(pft_i)],
+                minimum_acceptable_h2ogef_1,
+                maximum_acceptable_h2ogef_1, _TARGET_NODATA)
+            assert_all_values_in_raster_within_range(
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                minimum_acceptable_potential_production,
+                maximum_acceptable_potential_production, _TARGET_NODATA)
