@@ -1130,3 +1130,56 @@ class foragetests(unittest.TestCase):
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 minimum_acceptable_potential_production,
                 maximum_acceptable_potential_production, _TARGET_NODATA)
+
+    def test_calc_favail_P(self):
+        """Test that `_calc_favail_P` returns valid results.
+
+        Use the function `_calc_favail_P` to calculate the intermediate
+        parameter favail_P from random inputs.  Test that favail_P is
+        inside the range [0, 1]. Introduce nodata values into inputs and test
+        that favail_P remains inside the range [0, 1].
+
+        Raises:
+            AssertionError if favail_P is outside the range [0, 1]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif')
+        }
+        param_val_dict = {
+            'favail_4': os.path.join(self.workspace_dir, 'favail_4.tif'),
+            'favail_5': os.path.join(self.workspace_dir, 'favail_5.tif'),
+            'favail_6': os.path.join(self.workspace_dir, 'favail_6.tif'),
+            'favail_2': os.path.join(self.workspace_dir, 'favail_2.tif'),
+        }
+
+        create_random_raster(sv_reg['minerl_1_1_path'], 3, 8)
+        create_random_raster(param_val_dict['favail_4'], 0, 1)
+        create_random_raster(param_val_dict['favail_5'], 0, 1)
+        create_random_raster(param_val_dict['favail_6'], 1, 3)
+
+        forage._calc_favail_P(sv_reg, param_val_dict)
+
+        minimum_acceptable_favail_P = 0
+        maximum_acceptable_favail_P = 1
+
+        assert_all_values_in_raster_within_range(
+            param_val_dict['favail_2'],
+            minimum_acceptable_favail_P,
+            maximum_acceptable_favail_P, _IC_NODATA)
+
+        for input_raster in [
+                sv_reg['minerl_1_1_path'], param_val_dict['favail_4'],
+                param_val_dict['favail_5'], param_val_dict['favail_6']]:
+            insert_nodata_values_into_raster(input_raster, _IC_NODATA)
+            forage._calc_favail_P(sv_reg, param_val_dict)
+            assert_all_values_in_raster_within_range(
+                param_val_dict['favail_2'],
+                minimum_acceptable_favail_P,
+                maximum_acceptable_favail_P, _IC_NODATA)
+
