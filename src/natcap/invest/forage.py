@@ -1788,6 +1788,9 @@ def _potential_production(
             calculated values that are shared between submodels
 
     Modifies:
+        The raster indicated by `month_reg['h2ogef_1_<PFT>']` for each
+            plant functional type (PFT) where growth is scheduled to occur in
+            this month
         The raster indicated by `month_reg['tgprod_pot_prod_<PFT>']` for each
             plant functional type (PFT) where growth is scheduled to occur in
             this month
@@ -1903,9 +1906,9 @@ def _potential_production(
             / (ppdf_2[valid_mask] - ppdf_1[valid_mask]))
         gpdf = numpy.empty(ctemp.shape, dtype=numpy.float32)
         gpdf[:] = _TARGET_NODATA
-        gpdf[valid_mask] = numpy.exp(
-            ppdf_3[valid_mask]/ppdf_4[valid_mask]
-            * (1. - numpy.power(frac[valid_mask], ppdf_4[valid_mask]))
+        gpdf[valid_mask] = (numpy.exp(
+            (ppdf_3[valid_mask]/ppdf_4[valid_mask])
+            * (1. - numpy.power(frac[valid_mask], ppdf_4[valid_mask])))
             * numpy.power(frac[valid_mask], ppdf_3[valid_mask]))
         return gpdf
 
