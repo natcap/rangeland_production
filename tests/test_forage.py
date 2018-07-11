@@ -1183,3 +1183,86 @@ class foragetests(unittest.TestCase):
                 minimum_acceptable_favail_P,
                 maximum_acceptable_favail_P, _IC_NODATA)
 
+    def test_raster_sum(self):
+        """Test the treatment of nodata values by `raster_sum`.
+
+        Use the function `raster_sum` to calculate the sum across pixels
+        in three rasters containing nodata.  Test that when
+        nodata_remove=False, the result also contains nodata values. Test
+        that when nodata_remove=True, nodata pixels are treated as zero.
+
+        Raises:
+            AssertionError if result raster does not contain nodata values
+                in same position as input rasters
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        num_rasters = numpy.random.randint(1, 10)
+        raster_list = [
+            os.path.join(self.workspace_dir, '{}.tif'.format(r)) for r in
+            xrange(num_rasters)]
+
+        for input_raster in raster_list:
+            create_random_raster(input_raster, 1, 1)
+
+        input_nodata = -999
+        target_path = os.path.join(self.workspace_dir, 'result.tif')
+        target_nodata = -9.99
+
+        # input rasters include no nodata values
+        forage.raster_sum(
+            raster_list, input_nodata, target_path, target_nodata,
+            nodata_remove=False)
+        assert_all_values_in_raster_within_range(
+            target_path, num_rasters, num_rasters, target_nodata)
+
+        forage.raster_sum(
+            raster_list, input_nodata, target_path, target_nodata,
+            nodata_remove=True)
+        assert_all_values_in_raster_within_range(
+            target_path, num_rasters, num_rasters, target_nodata)
+
+        # one input raster includes nodata values
+        insert_nodata_values_into_raster(raster_list[0], input_nodata)
+
+        forage.raster_sum(
+            raster_list, input_nodata, target_path, target_nodata,
+            nodata_remove=False)
+        assert_all_values_in_raster_within_range(
+            target_path, num_rasters, num_rasters, target_nodata)
+
+        # assert that raster_list[0] and target_path include nodata
+        # values in same locations
+        input_including_nodata = gdal.OpenEx(raster_list[0])
+        result_including_nodata = gdal.OpenEx(target_path)
+        input_band = input_including_nodata.GetRasterBand(1)
+        result_band = result_including_nodata.GetRasterBand(1)
+        input_array = input_band.ReadAsArray()
+        result_array = result_band.ReadAsArray()
+        assert (
+            input_array[input_array == input_nodata]
+            == input_array[result_array == target_nodata],
+            """Result raster must contain nodata values in same position
+            as input""")
+
+        input_band = None
+        result_band = None
+        gdal.Dataset.__swig_destroy__(input_including_nodata)
+        gdal.Dataset.__swig_destroy__(result_including_nodata)
+
+        forage.raster_sum(
+            raster_list, input_nodata, target_path, target_nodata,
+            nodata_remove=True)
+
+        # assert that minimum value in target_path is num_rasters - 1
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                target_path):
+            if len(raster_block[raster_block != target_nodata]) == 0:
+                continue
+            min_val = numpy.amin(
+                raster_block[raster_block != target_nodata])
+            assert min_val >= (num_rasters - 1), (
+                "Raster appears to contain nodata values")
