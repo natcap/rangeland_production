@@ -1268,3 +1268,87 @@ class foragetests(unittest.TestCase):
                 raster_block[raster_block != target_nodata])
             assert min_val >= (num_rasters - 1), (
                 "Raster appears to contain nodata values")
+
+    def test_calc_available_nutrient(self):
+        """Test that `_calc_available_nutrient` returns valid results.
+
+        Use the function `_calc_available_nutrient` to calculate available
+        nutrient from random results. Test that the calculated nutrient
+        available is inside the range [0, 323]. Introduce nodata values into
+        inputs and test that available nutrient remains inside the range
+        [0, 323].
+
+        Raises:
+            AssertionError if available nutrient is outside the range [0, 323]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        pft_i = numpy.random.randint(0, 4)
+        pft_param_dict = {
+            'snfxmx_1': numpy.random.uniform(0, 1),
+            'nlaypg': numpy.random.randint(1, 10),
+        }
+        sv_reg = {
+            'bglivc_{}_path'.format(pft_i): os.path.join(
+                self.workspace_dir, 'bglivc_path.tif'),
+            'crpstg_1_{}_path'.format(pft_i): os.path.join(
+                self.workspace_dir, 'crpstg_1_{}.tif'.format(pft_i)),
+            'crpstg_2_{}_path'.format(pft_i): os.path.join(
+                self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i)),
+        }
+        for iel in [1, 2]:
+            for lyr in xrange(1, 11):
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
+                    self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
+                create_random_raster(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)], 0, 5)
+
+        site_param_table = {
+            1: {
+                'rictrl': numpy.random.uniform(0.005, 0.02),
+                'riint': numpy.random.uniform(0.6, 1),
+                }
+            }
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+        favail_path = os.path.join(self.workspace_dir, 'favail.tif')
+        tgprod_path = os.path.join(self.workspace_dir, 'tgprod.tif')
+
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(sv_reg['bglivc_{}_path'.format(pft_i)], 90, 180)
+        create_random_raster(sv_reg['crpstg_1_{}_path'.format(pft_i)], 0, 3)
+        create_random_raster(sv_reg['crpstg_2_{}_path'.format(pft_i)], 0, 1)
+        create_random_raster(favail_path, 0, 1)
+        create_random_raster(tgprod_path, 0, 675)
+
+        eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
+
+        minimum_acceptable_eavail = 0
+        maximum_acceptable_evail = 323
+
+        for iel in [1, 2]:
+            forage._calc_available_nutrient(
+                pft_i, iel, pft_param_dict, sv_reg, site_param_table,
+                site_index_path, favail_path, tgprod_path, eavail_path)
+
+            assert_all_values_in_raster_within_range(
+                eavail_path, minimum_acceptable_eavail,
+                maximum_acceptable_evail, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(site_index_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            sv_reg['minerl_1_1_path'], _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            sv_reg['bglivc_{}_path'.format(pft_i)], _TARGET_NODATA)
+        insert_nodata_values_into_raster(tgprod_path, _TARGET_NODATA)
+
+        for iel in [1, 2]:
+            forage._calc_available_nutrient(
+                pft_i, iel, pft_param_dict, sv_reg, site_param_table,
+                site_index_path, favail_path, tgprod_path, eavail_path)
+
+            assert_all_values_in_raster_within_range(
+                eavail_path, minimum_acceptable_eavail,
+                maximum_acceptable_evail, _TARGET_NODATA)
