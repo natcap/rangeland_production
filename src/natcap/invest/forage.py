@@ -644,10 +644,53 @@ def execute(args):
             veg_trait_table, sv_reg, year_reg, month_reg)
 
 
-def sum_positive_rasters(*raster_list):
-        """Add positive values in the rasters in raster_list."""
-        masked_list = [numpy.where(r < 0., 0., r) for r in raster_list]
-        return numpy.sum(masked_list, axis=0)
+def raster_sum(
+        raster_list, input_nodata, target_path, target_nodata,
+        nodata_remove=False):
+    """Calculate the sum per pixel across rasters in a list.
+
+    Sum the rasters in `raster_list` element-wise, allowing nodata values
+    in the rasters to propagate to the result or treating nodata as zero.
+
+    Parameters:
+        raster_list (list): list of paths to rasters to sum
+        input_nodata (float or int): nodata value in the input rasters
+        target_path (string): path to location to store the result
+        target_nodata (float or int): nodata value for the result raster
+        nodata_remove (bool): if true, treat nodata values in input
+            rasters as zero. If false, the sum in a pixel where any input
+            raster is nodata is nodata.
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    def raster_sum_op(*raster_list):
+        """Add the rasters in raster_list without removing nodata values."""
+        sum_of_rasters = numpy.sum(raster_list, axis=0)
+        masked_sum = numpy.where(
+            (numpy.any(numpy.array(raster_list) == input_nodata, axis=0)),
+            target_nodata, sum_of_rasters)
+        return masked_sum
+
+    def raster_sum_op_nodata_remove(*raster_list):
+        """Add the rasters in raster_list, treating nodata as zero."""
+        for r in raster_list:
+            numpy.place(r, r == input_nodata, [0])
+        sum_of_rasters = numpy.sum(raster_list, axis=0)
+        return sum_of_rasters
+
+    if nodata_remove:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in raster_list], raster_sum_op_nodata_remove,
+            target_path, gdal.GDT_Float32, target_nodata)
+
+    else:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in raster_list], raster_sum_op,
+            target_path, gdal.GDT_Float32, target_nodata)
 
 
 def _calc_ompc(
@@ -1479,18 +1522,9 @@ def _yearly_tasks(
         raise ValueError("Precipitation rasters include >1 nodata value")
     precip_nodata = list(precip_nodata)[0]
 
-    def raster_sum(*raster_list):
-        """Add the rasters in raster_list element-wise."""
-        sum_of_rasters = numpy.sum(raster_list, axis=0)
-        masked_sum = numpy.where(
-            (numpy.any(numpy.array(raster_list) == precip_nodata, axis=0)),
-            _TARGET_NODATA, sum_of_rasters)
-        return masked_sum
-
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in annual_precip_rasters],
-        raster_sum, year_reg['annual_precip_path'],
-        gdal.GDT_Float32, _TARGET_NODATA)
+    raster_sum(
+        annual_precip_rasters, precip_nodata, year_reg['annual_precip_path'],
+        _TARGET_NODATA)
 
     # calculate base N deposition
     # intermediate parameter rasters for this operation
@@ -2136,10 +2170,10 @@ def _potential_production(
                 gdal.GDT_Float32, _TARGET_NODATA)
             weighted_path_list.append(target_path)
 
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in weighted_path_list],
-            sum_positive_rasters, temp_val_dict['sum_{}'.format(sv)],
-            gdal.GDT_Float32, _TARGET_NODATA)
+        raster_sum(
+            weighted_path_list, _TARGET_NODATA,
+            temp_val_dict['sum_{}'.format(sv)], _TARGET_NODATA,
+            nodata_remove=True)
 
     # ctemp, soil temperature relative to impacts on growth
     pygeoprocessing.raster_calculator(
@@ -2326,7 +2360,7 @@ def _calc_available_nutrient(
             available to the plant functional type
 
     Modifies:
-        the raster indicated by `target_path`
+        the raster indicated by `eavail_path`
 
     Returns:
         None
@@ -2362,7 +2396,7 @@ def _calc_available_nutrient(
         rimpct[:] = _TARGET_NODATA
         rimpct[valid_mask] = numpy.where(
             ((rictrl[valid_mask] * bglivc[valid_mask] * 2.5) > 33.),
-            1., -riint[valid_mask] * numpy.exp(
+            1., 1. - riint[valid_mask] * numpy.exp(
                 -rictrl[valid_mask] * bglivc[valid_mask] * 2.5))
 
         eavail = numpy.empty(rictrl.shape, dtype=numpy.float32)
@@ -2438,10 +2472,19 @@ def _calc_available_nutrient(
     mineral_raster_list = [
         sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
             1, nlay + 1)]
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in mineral_raster_list],
-        sum_positive_rasters, temp_val_dict['availm'],
-        gdal.GDT_Float32, _TARGET_NODATA)
+
+    mineral_nodata = set([])
+    for mineral_raster in mineral_raster_list:
+        mineral_nodata.update(
+            set([pygeoprocessing.get_raster_info(
+                mineral_raster)['nodata'][0]]))
+    if len(mineral_nodata) > 1:
+        raise ValueError(
+            "Mineral rasters for element {} contain >1 nodata value".format(
+                iel))
+    raster_sum(
+        mineral_raster_list, mineral_nodata, temp_val_dict['availm'],
+        _TARGET_NODATA, nodata_remove=True)
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
