@@ -1352,3 +1352,84 @@ class foragetests(unittest.TestCase):
             assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
                 maximum_acceptable_evail, _TARGET_NODATA)
+
+    def test_calc_nutrient_demand(self):
+        """Test that `_calc_nutrient_demand` returns reasonable results.
+
+        Use the function `_calc_nutrient_demand` to calculate demand for
+        one nutrient by one plant functional type. Test that the calculated
+        demand is in the range [???].  Introduce nodata values into inputs
+        and test that calculated demand remains in the range [???]. Test
+        against a result calculated by hand for known inputs.
+
+        Raises:
+            AssertionError if calculated demand from random inputs is outside
+                the range [???]
+            AssertionError if calculated demand from known inputs is not equal
+                to value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        biomass_production_path = os.path.join(
+            self.workspace_dir, 'biomass_production.tif')
+        fraction_allocated_to_roots_path = os.path.join(
+            self.workspace_dir, 'fraction_allocated_to_roots.tif')
+        cercrp_min_above_path = os.path.join(
+            self.workspace_dir, 'cercrp_min_above.tif')
+        cercrp_min_below_path = os.path.join(
+            self.workspace_dir, 'cercrp_min_below.tif')
+        demand_path = os.path.join(
+            self.workspace_dir, 'demand.tif')
+
+        # run with random inputs
+        create_random_raster(biomass_production_path, 0, 675)
+        create_random_raster(fraction_allocated_to_roots_path, 0.01, 0.99)
+        create_random_raster(cercrp_min_above_path, 8, 16)
+        create_random_raster(cercrp_min_below_path, 8, 16)
+
+        minimum_acceptable_demand = 0
+        maximum_acceptable_demand = 33.75
+
+        forage._calc_nutrient_demand(
+            biomass_production_path, fraction_allocated_to_roots_path,
+            cercrp_min_above_path, cercrp_min_below_path, demand_path)
+
+        assert_all_values_in_raster_within_range(
+            demand_path, minimum_acceptable_demand,
+            maximum_acceptable_demand, _TARGET_NODATA)
+
+        # insert nodata values into inputs
+        insert_nodata_values_into_raster(
+            biomass_production_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            fraction_allocated_to_roots_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(cercrp_min_above_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(cercrp_min_below_path, _TARGET_NODATA)
+
+        forage._calc_nutrient_demand(
+            biomass_production_path, fraction_allocated_to_roots_path,
+            cercrp_min_above_path, cercrp_min_below_path, demand_path)
+
+        assert_all_values_in_raster_within_range(
+            demand_path, minimum_acceptable_demand,
+            maximum_acceptable_demand, _TARGET_NODATA)
+
+        # run with known inputs
+        create_random_raster(biomass_production_path, 300, 300)
+        create_random_raster(fraction_allocated_to_roots_path, 0.4, 0.4)
+        create_random_raster(cercrp_min_above_path, 15, 15)
+        create_random_raster(cercrp_min_below_path, 9, 9)
+
+        known_demand = 10.1333
+        tolerance = 0.0001
+
+        forage._calc_nutrient_demand(
+            biomass_production_path, fraction_allocated_to_roots_path,
+            cercrp_min_above_path, cercrp_min_below_path, demand_path)
+
+        assert_all_values_in_raster_within_range(
+            demand_path, known_demand - tolerance, known_demand + tolerance,
+            _TARGET_NODATA)
