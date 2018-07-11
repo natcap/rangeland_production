@@ -1242,16 +1242,18 @@ class foragetests(unittest.TestCase):
         result_band = result_including_nodata.GetRasterBand(1)
         input_array = input_band.ReadAsArray()
         result_array = result_band.ReadAsArray()
-        assert (
-            input_array[input_array == input_nodata]
-            == input_array[result_array == target_nodata],
-            """Result raster must contain nodata values in same position
-            as input""")
+
+        sum_input_mask = numpy.sum(input_array[input_array == input_nodata])
+        sum_result_mask = numpy.sum(input_array[result_array == target_nodata])
+
+        assert sum_input_mask == sum_result_mask, (
+            "Result raster must contain nodata values in same "
+            + "position as input")
 
         input_band = None
         result_band = None
-        gdal.Dataset.__swig_destroy__(input_including_nodata)
-        gdal.Dataset.__swig_destroy__(result_including_nodata)
+        input_including_nodata = None
+        result_including_nodata = None
 
         forage.raster_sum(
             raster_list, input_nodata, target_path, target_nodata,
