@@ -1854,3 +1854,127 @@ class foragetests(unittest.TestCase):
             assert_all_values_in_raster_within_range(
                 month_reg[path], value - tolerance,
                 value + tolerance, _TARGET_NODATA)
+
+    def test_calc_revised_fracrc(self):
+        """Test that `calc_revised_fracrc` returns reasonable results.
+
+        Use the function `calc_revised_fracrc` to calculate fracrc_r, the
+        revised fraction of carbon allocated to roots. Test that fracrc_r
+        calculated from random inputs is within the range of valid values
+        according to the range of inputs. Introduce nodata values into
+        inputs and test that fracrc_r remains within the valid range.
+        Test fracrc_r calculated from known inputs against the result
+        calculated by hand.
+
+        Raises:
+            AssertionError if fracrc_r calculated from random inputs is
+                outside the range of valid values
+            AssertionError if fracrc_r from known inputs is not within
+                0.0001 of the value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        frtcindx_path = os.path.join(self.workspace_dir, 'frtcindx.tif')
+        fracrc_p_path = os.path.join(self.workspace_dir, 'fracrc_p.tif')
+        totale_1_path = os.path.join(self.workspace_dir, 'totale_1.tif')
+        totale_2_path = os.path.join(self.workspace_dir, 'totale_2.tif')
+        demand_1_path = os.path.join(self.workspace_dir, 'demand_1.tif')
+        demand_2_path = os.path.join(self.workspace_dir, 'demand_2.tif')
+        h2ogef_1_path = os.path.join(self.workspace_dir, 'h2ogef_1.tif')
+        cfrtcw_1_path = os.path.join(self.workspace_dir, 'cfrtcw_1.tif')
+        cfrtcw_2_path = os.path.join(self.workspace_dir, 'cfrtcw_2.tif')
+        cfrtcn_1_path = os.path.join(self.workspace_dir, 'cfrtcn_1.tif')
+        cfrtcn_2_path = os.path.join(self.workspace_dir, 'cfrtcn_2.tif')
+        fracrc_r_path = os.path.join(self.workspace_dir, 'fracrc_r.tif')
+
+        create_random_raster(fracrc_p_path, 0.2, 0.95)
+        create_random_raster(totale_1_path, 0, 320)
+        create_random_raster(totale_2_path, 0, 52)
+        create_random_raster(demand_1_path, 1, 34)
+        create_random_raster(demand_2_path, 1, 34)
+        create_random_raster(h2ogef_1_path, 0.01, 0.9)
+        create_random_raster(cfrtcw_1_path, 0.4, 0.8)
+        create_random_raster(cfrtcw_2_path, 1.01, 0.39)
+        create_random_raster(cfrtcn_1_path, 0.4, 0.8)
+        create_random_raster(cfrtcn_2_path, 1.01, 0.39)
+
+        minimum_acceptable_fracrc_r = 0.01
+        maximum_acceptable_fracrc_r = 0.999
+
+        create_random_raster(frtcindx_path, 0, 0)
+        forage.calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
+        assert_all_values_in_raster_within_range(
+            fracrc_r_path, minimum_acceptable_fracrc_r,
+            maximum_acceptable_fracrc_r, _TARGET_NODATA)
+
+        create_random_raster(frtcindx_path, 1, 1)
+        forage.calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
+        assert_all_values_in_raster_within_range(
+            fracrc_r_path, minimum_acceptable_fracrc_r,
+            maximum_acceptable_fracrc_r, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(fracrc_p_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(totale_2_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(demand_1_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(cfrtcw_2_path, _IC_NODATA)
+
+        create_random_raster(frtcindx_path, 0, 0)
+        forage.calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
+        assert_all_values_in_raster_within_range(
+            fracrc_r_path, minimum_acceptable_fracrc_r,
+            maximum_acceptable_fracrc_r, _TARGET_NODATA)
+
+        create_random_raster(frtcindx_path, 1, 1)
+        forage.calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
+        assert_all_values_in_raster_within_range(
+            fracrc_r_path, minimum_acceptable_fracrc_r,
+            maximum_acceptable_fracrc_r, _TARGET_NODATA)
+
+        # known values
+        create_random_raster(fracrc_p_path, 0.7, 0.7)
+        create_random_raster(totale_1_path, 10, 10)
+        create_random_raster(totale_2_path, 157, 157)
+        create_random_raster(demand_1_path, 14, 14)
+        create_random_raster(demand_2_path, 30, 30)
+        create_random_raster(h2ogef_1_path, 0.7, 0.7)
+        create_random_raster(cfrtcw_1_path, 0.7, 0.7)
+        create_random_raster(cfrtcw_2_path, 0.36, 0.36)
+        create_random_raster(cfrtcn_1_path, 0.47, 0.47)
+        create_random_raster(cfrtcn_2_path, 0.33, 0.33)
+
+        known_fracrc_r_frtcindx_0 = 0.7
+        known_fracrc_r_frtcindx_1 = 0.462
+        tolerance = 0.0001
+
+        create_random_raster(frtcindx_path, 0, 0)
+        forage.calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
+        assert_all_values_in_raster_within_range(
+            fracrc_r_path, known_fracrc_r_frtcindx_0 - tolerance,
+            known_fracrc_r_frtcindx_0 + tolerance, _TARGET_NODATA)
+
+        create_random_raster(frtcindx_path, 1, 1)
+        forage.calc_revised_fracrc(
+            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
+        assert_all_values_in_raster_within_range(
+            fracrc_r_path, known_fracrc_r_frtcindx_1 - tolerance,
+            known_fracrc_r_frtcindx_1 + tolerance, _TARGET_NODATA)
