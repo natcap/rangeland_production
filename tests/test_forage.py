@@ -2124,4 +2124,31 @@ class foragetests(unittest.TestCase):
             rtsh, rtsh_grzeff_2 - tolerance, rtsh_grzeff_2 + tolerance,
             _TARGET_NODATA)
 
+    def test_calc_tgprod_final(self):
+        """Test that `calc_tgprod_final` reproduces results calculated by hand.
+
+        Use the function `calc_tgprod_final` to calculate tgprod, final total
+        prodcution from root:shoot ratio and aboveground production. Test that
+        calculated tgprod matches results calculated by hand.
+
+        Raises:
+            AssertionError if tgprod is not within 0.0001 of the value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        array_size = (3, 3)
+        # known values
+        rtsh = numpy.full(array_size, 0.72)
+        agprod = numpy.full(array_size, 333)
+
+        known_tgprod = 572.76
+        tolerance = 0.0001
+        tgprod = forage.calc_tgprod_final(rtsh, agprod)
+        assert_all_values_in_array_within_range(
+            tgprod, known_tgprod - tolerance, known_tgprod + tolerance,
+            _TARGET_NODATA)
 
