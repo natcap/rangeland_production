@@ -1631,3 +1631,88 @@ class foragetests(unittest.TestCase):
         assert_all_values_in_raster_within_range(
             demand_path, known_demand - tolerance, known_demand + tolerance,
             _TARGET_NODATA)
+
+    def test_calc_provisional_fracrc(self):
+        """Test that `calc_provisional_fracrc` returns reasonable results.
+
+        Use the function `calc_provisional_fracrc` to calculate fracrc_p, the
+        fraction of carbon allocated to roots. Test that fracrc_p calculated
+        from random inputs is inside the valid range given the range
+        of inputs. Introduce nodata values into inputs and test that fracrc_p
+        remains inside the valid range. Test the function with known inputs
+        against values calculated by hand.
+
+        Raises:
+            AssertionError if fracrc_p from random inputs is outside the range
+                of valid values given the range of inputs
+            AssertionError if fracrc_p from known inputs is not within 0.0001 of
+                of the value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        array_shape = (10, 10)
+
+        annual_precip = numpy.random.uniform(22, 100, array_shape)
+        frtcindx = numpy.random.randint(0, 2, array_shape)
+        bgppa = numpy.random.uniform(100, 200, array_shape)
+        bgppb = numpy.random.uniform(2, 12, array_shape)
+        agppa = numpy.random.uniform(-40, -10, array_shape)
+        agppb = numpy.random.uniform(2, 12, array_shape)
+        cfrtcw_1 = numpy.random.uniform(0.4, 0.8, array_shape)
+        cfrtcw_2 = numpy.random.uniform(0.01, 0.38, array_shape)
+        cfrtcn_1 = numpy.random.uniform(0.4, 0.8, array_shape)
+        cfrtcn_2 = numpy.random.uniform(0.01, 0.38, array_shape)
+
+        minimum_acceptable_fracrc_p = 0.205
+        maximum_acceptable_fracrc_p = 0.97297
+
+        fracrc_p = forage.calc_provisional_fracrc(
+            annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
+            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
+        assert_all_values_in_array_within_range(
+            fracrc_p, minimum_acceptable_fracrc_p,
+            maximum_acceptable_fracrc_p, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(annual_precip, _TARGET_NODATA)
+        fracrc_p = forage.calc_provisional_fracrc(
+            annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
+            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
+        assert_all_values_in_array_within_range(
+            fracrc_p, minimum_acceptable_fracrc_p,
+            maximum_acceptable_fracrc_p, _TARGET_NODATA)
+
+        # known values
+        annual_precip = numpy.full(array_shape, 42)
+        bgppa = numpy.full(array_shape, 101)
+        bgppb = numpy.full(array_shape, 4.2)
+        agppa = numpy.full(array_shape, -12)
+        agppb = numpy.full(array_shape, 3.2)
+        cfrtcw_1 = numpy.full(array_shape, 0.4)
+        cfrtcw_2 = numpy.full(array_shape, 0.33)
+        cfrtcn_1 = numpy.full(array_shape, 0.76)
+        cfrtcn_2 = numpy.full(array_shape, 0.02)
+
+        insert_nodata_values_into_array(annual_precip, _TARGET_NODATA)
+
+        known_fracrc_p_frtcindx_0 = 0.69385
+        known_fracrc_p_frtcindx_1 = 0.3775
+        tolerance = 0.0001
+
+        frtcindx = numpy.full(array_shape, 0)
+        fracrc_p = forage.calc_provisional_fracrc(
+            annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
+            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
+        assert_all_values_in_array_within_range(
+            fracrc_p, known_fracrc_p_frtcindx_0 - tolerance,
+            known_fracrc_p_frtcindx_0 + tolerance, _TARGET_NODATA)
+
+        frtcindx = numpy.full(array_shape, 1)
+        fracrc_p = forage.calc_provisional_fracrc(
+            annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
+            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
+        assert_all_values_in_array_within_range(
+            fracrc_p, known_fracrc_p_frtcindx_1 - tolerance,
+            known_fracrc_p_frtcindx_1 + tolerance, _TARGET_NODATA)
