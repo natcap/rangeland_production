@@ -3017,6 +3017,153 @@ def calc_revised_fracrc(
     shutil.rmtree(temp_dir)
 
 
+def grazing_effect_on_aboveground_production(
+        tgprod, fracrc, flgrem, grzeff):
+    """Adjust aboveground production with the impact of grazing.
+
+    Removal of biomass by herbivores directly impacts potential
+    aboveground production according to the amount of biomass removed
+    and the parameter grzeff, which acts as a switch to determine the
+    effect. If grzeff=0, 3, or 4, aboveground production is not
+    changed. If grzeff=1 or 6, production decreases linearly with
+    biomass removed; if grzeff=2 or 5, biomass removed has a quadratic
+    impact on production. Grazrst.f
+
+    Parameters:
+        tgprod (numpy.ndarray): derived, total potential biomass
+            production restricted by water and nutrient availability
+        fracrc (numpy.ndarray): derived, fraction of carbon allocated
+            to roots according to water and nutrient availability
+        flgrem (numpy.ndarray): derived, fraction of live biomass
+            removed by grazing in previous monthly step
+        grzeff (numpy.ndarray): parameter, the effect of defoliation on
+            production and root:shoot ratio
+
+    Returns:
+        agprod, aboveground production impacted by grazing
+    """
+    valid_mask = (
+        (tgprod != _TARGET_NODATA)
+        & (fracrc != _TARGET_NODATA)
+        & (flgrem != _IC_NODATA)
+        & (grzeff != _IC_NODATA))
+
+    agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
+    agprod_prior[:] = _TARGET_NODATA
+    agprod_prior[valid_mask] = (
+        tgprod[valid_mask] * (1. - fracrc[valid_mask]))
+
+    linear_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
+    linear_effect[:] = _TARGET_NODATA
+    linear_effect[valid_mask] = numpy.maximum(
+        (1. - (2.21*flgrem[valid_mask])) * agprod_prior[valid_mask],
+        0.02)
+
+    quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
+    quadratic_effect[:] = _TARGET_NODATA
+    quadratic_effect[valid_mask] = numpy.maximum(
+        (1. + 2.6*flgrem[valid_mask]
+            - (5.83*(numpy.power(flgrem[valid_mask], 2))))
+        * agprod_prior[valid_mask],
+        0.02)
+
+    no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
+    linear_mask = (valid_mask & numpy.isin(grzeff, [1, 6]))
+    quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 5]))
+
+    agprod = numpy.empty(tgprod.shape, dtype=numpy.float32)
+    agprod[:] = _TARGET_NODATA
+    agprod[no_effect_mask] = agprod_prior[no_effect_mask]
+    agprod[linear_mask] = linear_effect[linear_mask]
+    agprod[quadratic_mask] = quadratic_effect[quadratic_mask]
+    return agprod
+
+
+def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
+    """Adjust root:shoot ratio according to the impact of grazing.
+
+    Removal of biomass by herbivores directly impacts the root:shoot
+    ratio of production according to the amount of biomass removed and
+    the parameter grzeff, which acts as a switch to determine the
+    effect. If grzeff=0 or 1, the root:shoot ratio is not changed.
+    If grzeff=2 or 3, biomass removed has a quadratic impact on the
+    root:shoot ratio. If grzeff=4, 5, or 6, biomass removed has a
+    linear effect on the root:shoot ratio. The parameter gremb
+    multiplies the linear impact of grazing when grzeff=4, 5 or 6.
+    Grzrst.f
+
+    Parameters:
+        fracrc (numpy.ndarray): derived, fraction of carbon allocated
+            to roots according to water and nutrient availability
+        flgrem (numpy.ndarray): derived, fraction of live biomass
+            removed by grazing in previous monthly step
+        grzeff (numpy.ndarray): parameter, the effect of defoliation on
+            production and root:shoot ratio
+        grzemb (numpy.ndarray): parameter, grazing effect multiplier
+
+    Returns:
+        rtsh, root:shoot ratio impacted by grazing
+    """
+    valid_mask = (
+        (fracrc != _TARGET_NODATA)
+        & (flgrem != _TARGET_NODATA)
+        & (grzeff != _IC_NODATA)
+        & (gremb != _IC_NODATA))
+
+    rtsh_prior = numpy.empty(fracrc.shape, dtype=numpy.float32)
+    rtsh_prior[:] = _TARGET_NODATA
+    rtsh_prior[valid_mask] = (
+        fracrc[valid_mask] / (1. - fracrc[valid_mask]))
+
+    quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
+    quadratic_effect[:] = _TARGET_NODATA
+    quadratic_effect[valid_mask] = (
+        rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask]
+        - 11.78 * numpy.power(flgrem[valid_mask], 2))
+
+    linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
+    linear_effect[:] = _TARGET_NODATA
+    linear_effect[valid_mask] = (
+        1. - (flgrem[valid_mask] * gremb[valid_mask]))
+
+    no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 1]))
+    quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 3]))
+    linear_mask = (valid_mask & numpy.isin(grzeff, [4, 5, 6]))
+
+    rtsh = numpy.empty(fracrc.shape, dtype=numpy.float32)
+    rtsh[:] = _TARGET_NODATA
+    rtsh[no_effect_mask] = rtsh_prior[no_effect_mask]
+    rtsh[quadratic_mask] = quadratic_effect[quadratic_mask]
+    rtsh[linear_mask] = linear_effect[linear_mask]
+    return rtsh
+
+
+def calc_tgprod_final(rtsh, agprod):
+    """Calculate final total potential production.
+
+    Final total potential production is calculated from aboveground
+    production impacted by grazing and the final root:shoot ratio
+    impacted by grazing.
+
+    Parameters:
+        rtsh (numpy.ndarray): derived, final root:shoot ratio impacted
+            by grazing
+        agprod (numpy.ndarray): derived, final aboveground potential
+            production impacted by grazing
+
+    Returns:
+        tgprod, final total potential production
+    """
+    valid_mask = (
+        (rtsh != _TARGET_NODATA)
+        & (agprod != _TARGET_NODATA))
+    tgprod = numpy.empty(rtsh.shape, dtype=numpy.float32)
+    tgprod[:] = _TARGET_NODATA
+    tgprod[valid_mask] = (
+        agprod[valid_mask] + (rtsh[valid_mask] * agprod[valid_mask]))
+    return tgprod
+
+
 def calc_final_tgprod_rtsh(
         tgprod_pot_prod_path, fracrc_path, flgrem_path, grzeff_path,
         gremb_path, tgprod_path, rtsh_path):
@@ -3057,150 +3204,6 @@ def calc_final_tgprod_rtsh(
     Returns:
         None
     """
-    def grazing_effect_on_aboveground_production(
-            tgprod, fracrc, flgrem, grzeff):
-        """Adjust aboveground production with the impact of grazing.
-
-        Removal of biomass by herbivores directly impacts potential
-        aboveground production according to the amount of biomass removed
-        and the parameter grzeff, which acts as a switch to determine the
-        effect. If grzeff=0, 3, or 4, aboveground production is not
-        changed. If grzeff=1 or 6, production decreases linearly with
-        biomass removed; if grzeff=2 or 5, biomass removed has a quadratic
-        impact on production. Grazrst.f
-
-        Parameters:
-            tgprod (numpy.ndarray): derived, total potential biomass
-                production restricted by water and nutrient availability
-            fracrc (numpy.ndarray): derived, fraction of carbon allocated
-                to roots according to water and nutrient availability
-            flgrem (numpy.ndarray): derived, fraction of live biomass
-                removed by grazing in previous monthly step
-            grzeff (numpy.ndarray): parameter, the effect of defoliation on
-                production and root:shoot ratio
-
-        Returns:
-            agprod, aboveground production impacted by grazing
-        """
-        valid_mask = (
-            (tgprod != _TARGET_NODATA)
-            & (fracrc != _TARGET_NODATA)
-            & (flgrem != _IC_NODATA)
-            & (grzeff != _IC_NODATA))
-
-        agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
-        agprod_prior[:] = _TARGET_NODATA
-        agprod_prior[valid_mask] = (
-            tgprod[valid_mask] * (1. - fracrc[valid_mask]))
-
-        linear_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
-        linear_effect[:] = _TARGET_NODATA
-        linear_effect[valid_mask] = numpy.maximum(
-            (1. - (2.21*flgrem[valid_mask])) * agprod_prior[valid_mask],
-            0.02)
-
-        quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
-        quadratic_effect[:] = _TARGET_NODATA
-        quadratic_effect[valid_mask] = numpy.maximum(
-            (1. + 2.6*flgrem[valid_mask]
-                - (5.83*(numpy.power(flgrem[valid_mask], 2))))
-            * agprod_prior[valid_mask],
-            0.02)
-
-        no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
-        linear_mask = (valid_mask & numpy.isin(grzeff, [1, 6]))
-        quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 5]))
-
-        agprod = numpy.empty(tgprod.shape, dtype=numpy.float32)
-        agprod[:] = _TARGET_NODATA
-        agprod[no_effect_mask] = agprod_prior[no_effect_mask]
-        agprod[linear_mask] = linear_effect[linear_mask]
-        agprod[quadratic_mask] = quadratic_effect[quadratic_mask]
-        return agprod
-
-    def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
-        """Adjust root:shoot ratio according to the impact of grazing.
-
-        Removal of biomass by herbivores directly impacts the root:shoot
-        ratio of production according to the amount of biomass removed and
-        the parameter grzeff, which acts as a switch to determine the
-        effect. If grzeff=0 or 1, the root:shoot ratio is not changed.
-        If grzeff=2 or 3, biomass removed has a quadratic impact on the
-        root:shoot ratio. If grzeff=4, 5, or 6, biomass removed has a
-        linear effect on the root:shoot ratio. The parameter gremb
-        multiplies the linear impact of grazing when grzeff=4, 5 or 6.
-        Grzrst.f
-
-        Parameters:
-            fracrc (numpy.ndarray): derived, fraction of carbon allocated
-                to roots according to water and nutrient availability
-            flgrem (numpy.ndarray): derived, fraction of live biomass
-                removed by grazing in previous monthly step
-            grzeff (numpy.ndarray): parameter, the effect of defoliation on
-                production and root:shoot ratio
-            grzemb (numpy.ndarray): parameter, grazing effect multiplier
-
-        Returns:
-            rtsh, root:shoot ratio impacted by grazing
-        """
-        valid_mask = (
-            (fracrc != _TARGET_NODATA)
-            & (flgrem != _TARGET_NODATA)
-            & (grzeff != _IC_NODATA)
-            & (gremb != _IC_NODATA))
-
-        rtsh_prior = numpy.empty(fracrc.shape, dtype=numpy.float32)
-        rtsh_prior[:] = _TARGET_NODATA
-        rtsh_prior[valid_mask] = (
-            fracrc[valid_mask] / (1. - fracrc[valid_mask]))
-
-        quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
-        quadratic_effect[:] = _TARGET_NODATA
-        quadratic_effect[valid_mask] = (
-            rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask]
-            - 11.78 * numpy.power(flgrem[valid_mask], 2))
-
-        linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
-        linear_effect[:] = _TARGET_NODATA
-        linear_effect[valid_mask] = (
-            1. - (flgrem[valid_mask] * gremb[valid_mask]))
-
-        no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 1]))
-        quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 3]))
-        linear_mask = (valid_mask & numpy.isin(grzeff, [4, 5, 6]))
-
-        rtsh = numpy.empty(fracrc.shape, dtype=numpy.float32)
-        rtsh[:] = _TARGET_NODATA
-        rtsh[no_effect_mask] = rtsh_prior[no_effect_mask]
-        rtsh[quadratic_mask] = quadratic_effect[quadratic_mask]
-        rtsh[linear_mask] = linear_effect[linear_mask]
-        return rtsh
-
-    def calc_tgprod_final(rtsh, agprod):
-        """Calculate final total potential production.
-
-        Final total potential production is calculated from aboveground
-        production impacted by grazing and the final root:shoot ratio
-        impacted by grazing.
-
-        Parameters:
-            rtsh (numpy.ndarray): derived, final root:shoot ratio impacted
-                by grazing
-            agprod (numpy.ndarray): derived, final aboveground potential
-                production impacted by grazing
-
-        Returns:
-            tgprod, final total potential production
-        """
-        valid_mask = (
-            (rtsh != _TARGET_NODATA)
-            & (agprod != _TARGET_NODATA))
-        tgprod = numpy.empty(rtsh.shape, dtype=numpy.float32)
-        tgprod[:] = _TARGET_NODATA
-        tgprod[valid_mask] = (
-            agprod[valid_mask] + (rtsh[valid_mask] * agprod[valid_mask]))
-        return tgprod
-
     # temporary intermediate rasters for grazing effect
     temp_dir = tempfile.mkdtemp()
     agprod_path = os.path.join(temp_dir, 'agprod.tif')
