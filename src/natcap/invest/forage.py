@@ -970,7 +970,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
     pygeoprocessing.reclassify_raster(
         (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
-        _TARGET_NODATA)
+        _IC_NODATA)
 
     # estimate total soil organic matter
     _calc_ompc(

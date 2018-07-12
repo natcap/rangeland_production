@@ -467,12 +467,13 @@ class foragetests(unittest.TestCase):
         capacity and calculated wilting point are in the range [0.01, 0.9].
         Introduce nodata values into the input rasters and test that calculated
         field capacity and wilting point remain in the range [0.01, 0.9].
+        Test the function with known values against results calculated by hand.
 
         Raises:
-            AssertionError if calculated field capacity is outside the
-                acceptable range
-            AssertionError if calculated wilting point is outside the
-                acceptable range
+            AssertionError if a result from random inputs is outside the
+                known possible range given the range of inputs
+            AssertionError if a result from known inputs is outside the range
+                [known result += 0.0001]
 
         Returns:
             None
@@ -546,6 +547,41 @@ class foragetests(unittest.TestCase):
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
 
+        # known inputs
+        site_param_table = {1: {'edepth': 0.111}}
+        create_random_raster(som1c_2_path, 40, 40)
+        create_random_raster(som2c_2_path, 744, 744)
+        create_random_raster(som3c_path, 444, 444)
+        create_random_raster(sand_path, 0.4, 0.4)
+        create_random_raster(silt_path, 0.1, 0.1)
+        create_random_raster(bulk_d_path, 0.81, 0.81)
+        create_complementary_raster(sand_path, silt_path, clay_path)
+
+        known_afiel_1 = 0.47285
+        known_awilt_1 = 0.32424
+        known_afiel_4 = 0.47085
+        known_awilt_6 = 0.32132
+        tolerance = 0.0001
+
+        forage._afiel_awilt(
+            site_index_path, site_param_table, som1c_2_path,
+            som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
+            bulk_d_path, pp_reg)
+
+        assert_all_values_in_raster_within_range(
+            pp_reg['afiel_1_path'], known_afiel_1 - tolerance,
+            known_afiel_1 + tolerance, nodata_value)
+        assert_all_values_in_raster_within_range(
+            pp_reg['awilt_1_path'], known_awilt_1 - tolerance,
+            known_awilt_1 + tolerance, nodata_value)
+        assert_all_values_in_raster_within_range(
+            pp_reg['afiel_4_path'], known_afiel_4 - tolerance,
+            known_afiel_4 + tolerance, nodata_value)
+        assert_all_values_in_raster_within_range(
+            pp_reg['awilt_6_path'], known_awilt_6 - tolerance,
+            known_awilt_6 + tolerance, nodata_value)
+
+
     def test_persistent_params(self):
         """Test that values calculated by `persistent_params` are reasonable.
 
@@ -553,14 +589,14 @@ class foragetests(unittest.TestCase):
         fps1s3, and fps2s3 from randomly generated inputs. Test that each of
         the calculated quantities are within the range [0, 1].  Introduce
         nodata values into the inputs and test that calculated values
-        remain inside the specified ranges.
+        remain inside the specified ranges. Test the function with known inputs
+        against values calculated by hand.
 
         Raises:
-            AssertionError if wc is outside the range [0, 1]
-            AssertionError if eftext is outside the range [0, 1]
-            AssertionError if p1co2_2 is outside the range [0, 1]
-            AssertionError if fps1s3 is outside the range [0, 1]
-            AssertionError if fps2s3 is outside the range [0, 1]
+            AssertionError if a result from random inputs is outside the
+                known possible range given the range of inputs
+            AssertionError if a result from known inputs is outside the range
+                [known result += 0.0001]
 
         Returns:
             None
@@ -657,6 +693,60 @@ class foragetests(unittest.TestCase):
                     ranges['maximum_acceptable_value'],
                     ranges['nodata_value'])
 
+        # known inputs
+        site_param_table[1]['peftxa'] = 0.2
+        site_param_table[1]['peftxb'] = 0.7
+        site_param_table[1]['p1co2a_2'] = 0.18
+        site_param_table[1]['p1co2b_2'] = 0.65
+        site_param_table[1]['ps1s3_1'] = 0.59
+        site_param_table[1]['ps1s3_2'] = 0.03
+        site_param_table[1]['ps2s3_1'] = 0.61
+        site_param_table[1]['ps2s3_2'] = 0.0022
+        site_param_table[1]['omlech_1'] = 0.022
+        site_param_table[1]['omlech_2'] = 0.12
+
+        create_random_raster(sand_path, 0.22, 0.22)
+        create_random_raster(clay_path, 0.22, 0.22)
+        create_random_raster(pp_reg['afiel_1_path'], 0.56, 0.56)
+        create_random_raster(pp_reg['awilt_1_path'], 0.4, 0.4)
+
+        known_value_dict = {
+            'wc_path': {
+                'value': 0.16,
+                'nodata_value': _TARGET_NODATA,
+                },
+            'eftext_path': {
+                'value': 0.354,
+                'nodata_value': _IC_NODATA,
+                },
+            'p1co2_2_path': {
+                'value': 0.323,
+                'nodata_value': _IC_NODATA,
+                },
+            'fps1s3_path': {
+                'value': 0.5966,
+                'nodata_value': _IC_NODATA,
+                },
+            'fps2s3_path': {
+                'value': 0.61048,
+                'nodata_value': _IC_NODATA,
+                },
+            'orglch_path': {
+                'value': 0.0484,
+                'nodata_value': _IC_NODATA,
+                },
+        }
+        tolerance = 0.0001
+
+        forage._persistent_params(
+            site_index_path, site_param_table, sand_path, clay_path,
+            pp_reg)
+
+        for path, values in known_value_dict.iteritems():
+            assert_all_values_in_raster_within_range(
+                pp_reg[path], values['value'] - tolerance,
+                values['value'] + tolerance, values['nodata_value'])
+
     def test_aboveground_ratio(self):
         """Test that values calculated by `_aboveground_ratio` are valid.
 
@@ -664,10 +754,14 @@ class foragetests(unittest.TestCase):
         ratio of decomposing aboveground material from random inputs. Test
         that the calculated ratio, agdrat, is within the range [1, 150].
         Introduce nodata values into the inputs and test that calculated
-        agdrat remains inside the range [1, 150].
+        agdrat remains inside the range [1, 150]. Calculate aboveground
+        ratio from known inputs and compare to result calculated by hand.
 
         Raises:
-            AssertionError if agdrat is outside the range [1, 150]
+            AssertionError if agdrat from random inputs is outside the
+                known possible range given the range of inputs
+            AssertionError if agdrat from known inputs is outside the range
+                [known result += 0.0001]
 
         Returns:
             None
@@ -710,6 +804,25 @@ class foragetests(unittest.TestCase):
             assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
+
+        # known inputs
+        tca = numpy.full(array_shape, 413)
+        anps = numpy.full(array_shape, 229)
+        pcemic_1 = numpy.full(array_shape, 17.4)
+        pcemic_2 = numpy.full(array_shape, 3.2)
+        pcemic_3 = numpy.full(array_shape, 0.04)
+        cemicb = numpy.full(array_shape, -20)
+
+        known_agdrat = 3.2
+        tolerance = 0.0001
+
+        agdrat = forage._aboveground_ratio(
+            anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+
+        assert_all_values_in_array_within_range(
+            agdrat, known_agdrat - tolerance, known_agdrat + tolerance,
+            agdrat_nodata)
+
 
     def test_structural_ratios(self):
         """Test that values calculated by `_structural_ratios` are valid.
@@ -838,10 +951,8 @@ class foragetests(unittest.TestCase):
                 months of precipitation rasters supplied
             AssertionError if `_yearly_tasks` does not fail with precipitation
                 rasters supplied not within 12 months of current month
-            AssertionError if calculated annual precipitation is outside the
-                range [0, 72]
-            AssertionError if calculated annual N deposition is outside the
-                range [0, 37]
+            AssertionError if a result from random inputs is outside the
+                known possible range given the range of inputs
 
         Returns:
             None
@@ -932,10 +1043,13 @@ class foragetests(unittest.TestCase):
         evapotranspiration (ET) from random inputs. Test that the calculated
         reference ET is within the range [0, 32]. Introduce nodata values into
         the inputs and test that the result remains inside the range [0, 31].
+        Test the function with known inputs against a value calculated by hand.
 
         Raises:
-            AssertionError if reference evapotranspiration is outside the range
-                [0, 32]
+            AssertionError if evapotranspiration from random inputs is outside
+                the known possible range given the range of inputs
+            AssertionError if evapotranspiration from known inputs is outside
+                the range [known result += 0.0001]
 
         Returns:
             None
@@ -977,6 +1091,23 @@ class foragetests(unittest.TestCase):
 
         assert_all_values_in_raster_within_range(
             pevap_path, minimum_acceptable_ET, maximum_acceptable_ET,
+            ET_nodata)
+
+        # known inputs
+        create_random_raster(max_temp_path, 23, 23)
+        create_random_raster(min_temp_path, -2, -2)
+        create_random_raster(shwave_path, 880, 880)
+        create_random_raster(fwloss_4_path, 0.6, 0.6)
+
+        known_ET = 9.5465
+        tolerance = 0.0001
+
+        forage._reference_evapotranspiration(
+            max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
+            pevap_path)
+
+        assert_all_values_in_raster_within_range(
+            pevap_path, known_ET - tolerance, known_ET + tolerance,
             ET_nodata)
 
     def test_potential_production(self):
@@ -1137,10 +1268,14 @@ class foragetests(unittest.TestCase):
         Use the function `_calc_favail_P` to calculate the intermediate
         parameter favail_P from random inputs.  Test that favail_P is
         inside the range [0, 1]. Introduce nodata values into inputs and test
-        that favail_P remains inside the range [0, 1].
+        that favail_P remains inside the range [0, 1]. Test the function with
+        known inputs against values calculated by hand.
 
         Raises:
-            AssertionError if favail_P is outside the range [0, 1]
+            AssertionError if favail_P from random inputs is outside the
+                known possible range given the range of inputs
+            AssertionError if favail_ from known inputs is outside the range
+                [known result += 0.0001]
 
         Returns:
             None
@@ -1182,6 +1317,21 @@ class foragetests(unittest.TestCase):
                 param_val_dict['favail_2'],
                 minimum_acceptable_favail_P,
                 maximum_acceptable_favail_P, _IC_NODATA)
+
+        # known inputs
+        create_random_raster(sv_reg['minerl_1_1_path'], 4.5, 4.5)
+        create_random_raster(param_val_dict['favail_4'], 0.2, 0.2)
+        create_random_raster(param_val_dict['favail_5'], 0.5, 0.5)
+        create_random_raster(param_val_dict['favail_6'], 2.3, 2.3)
+
+        known_favail_2 = 0.5
+        tolerance = 0.0001
+
+        forage._calc_favail_P(sv_reg, param_val_dict)
+        assert_all_values_in_raster_within_range(
+            param_val_dict['favail_2'],
+            known_favail_2 - tolerance, known_favail_2 + tolerance,
+            _IC_NODATA)
 
     def test_raster_sum(self):
         """Test the treatment of nodata values by `raster_sum`.
@@ -1276,10 +1426,14 @@ class foragetests(unittest.TestCase):
         nutrient from random results. Test that the calculated nutrient
         available is inside the range [0, 323]. Introduce nodata values into
         inputs and test that available nutrient remains inside the range
-        [0, 323].
+        [0, 323]. Test the function with known values against values calculated
+        by hand.
 
         Raises:
-            AssertionError if available nutrient is outside the range [0, 323]
+            AssertionError if a result from random inputs is outside the
+                known possible range given the range of inputs
+            AssertionError if a result from known inputs is outside the range
+                [known result += 0.0001]
 
         Returns:
             None
@@ -1353,6 +1507,50 @@ class foragetests(unittest.TestCase):
                 eavail_path, minimum_acceptable_eavail,
                 maximum_acceptable_evail, _TARGET_NODATA)
 
+        # known inputs
+        create_random_raster(sv_reg['bglivc_{}_path'.format(pft_i)], 100, 100)
+        create_random_raster(
+            sv_reg['crpstg_1_{}_path'.format(pft_i)], 0.8, 0.8)
+        create_random_raster(
+            sv_reg['crpstg_2_{}_path'.format(pft_i)], 0.8, 0.8)
+        create_random_raster(favail_path, 0.3, 0.3)
+        create_random_raster(tgprod_path, 300, 300)
+
+        for iel in [1, 2]:
+            for lyr in xrange(1, 11):
+                create_random_raster(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)], 1, 1)
+
+        pft_param_dict['snfxmx_1'] = 0.4
+        pft_param_dict['nlaypg'] = 4
+
+        site_param_table[1]['rictrl'] = 0.013
+        site_param_table[1]['riint'] = 0.65
+
+        known_N_avail = 49.9697
+        known_P_avail = 1.9697
+        tolerance = 0.0001
+
+        iel = 1
+        eavail_path = os.path.join(self.workspace_dir, 'eavail_N.tif')
+        forage._calc_available_nutrient(
+            pft_i, iel, pft_param_dict, sv_reg, site_param_table,
+            site_index_path, favail_path, tgprod_path, eavail_path)
+
+        assert_all_values_in_raster_within_range(
+            eavail_path, known_N_avail - tolerance,
+            known_N_avail + tolerance, _TARGET_NODATA)
+
+        iel = 2
+        eavail_path = os.path.join(self.workspace_dir, 'eavail_P.tif')
+        forage._calc_available_nutrient(
+            pft_i, iel, pft_param_dict, sv_reg, site_param_table,
+            site_index_path, favail_path, tgprod_path, eavail_path)
+
+        assert_all_values_in_raster_within_range(
+            eavail_path, known_P_avail - tolerance,
+            known_P_avail + tolerance, _TARGET_NODATA)
+
     def test_calc_nutrient_demand(self):
         """Test that `_calc_nutrient_demand` returns reasonable results.
 
@@ -1363,10 +1561,10 @@ class foragetests(unittest.TestCase):
         against a result calculated by hand for known inputs.
 
         Raises:
-            AssertionError if calculated demand from random inputs is outside
-                the range [???]
-            AssertionError if calculated demand from known inputs is not equal
-                to value calculated by hand
+            AssertionError if demand from random inputs is outside the
+                known possible range given the range of inputs
+            AssertionError if demand from known inputs is outside the range
+                [known result += 0.0001]
 
         Returns:
             None
