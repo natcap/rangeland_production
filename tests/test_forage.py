@@ -1645,7 +1645,7 @@ class foragetests(unittest.TestCase):
         Raises:
             AssertionError if fracrc_p from random inputs is outside the range
                 of valid values given the range of inputs
-            AssertionError if fracrc_p from known inputs is not within 0.0001 of
+            AssertionError if fracrc_p from known inputs is not within 0.0001
                 of the value calculated by hand
 
         Returns:
@@ -1716,3 +1716,141 @@ class foragetests(unittest.TestCase):
         assert_all_values_in_array_within_range(
             fracrc_p, known_fracrc_p_frtcindx_1 - tolerance,
             known_fracrc_p_frtcindx_1 + tolerance, _TARGET_NODATA)
+
+    def test_calc_ce_ratios(self):
+        """Test that `calc_ce_ratios` returns reasonable results.
+
+        Use the funciton `calc_ce_ratios` to calculate minimum and maximum
+        carbon to nutrient ratios. Test that ratios calculated from random
+        inputs are within the range of valid values given the range of
+        inputs. Introduce nodata values into inputs and test that results
+        remain within valid ranges. Calculate the ratios from known inputs
+        against results calculated by hand.
+
+        Raises:
+            AssertionError if calculated ratios are outside the range of
+                valid results given range of random inputs
+            AssertionError if calculated ratios are not within 0.0001 of
+                values calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        pramn_1_path = os.path.join(self.workspace_dir, 'pramn_1.tif')
+        pramn_2_path = os.path.join(self.workspace_dir, 'pramn_2.tif')
+        aglivc_path = os.path.join(self.workspace_dir, 'aglivc.tif')
+        biomax_path = os.path.join(self.workspace_dir, 'biomax.tif')
+        pramx_1_path = os.path.join(self.workspace_dir, 'pramx_1.tif')
+        pramx_2_path = os.path.join(self.workspace_dir, 'pramx_2.tif')
+        prbmn_1_path = os.path.join(self.workspace_dir, 'prbmn_1.tif')
+        prbmn_2_path = os.path.join(self.workspace_dir, 'prbmn_2.tif')
+        prbmx_1_path = os.path.join(self.workspace_dir, 'prbmx_1.tif')
+        prbmx_2_path = os.path.join(self.workspace_dir, 'prbmx_2.tif')
+        annual_precip_path = os.path.join(
+            self.workspace_dir, 'annual_precip.tif')
+        create_random_raster(pramn_1_path, 20, 50)
+        create_random_raster(pramn_2_path, 52, 70)
+        create_random_raster(aglivc_path, 20, 400)
+        create_random_raster(biomax_path, 300, 500)
+        create_random_raster(pramx_1_path, 51, 100)
+        create_random_raster(pramx_2_path, 70, 130)
+        create_random_raster(prbmn_1_path, 30, 70)
+        create_random_raster(prbmn_2_path, 0, 0.2)
+        create_random_raster(prbmx_1_path, 40, 70)
+        create_random_raster(prbmx_2_path, 0, 0.4)
+        create_random_raster(annual_precip_path, 22, 100)
+
+        pft_i = numpy.random.randint(0, 5)
+        iel = numpy.random.randint(1, 3)
+
+        month_reg = {
+            'cercrp_min_above_{}_{}'.format(iel, pft_i): os.path.join(
+                self.workspace_dir,
+                'cercrp_min_above_{}_{}.tif'.format(iel, pft_i)),
+            'cercrp_max_above_{}_{}'.format(iel, pft_i): os.path.join(
+                self.workspace_dir,
+                'cercrp_max_above_{}_{}.tif'.format(iel, pft_i)),
+            'cercrp_min_below_{}_{}'.format(iel, pft_i): os.path.join(
+                self.workspace_dir,
+                'cercrp_min_below_{}_{}.tif'.format(iel, pft_i)),
+            'cercrp_max_below_{}_{}'.format(iel, pft_i): os.path.join(
+                self.workspace_dir,
+                'cercrp_max_below_{}_{}.tif'.format(iel, pft_i)),
+        }
+
+        acceptable_range_dict = {
+            'cercrp_min_above_{}_{}'.format(iel, pft_i): {
+                'minimum_acceptable_value': 25.3333,
+                'maximum_acceptable_value': 70.,
+            },
+            'cercrp_max_above_{}_{}'.format(iel, pft_i): {
+                'minimum_acceptable_value': 45.,
+                'maximum_acceptable_value': 130.,
+            },
+            'cercrp_min_below_{}_{}'.format(iel, pft_i): {
+                'minimum_acceptable_value': 30.,
+                'maximum_acceptable_value': 90.,
+            },
+            'cercrp_max_below_{}_{}'.format(iel, pft_i): {
+                'minimum_acceptable_value': 40.,
+                'maximum_acceptable_value': 110.,
+            },
+        }
+        forage.calc_ce_ratios(
+            pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
+            pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
+            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
+            pft_i, iel)
+        for path, ranges in acceptable_range_dict.iteritems():
+            assert_all_values_in_raster_within_range(
+                month_reg[path], ranges['minimum_acceptable_value'],
+                ranges['maximum_acceptable_value'], _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(aglivc_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(prbmn_1_path, _IC_NODATA)
+        insert_nodata_values_into_raster(annual_precip_path, _TARGET_NODATA)
+        forage.calc_ce_ratios(
+            pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
+            pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
+            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
+            pft_i, iel)
+        for path, ranges in acceptable_range_dict.iteritems():
+            assert_all_values_in_raster_within_range(
+                month_reg[path], ranges['minimum_acceptable_value'],
+                ranges['maximum_acceptable_value'], _TARGET_NODATA)
+
+        # known inputs
+        create_random_raster(pramn_1_path, 22, 22)
+        create_random_raster(pramn_2_path, 55, 55)
+        create_random_raster(aglivc_path, 321, 321)
+        create_random_raster(biomax_path, 300, 300)
+        create_random_raster(pramx_1_path, 46, 46)
+        create_random_raster(pramx_2_path, 78, 78)
+        create_random_raster(prbmn_1_path, 52, 52)
+        create_random_raster(prbmn_2_path, 0.18, 0.18)
+        create_random_raster(prbmx_1_path, 42, 42)
+        create_random_raster(prbmx_2_path, 0.33, 0.33)
+        create_random_raster(annual_precip_path, 77.22, 77.22)
+
+        known_value_dict = {
+            'cercrp_min_above_{}_{}'.format(iel, pft_i): 55.,
+            'cercrp_max_above_{}_{}'.format(iel, pft_i): 78.,
+            'cercrp_min_below_{}_{}'.format(iel, pft_i): 65.8996,
+            'cercrp_max_below_{}_{}'.format(iel, pft_i): 67.4826,
+        }
+        tolerance = 0.0001
+
+        insert_nodata_values_into_raster(aglivc_path, -999)
+        insert_nodata_values_into_raster(prbmn_1_path, _IC_NODATA)
+        insert_nodata_values_into_raster(annual_precip_path, -9)
+        forage.calc_ce_ratios(
+            pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
+            pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
+            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
+            pft_i, iel)
+        for path, value in known_value_dict.iteritems():
+            assert_all_values_in_raster_within_range(
+                month_reg[path], value - tolerance,
+                value + tolerance, _TARGET_NODATA)
