@@ -1786,7 +1786,7 @@ class foragetests(unittest.TestCase):
                 'maximum_acceptable_value': 70.,
             },
             'cercrp_max_above_{}_{}'.format(iel, pft_i): {
-                'minimum_acceptable_value': 45.,
+                'minimum_acceptable_value': 25.,
                 'maximum_acceptable_value': 130.,
             },
             'cercrp_min_below_{}_{}'.format(iel, pft_i): {
@@ -1978,3 +1978,150 @@ class foragetests(unittest.TestCase):
         assert_all_values_in_raster_within_range(
             fracrc_r_path, known_fracrc_r_frtcindx_1 - tolerance,
             known_fracrc_r_frtcindx_1 + tolerance, _TARGET_NODATA)
+
+    def test_grazing_effect(self):
+        """Test grazing effect on aboveground production and root:shoot ratio.
+
+        Use the function `grazing_effect_on_aboveground_production` to
+        calculate agprod, revised aboveground production including the
+        effects of grazing. Use the function `grazing_effect_on_root_shoot` to
+        calculate rtsh, root:shoot ratio including the effects of grazing.
+        Test that agprod and rtsh match values calculated by hand. Introduce
+        nodata values into inputs and ensure that calculated agprod and rtsh
+        still matche value calculated by hand.
+
+        Raises:
+            AssertionError if agprod is not within 0.0001 of value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        array_shape = (3, 3)
+
+        # known values
+        tgprod = numpy.full(array_shape, 500)
+        fracrc = numpy.full(array_shape, 0.62)
+        flgrem = numpy.full(array_shape, 0.16)
+        gremb = numpy.full(array_shape, 0.02)
+
+        tolerance = 0.0001
+
+        grzeff = numpy.full(array_shape, 1)
+        agprod_grzeff_1 = 122.816
+        rtsh_grzeff_1 = 1.63158
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_1 - tolerance, agprod_grzeff_1 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_1 - tolerance, rtsh_grzeff_1 + tolerance,
+            _TARGET_NODATA)
+
+        grzeff = numpy.full(array_shape, 2)
+        agprod_grzeff_2 = 240.6828
+        rtsh_grzeff_2 = 1.818
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_2 - tolerance, agprod_grzeff_2 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_2 - tolerance, rtsh_grzeff_2 + tolerance,
+            _TARGET_NODATA)
+
+        grzeff = numpy.full(array_shape, 3)
+        agprod_grzeff_3 = 190
+        rtsh_grzeff_3 = 1.818
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_3 - tolerance, agprod_grzeff_3 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_3 - tolerance, rtsh_grzeff_3 + tolerance,
+            _TARGET_NODATA)
+
+
+        grzeff = numpy.full(array_shape, 4)
+        agprod_grzeff_4 = 190
+        rtsh_grzeff_4 = 0.9968
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_4 - tolerance, agprod_grzeff_4 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_4 - tolerance, rtsh_grzeff_4 + tolerance,
+            _TARGET_NODATA)
+
+        grzeff = numpy.full(array_shape, 5)
+        agprod_grzeff_5 =240.6828
+        rtsh_grzeff_5 = 0.9968
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_5 - tolerance, agprod_grzeff_5 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_5 - tolerance, rtsh_grzeff_5 + tolerance,
+            _TARGET_NODATA)
+
+        grzeff = numpy.full(array_shape, 6)
+        agprod_grzeff_6 = 122.816
+        rtsh_grzeff_6 = 0.9968
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_6 - tolerance, agprod_grzeff_6 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_6 - tolerance, rtsh_grzeff_6 + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(fracrc, _TARGET_NODATA)
+
+        grzeff = numpy.full(array_shape, 4)
+        agprod_grzeff_4 = 190
+        rtsh_grzeff_4 = 0.9968
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_4 - tolerance, agprod_grzeff_4 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_4 - tolerance, rtsh_grzeff_4 + tolerance,
+            _TARGET_NODATA)
+
+        grzeff = numpy.full(array_shape, 2)
+        agprod_grzeff_2 = 240.6828
+        rtsh_grzeff_2 = 1.818
+        agprod = forage.grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff)
+        rtsh = forage.grazing_effect_on_root_shoot(
+            fracrc, flgrem, grzeff, gremb)
+        assert_all_values_in_array_within_range(
+            agprod, agprod_grzeff_2 - tolerance, agprod_grzeff_2 + tolerance,
+            _TARGET_NODATA)
+        assert_all_values_in_array_within_range(
+            rtsh, rtsh_grzeff_2 - tolerance, rtsh_grzeff_2 + tolerance,
+            _TARGET_NODATA)
+
+
