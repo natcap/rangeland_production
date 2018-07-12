@@ -2590,6 +2590,648 @@ def _calc_nutrient_demand(
         gdal.GDT_Float32, _TARGET_NODATA)
 
 
+def calc_provisional_fracrc(
+        annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
+        cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2):
+    """Calculate provisional fraction of carbon allocated to roots.
+
+    A temporary provisional fraction of carbon allocated to roots must be
+    calculated prior to calculating plant demand for N and P. The value
+    of this provisional fraction depends on whether the plant functional
+    type is modeled as a perennial plant or with the "Great Plains"
+    equation of Parton et al. 1987, "Analysis of factors controlling soil
+    organic matter levels in Great Plains grasslands", Soil Science
+    Society of America Journal. Lines 36-47 cropDynC.f
+
+    Parameters:
+        annual_precip (numpy.ndarray): derived, sum of monthly
+            precipitation over twelve months including the current month
+        frtcindx (numpy.ndarray): parameter, flag indicating whether
+            root:shoot allocation follows the Great Plains equation
+            (frtcindx=0) or as a perennial plant (frtcindx=1)
+        bgppa (numpy.ndarray): parameter, intercept in regression
+            estimating belowground production from annual precipitation
+            if frtcindx=0
+        bgppb (numpy.ndarray): parameter, slope in regression estimating
+            belowground production from annual precipitation if
+            frtcindx=0
+        agppa (numpy.ndarray): parameter, intercept in regression
+            estimating aboveground production from annual precipitation
+            if frtcindx=0
+        agppb (numpy.ndarray): parameter, slope in regression estimating
+            aboveground production from annual precipitation if
+            frtcindx=0
+        cfrtcw_1 (numpy.ndarray): parameter, maximum fraction of carbon
+            allocated to roots under maximum water stress if frtcindx=1
+        cfrtcw_2 (numpy.ndarray): parameter, minimum fraction of carbon
+            allocated to roots without water stress if frtcindx=1
+        cfrtcn_1 (numpy.ndarray): parameter, maximum fraction of carbon
+            allocated to roots under maximum nutrient stress if frtcindx=1
+        cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of carbon
+            allocated to roots under no nutrient stress if frtcindx=1
+
+    Returns:
+        fracrc_p, provisional fraction of carbon allocated to roots
+    """
+    valid_mask = (
+        (annual_precip != _TARGET_NODATA)
+        & (frtcindx != _IC_NODATA))
+    rtsh = numpy.empty(annual_precip.shape, dtype=numpy.float32)
+    rtsh[:] = _TARGET_NODATA
+    rtsh[valid_mask] = (
+        (bgppa[valid_mask]
+            + annual_precip[valid_mask] * bgppb[valid_mask])
+        / (agppa[valid_mask] + annual_precip[valid_mask]
+            * agppb[valid_mask]))
+
+    fracrc_p = numpy.empty(annual_precip.shape, dtype=numpy.float32)
+    fracrc_p[:] = _TARGET_NODATA
+    fracrc_p[valid_mask] = numpy.where(
+        frtcindx[valid_mask] == 0,
+        (1.0 / (1.0 / rtsh[valid_mask] + 1.0)),
+        ((cfrtcw_1[valid_mask] + cfrtcw_2[valid_mask]
+            + cfrtcn_1[valid_mask] + cfrtcn_2[valid_mask]) / 4.0))
+    return fracrc_p
+
+
+def calc_ce_ratios(
+        pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
+        pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
+        prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
+        pft_i, iel):
+    """Calculate minimum and maximum carbon to nutrient ratios.
+
+    Minimum and maximum C/E ratios are used to calculate demand for a
+    nutrient by a plant functional type. This function calculates the
+    ratios for above- and belowground plant portions, for one plant
+    functional type and one nutrient. Fltce.f
+
+    Parameters:
+        pramn_1_path (string): path to raster containing the parameter
+            pramn_1, the minimum aboveground ratio with zero biomass
+        pramn_2_path (string): path to raster containing the parameter
+            pramn_2, the minimum aboveground ratio with biomass greater
+            than or equal to biomax
+        aglivc_path (string): path to raster containing carbon in
+            aboveground live biomass
+        biomax_path (string): path to raster containing the parameter
+            biomax, the biomass above which the ratio equals pramn_2
+            or pramx_2
+        pramx_1_path (string): path to raster containing the parameter
+            pramx_1, the maximum aboveground ratio with zero biomass
+        pramx_2_path (string): path to raster containing the parameter
+            pramx_2, the maximum aboveground ratio with biomass greater
+            than or equal to biomax
+        prbmn_1_path (string): path to raster containing the parameter
+            prbmn_1, intercept of regression to predict minimum
+            belowground ratio from annual precipitation
+        prbmn_2_path (string): path to raster containing the parameter
+            prbmn_2, slope of regression to predict minimum belowground
+            ratio from annual precipitation
+        prbmx_1_path (string): path to raster containing the parameter
+            prbmx_1, intercept of regression to predict maximum belowground
+            ratio from annual precipitation
+        prbmx_2_path (string): path to raster containing the parameter
+            prbmx_2, slope of regression to predict maximum belowground
+            ratio from annual precipitation
+        annual_precip_path (string): path to annual precipitation raster
+        month_reg (dict): map of key, path pairs giving paths to
+            intermediate calculated values that are shared between
+            submodels
+        pft_i (int): plant functional type index
+        iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
+
+    Modifies:
+        rasters indicated by
+            `month_reg['cercrp_min_above_<iel>_<pft_i>']`,
+            `month_reg['cercrp_max_above_<iel>_<pft_i>']`,
+            `month_reg['cercrp_min_below_<iel>_<pft_i>']`,
+            `month_reg['cercrp_max_below_<iel>_<pft_i>']`,
+
+    Returns:
+        None
+    """
+    def calc_above_ratio(pra_1, pra_2, aglivc, biomax):
+        """Calculate carbon to nutrient ratio for aboveground material.
+
+        Parameters:
+            pra_1 (numpy.ndarray): parameter, minimum or maximum ratio
+                with zero biomass
+            pra_2 (numpy.ndarray): parameter, minimum or maximum ratio
+                with biomass greater than or equal to biomax
+            aglivc (numpy.ndarray): state variable, carbon in aboveground
+                live material
+            biomax (numpy:ndarray): parameter, biomass above which the
+                ratio equals pra_2
+
+        Returns:
+            cercrp_above, carbon to nutrient ratio for aboveground
+                material
+        """
+        valid_mask = (
+            (pra_1 != _IC_NODATA)
+            & (pra_2 != _IC_NODATA)
+            & (aglivc != aglivc_nodata)
+            & (biomax != _IC_NODATA))
+
+        cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
+        cercrp_above[:] = _TARGET_NODATA
+
+        cercrp_above[valid_mask] = numpy.minimum(
+            (pra_1[valid_mask] + (pra_2[valid_mask] - pra_1[valid_mask])
+                * 2.5 * aglivc[valid_mask] / biomax[valid_mask]),
+            pra_2[valid_mask])
+        return cercrp_above
+
+    def calc_below_ratio(prb_1, prb_2, annual_precip):
+        """Calculate carbon to nutrient ratio for belowground material.
+
+        Parameters:
+            prb_1 (numpy.ndarray): parameter, intercept of regression
+                to predict ratio from annual precipitation
+            prb_2 (numpy.ndarray): parameter, slope of regression to
+                predict ratio from annual precipitation
+            annual_precip (numpy.ndarray): derived, precipitation in twelve
+                months including the current month
+
+        Returns:
+            cercrp_below, carbon to nutrient ratio for belowground
+                material
+        """
+        valid_mask = (
+            (prb_1 != _IC_NODATA)
+            & (prb_2 != _IC_NODATA)
+            & (annual_precip != annual_precip_nodata))
+
+        cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
+        cercrp_below[:] = _TARGET_NODATA
+
+        cercrp_below[valid_mask] = (
+            prb_1[valid_mask]
+            + (prb_2[valid_mask] * annual_precip[valid_mask]))
+        return cercrp_below
+
+    aglivc_nodata = pygeoprocessing.get_raster_info(
+        aglivc_path)['nodata'][0]
+    annual_precip_nodata = pygeoprocessing.get_raster_info(
+        annual_precip_path)['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            pramn_1_path, pramn_2_path, aglivc_path, biomax_path]],
+        calc_above_ratio,
+        month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            pramx_1_path, pramx_2_path, aglivc_path, biomax_path]],
+        calc_above_ratio,
+        month_reg['cercrp_max_above_{}_{}'.format(iel, pft_i)],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            prbmn_1_path, prbmn_2_path, annual_precip_path]],
+        calc_below_ratio,
+        month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            prbmx_1_path, prbmx_2_path, annual_precip_path]],
+        calc_below_ratio,
+        month_reg['cercrp_max_below_{}_{}'.format(iel, pft_i)],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+
+def calc_revised_fracrc(
+        frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
+        demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
+        cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path):
+    """
+    Calculate revised fraction of carbon allocated to roots.
+
+    The revised fraction of carbon allocated to roots includes the
+    impacts of water and nutrient limitation. The method of the
+    revised calculation depends on whether the plant functional
+    type is modeled as a perennial plant or with the "Great Plains"
+    equation of Parton et al. 1987, "Analysis of factors controlling soil
+    organic matter levels in Great Plains grasslands", Soil Science
+    Society of America Journal. Lines 96-104, cropDynC.f, froota.f
+
+    Parameters:
+        frtcindx_path (string): path to raster containing the parameter
+            frtcindx
+        fracrc_p_path (string): path to raster containing provisional
+            fraction of carbon allocated to roots
+        totale_1_path (string): path to raster containing total available
+            nitrogen
+        totale_2_path (string): path to raster containing total available
+            phosphorus
+        demand_1_path (string): path to raster containing nitrogen demand
+        demand_2_path (string): path to raster containing phosphorus demand
+        h2ogef_1_path (string): path to raster containing the limiting
+            effect of water availability on growth
+        cfrtcw_1_path (string): path to raster containing the parameter
+            cfrtcw_1
+        cfrtcw_2_path (string): path to raster containing the parameter
+            cfrtcw_2
+        cfrtcn_1_path (string): path to raster containing the parameter
+            cfrtcn_1
+        cfrtcn_2_path (string): path to raster containing the parameter
+            cfrtcn_2
+        fracrc_r_path (string): path to raster that should contain the
+            result, revised fraction of carbon allocated to roots
+
+    Modifies:
+        the raster indicated by `fracrc_r_path`
+
+    Returns:
+        None
+    """
+    def calc_a2drat(totale, demand):
+        """Calculate the ratio of available nutrient to nutrient demand.
+
+        The ratio of nutrient available to demand for the nutrient is
+        restricted to be between 0 and 1.
+
+        Parameters:
+            totale (numpy.ndarray): derived, nutrient available
+            demand (numpy.ndarray): derived, demand for the nutrient
+
+        Returns:
+            a2drat, the ratio of available nutrient to demand, restricted
+                to be between 0 and 1
+        """
+        valid_mask = (
+            (totale != _TARGET_NODATA)
+            & (demand != _TARGET_NODATA))
+
+        a2drat = numpy.empty(totale.shape, dtype=numpy.float32)
+        a2drat[:] = _TARGET_NODATA
+
+        a2drat[valid_mask] = numpy.minimum(
+            1., (totale[valid_mask] / demand[valid_mask]))
+        a2drat[valid_mask] = numpy.maximum(0., a2drat[valid_mask])
+        return a2drat
+
+    def calc_perennial_fracrc(
+            h2ogef, cfrtcw_1, cfrtcw_2, a2drat_1, a2drat_2, cfrtcn_1,
+            cfrtcn_2):
+        """Calculate fraction C allocated to roots for a perennial plant.
+
+        The fraction of carbon allocated to roots is determined by
+        water availability, described by h2ogef, and nutrient availability,
+        described by a2drat_1 for nitrogen and a2drat_2 for phosphorus.
+        Lines 114-125 froota.f
+
+        Parameters:
+            h2ogef (numpy.ndarray): derived, the limiting factor of water
+                availability on growth
+            cfrtcw_1 (numpy.ndarray): parameter, the maximum fraction of
+                carbon allocated to roots with maximum water stress
+            cfrtcw_2 (numpy.ndarray): parameter, the minimum fraction of
+                carbon allocated to roots with no water stress
+            a2drat_1 (numpy.ndarray): derived, the ratio of available
+                nitrogen to nitrogen demand, restricted to be between 0
+                and 1
+            a2drat_2 (numpy.ndarray): derived, the ratio of available
+                phosphorus to phosphorus demand, restricted to be between
+                0 and 1
+            cfrtcn_1 (numpy.ndarray): parameter, maximum fraction of
+                carbon allocated to roots with maximum nutrient stress
+            cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of
+                carbon allocated to roots with no nutrient stress
+
+        Returns:
+            fracrc_perennial, revised fraction of C allocated to roots for
+                a perennial plant
+        """
+        valid_mask = (
+            (h2ogef != _TARGET_NODATA)
+            & (cfrtcw_1 != _IC_NODATA)
+            & (cfrtcw_2 != _IC_NODATA)
+            & (a2drat_1 != _TARGET_NODATA)
+            & (a2drat_2 != _TARGET_NODATA)
+            & (cfrtcn_1 != _IC_NODATA)
+            & (cfrtcn_2 != _IC_NODATA))
+
+        h2oeff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+        h2oeff[:] = _TARGET_NODATA
+        h2oeff[valid_mask] = (
+            (cfrtcw_2[valid_mask] - cfrtcw_1[valid_mask])
+            * (h2ogef[valid_mask] - 1.) + cfrtcw_2[valid_mask])
+
+        ntreff_1 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+        ntreff_1[:] = _TARGET_NODATA
+        ntreff_1[valid_mask] = (
+            (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
+            * (a2drat_1[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
+
+        ntreff_2 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+        ntreff_2[:] = _TARGET_NODATA
+        ntreff_1[valid_mask] = (
+            (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
+            * (a2drat_2[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
+
+        ntreff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
+        ntreff[:] = _TARGET_NODATA
+        ntreff[valid_mask] = numpy.maximum(
+            ntreff_1[valid_mask], ntreff_2[valid_mask])
+
+        fracrc_perennial = numpy.empty(
+            h2ogef.shape, dtype=numpy.float32)
+        fracrc_perennial[:] = _TARGET_NODATA
+        fracrc_perennial[valid_mask] = numpy.minimum(
+            numpy.maximum(h2oeff[valid_mask], ntreff[valid_mask]), 0.99)
+        return fracrc_perennial
+
+    def revised_fracrc_op(frtcindx, fracrc_p, fracrc_perennial):
+        """Calculate revised fraction of carbon allocated to roots.
+
+        The revised fraction of carbon allocated to roots is calculated
+        according to the parameter frtcindx.  If frtcindx=0 (use the "Great
+        Plains equation"), the revised fraction is equal to the provisional
+        fraction.  If frtcindx=1 (a perennial plant), the revised fraction
+        is calculated from water and nutrient stress.
+
+        Parameters:
+            frtcindx (numpy.ndarray): parameter, indicates whether revised
+                fraction of carbon allocated to roots should follow the
+                "Great Plains equation" or the algorithm for a perennial
+                plant
+            fracrc_p (numpy.ndarray): derived, provisional fraction of
+                carbon allocated to roots
+            fracrc_perennial (numpy.ndarray): derived, fraction of
+                carbon allocated to roots for a perennial plant
+
+        Returns:
+            fracrc_r, revised fraction of carbon allocated to roots
+        """
+        valid_mask = (
+            (frtcindx != _IC_NODATA)
+            & (fracrc_p != _TARGET_NODATA)
+            & (fracrc_perennial != _TARGET_NODATA))
+
+        fracrc_r = numpy.empty(frtcindx.shape, dtype=numpy.float32)
+        fracrc_r[:] = _TARGET_NODATA
+        fracrc_r[valid_mask] = numpy.where(
+            frtcindx[valid_mask] == 0, fracrc_p[valid_mask],
+            fracrc_perennial[valid_mask])
+        return fracrc_r
+
+    # temporary intermediate rasters for calculating revised fracrc
+    temp_dir = tempfile.mkdtemp()
+    temp_val_dict = {}
+    for val in ['a2drat_1', 'a2drat_2', 'fracrc_perennial']:
+        temp_val_dict[val] = os.path.join(
+            temp_dir, '{}.tif'.format(val))
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [totale_1_path, demand_1_path]],
+        calc_a2drat, temp_val_dict['a2drat_1'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [totale_2_path, demand_2_path]],
+        calc_a2drat, temp_val_dict['a2drat_2'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            h2ogef_1_path, cfrtcw_1_path, cfrtcw_2_path,
+            temp_val_dict['a2drat_1'], temp_val_dict['a2drat_2'],
+            cfrtcn_1_path, cfrtcn_2_path]],
+        calc_perennial_fracrc, temp_val_dict['fracrc_perennial'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            frtcindx_path, fracrc_p_path,
+            temp_val_dict['fracrc_perennial']]],
+        revised_fracrc_op, fracrc_r_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def calc_final_tgprod_rtsh(
+        tgprod_pot_prod_path, fracrc_path, flgrem_path, grzeff_path,
+        gremb_path, tgprod_path, rtsh_path):
+    """Calculate final potential production and root:shoot ratio.
+
+    Final potential production and root:shoot ratio include the impact of
+    grazing. First calculate final aboveground production including the
+    impact of grazing; then calculate rtsh, the final root:shoot ratio
+    including the impact of grazing; then calculate tgprod, final total
+    potential production, from final aboveground production and final
+    root:shoot ratio. Grazrst.f
+
+    Parameters:
+        tgprod_pot_prod_path (string): path to raster containing total
+            potential biomass production restricted by water and nutrient
+            availability, prior to effects of grazing
+        fracrc_path (string): path to raster containing the fraction of
+            carbon production allocated to roots according to restriction
+            by water and nutrient availability, prior to effects of
+            grazing
+        flgrem_path (string): path to raster containing the fraction of
+            live aboveground biomass removed by herbivores according to
+            diet selection in the previous step
+        grzeff_path (string): path to raster containing the parameter
+            grzeff, the effect of defolation on production and root:shoot
+            ratio
+        gremb_path (string): path to raster containing the parameter
+            gremb, the grazing effect multiplier
+        tgprod_path (string): path to raster containing final total
+            potential production
+        rtsh_path (string): path to raster containing final root:shoot
+            ratio
+
+    Modifies:
+        The raster indicated by tgprod_path
+        The raster indicated by rtsh_path
+
+    Returns:
+        None
+    """
+    def grazing_effect_on_aboveground_production(
+            tgprod, fracrc, flgrem, grzeff):
+        """Adjust aboveground production with the impact of grazing.
+
+        Removal of biomass by herbivores directly impacts potential
+        aboveground production according to the amount of biomass removed
+        and the parameter grzeff, which acts as a switch to determine the
+        effect. If grzeff=0, 3, or 4, aboveground production is not
+        changed. If grzeff=1 or 6, production decreases linearly with
+        biomass removed; if grzeff=2 or 5, biomass removed has a quadratic
+        impact on production. Grazrst.f
+
+        Parameters:
+            tgprod (numpy.ndarray): derived, total potential biomass
+                production restricted by water and nutrient availability
+            fracrc (numpy.ndarray): derived, fraction of carbon allocated
+                to roots according to water and nutrient availability
+            flgrem (numpy.ndarray): derived, fraction of live biomass
+                removed by grazing in previous monthly step
+            grzeff (numpy.ndarray): parameter, the effect of defoliation on
+                production and root:shoot ratio
+
+        Returns:
+            agprod, aboveground production impacted by grazing
+        """
+        valid_mask = (
+            (tgprod != _TARGET_NODATA)
+            & (fracrc != _TARGET_NODATA)
+            & (flgrem != _IC_NODATA)
+            & (grzeff != _IC_NODATA))
+
+        agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
+        agprod_prior[:] = _TARGET_NODATA
+        agprod_prior[valid_mask] = (
+            tgprod[valid_mask] * (1. - fracrc[valid_mask]))
+
+        linear_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
+        linear_effect[:] = _TARGET_NODATA
+        linear_effect[valid_mask] = numpy.maximum(
+            (1. - (2.21*flgrem[valid_mask])) * agprod_prior[valid_mask],
+            0.02)
+
+        quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
+        quadratic_effect[:] = _TARGET_NODATA
+        quadratic_effect[valid_mask] = numpy.maximum(
+            (1. + 2.6*flgrem[valid_mask]
+                - (5.83*(numpy.power(flgrem[valid_mask], 2))))
+            * agprod_prior[valid_mask],
+            0.02)
+
+        no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
+        linear_mask = (valid_mask & numpy.isin(grzeff, [1, 6]))
+        quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 5]))
+
+        agprod = numpy.empty(tgprod.shape, dtype=numpy.float32)
+        agprod[:] = _TARGET_NODATA
+        agprod[no_effect_mask] = agprod_prior[no_effect_mask]
+        agprod[linear_mask] = linear_effect[linear_mask]
+        agprod[quadratic_mask] = quadratic_effect[quadratic_mask]
+        return agprod
+
+    def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
+        """Adjust root:shoot ratio according to the impact of grazing.
+
+        Removal of biomass by herbivores directly impacts the root:shoot
+        ratio of production according to the amount of biomass removed and
+        the parameter grzeff, which acts as a switch to determine the
+        effect. If grzeff=0 or 1, the root:shoot ratio is not changed.
+        If grzeff=2 or 3, biomass removed has a quadratic impact on the
+        root:shoot ratio. If grzeff=4, 5, or 6, biomass removed has a
+        linear effect on the root:shoot ratio. The parameter gremb
+        multiplies the linear impact of grazing when grzeff=4, 5 or 6.
+        Grzrst.f
+
+        Parameters:
+            fracrc (numpy.ndarray): derived, fraction of carbon allocated
+                to roots according to water and nutrient availability
+            flgrem (numpy.ndarray): derived, fraction of live biomass
+                removed by grazing in previous monthly step
+            grzeff (numpy.ndarray): parameter, the effect of defoliation on
+                production and root:shoot ratio
+            grzemb (numpy.ndarray): parameter, grazing effect multiplier
+
+        Returns:
+            rtsh, root:shoot ratio impacted by grazing
+        """
+        valid_mask = (
+            (fracrc != _TARGET_NODATA)
+            & (flgrem != _TARGET_NODATA)
+            & (grzeff != _IC_NODATA)
+            & (gremb != _IC_NODATA))
+
+        rtsh_prior = numpy.empty(fracrc.shape, dtype=numpy.float32)
+        rtsh_prior[:] = _TARGET_NODATA
+        rtsh_prior[valid_mask] = (
+            fracrc[valid_mask] / (1. - fracrc[valid_mask]))
+
+        quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
+        quadratic_effect[:] = _TARGET_NODATA
+        quadratic_effect[valid_mask] = (
+            rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask]
+            - 11.78 * numpy.power(flgrem[valid_mask], 2))
+
+        linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
+        linear_effect[:] = _TARGET_NODATA
+        linear_effect[valid_mask] = (
+            1. - (flgrem[valid_mask] * gremb[valid_mask]))
+
+        no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 1]))
+        quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 3]))
+        linear_mask = (valid_mask & numpy.isin(grzeff, [4, 5, 6]))
+
+        rtsh = numpy.empty(fracrc.shape, dtype=numpy.float32)
+        rtsh[:] = _TARGET_NODATA
+        rtsh[no_effect_mask] = rtsh_prior[no_effect_mask]
+        rtsh[quadratic_mask] = quadratic_effect[quadratic_mask]
+        rtsh[linear_mask] = linear_effect[linear_mask]
+        return rtsh
+
+    def calc_tgprod_final(rtsh, agprod):
+        """Calculate final total potential production.
+
+        Final total potential production is calculated from aboveground
+        production impacted by grazing and the final root:shoot ratio
+        impacted by grazing.
+
+        Parameters:
+            rtsh (numpy.ndarray): derived, final root:shoot ratio impacted
+                by grazing
+            agprod (numpy.ndarray): derived, final aboveground potential
+                production impacted by grazing
+
+        Returns:
+            tgprod, final total potential production
+        """
+        valid_mask = (
+            (rtsh != _TARGET_NODATA)
+            & (agprod != _TARGET_NODATA))
+        tgprod = numpy.empty(rtsh.shape, dtype=numpy.float32)
+        tgprod[:] = _TARGET_NODATA
+        tgprod[valid_mask] = (
+            agprod[valid_mask] + (rtsh[valid_mask] * agprod[valid_mask]))
+        return tgprod
+
+    # temporary intermediate rasters for grazing effect
+    temp_dir = tempfile.mkdtemp()
+    agprod_path = os.path.join(temp_dir, 'agprod.tif')
+
+    # grazing effect on aboveground production
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in
+            tgprod_pot_prod_path, fracrc_path, flgrem_path,
+            grzeff_path],
+        grazing_effect_on_aboveground_production,
+        agprod_path, gdal.GDT_Float32, _TARGET_NODATA)
+    # grazing effect on final root:shoot ratio
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in
+            fracrc_path, flgrem_path, grzeff_path, gremb_path],
+        grazing_effect_on_root_shoot,
+        month_reg['rtsh_{}'.format(pft_i)],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    # final total potential production
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in
+            month_reg['rtsh_{}'.format(pft_i)],
+            agprod_path],
+        calc_tgprod_final,
+        month_reg['tgprod_{}'.format(pft_i)],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
 def _root_shoot_ratio(
         aligned_inputs, site_param_table, current_month, pft_id_set,
         veg_trait_table, sv_reg, year_reg, month_reg):
@@ -2636,644 +3278,6 @@ def _root_shoot_ratio(
             month_reg['rtsh_{}_path'.format(pft_index)] = None
     if not do_PFT:
         return
-
-    def calc_provisional_fracrc(
-            annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
-            cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2):
-        """Calculate provisional fraction of carbon allocated to roots.
-
-        A temporary provisional fraction of carbon allocated to roots must be
-        calculated prior to calculating plant demand for N and P. The value
-        of this provisional fraction depends on whether the plant functional
-        type is modeled as a perennial plant or with the "Great Plains"
-        equation of Parton et al. 1987, "Analysis of factors controlling soil
-        organic matter levels in Great Plains grasslands", Soil Science
-        Society of America Journal. Lines 36-47 cropDynC.f
-
-        Parameters:
-            annual_precip (numpy.ndarray): derived, sum of monthly
-                precipitation over twelve months including the current month
-            frtcindx (numpy.ndarray): parameter, flag indicating whether
-                root:shoot allocation follows the Great Plains equation
-                (frtcindx=0) or as a perennial plant (frtcindx=1)
-            bgppa (numpy.ndarray): parameter, intercept in regression
-                estimating belowground production from annual precipitation
-                if frtcindx=0
-            bgppb (numpy.ndarray): parameter, slope in regression estimating
-                belowground production from annual precipitation if
-                frtcindx=0
-            agppa (numpy.ndarray): parameter, intercept in regression
-                estimating aboveground production from annual precipitation
-                if frtcindx=0
-            agppb (numpy.ndarray): parameter, slope in regression estimating
-                aboveground production from annual precipitation if
-                frtcindx=0
-            cfrtcw_1 (numpy.ndarray): parameter, maximum fraction of carbon
-                allocated to roots under maximum water stress if frtcindx=1
-            cfrtcw_2 (numpy.ndarray): parameter, minimum fraction of carbon
-                allocated to roots without water stress if frtcindx=1
-            cfrtcn_1 (numpy.ndarray): parameter, maximum fraction of carbon
-                allocated to roots under maximum nutrient stress if frtcindx=1
-            cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of carbon
-                allocated to roots under no nutrient stress if frtcindx=1
-
-        Returns:
-            fracrc_p, provisional fraction of carbon allocated to roots
-        """
-        valid_mask = (
-            (annual_precip != _TARGET_NODATA)
-            & (frtcindx != _IC_NODATA))
-        rtsh = numpy.empty(annual_precip.shape, dtype=numpy.float32)
-        rtsh[:] = _TARGET_NODATA
-        rtsh[valid_mask] = (
-            (bgppa[valid_mask]
-                + annual_precip[valid_mask] * bgppb[valid_mask])
-            / (agppa[valid_mask] + annual_precip[valid_mask]
-                * agppb[valid_mask]))
-
-        fracrc_p = numpy.empty(annual_precip.shape, dtype=numpy.float32)
-        fracrc_p[:] = _TARGET_NODATA
-        fracrc_p[valid_mask] = numpy.where(
-            frtcindx[valid_mask] == 0,
-            (1.0 / (1.0 / rtsh[valid_mask] + 1.0)),
-            ((cfrtcw_1[valid_mask] + cfrtcw_2[valid_mask]
-                + cfrtcn_1[valid_mask] + cfrtcn_2[valid_mask]) / 4.0))
-        return fracrc_p
-
-    def calc_ce_ratios(
-            pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
-            pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
-            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
-            pft_i, iel):
-        """Calculate minimum and maximum carbon to nutrient ratios.
-
-        Minimum and maximum C/E ratios are used to calculate demand for a
-        nutrient by a plant functional type. This function calculates the
-        ratios for above- and belowground plant portions, for one plant
-        functional type and one nutrient. Fltce.f
-
-        Parameters:
-            pramn_1_path (string): path to raster containing the parameter
-                pramn_1, the minimum aboveground ratio with zero biomass
-            pramn_2_path (string): path to raster containing the parameter
-                pramn_2, the minimum aboveground ratio with biomass greater
-                than or equal to biomax
-            aglivc_path (string): path to raster containing carbon in
-                aboveground live biomass
-            biomax_path (string): path to raster containing the parameter
-                biomax, the biomass above which the ratio equals pramn_2
-                or pramx_2
-            pramx_1_path (string): path to raster containing the parameter
-                pramx_1, the maximum aboveground ratio with zero biomass
-            pramx_2_path (string): path to raster containing the parameter
-                pramx_2, the maximum aboveground ratio with biomass greater
-                than or equal to biomax
-            prbmn_1_path (string): path to raster containing the parameter
-                prbmn_1, intercept of regression to predict minimum
-                belowground ratio from annual precipitation
-            prbmn_2_path (string): path to raster containing the parameter
-                prbmn_2, slope of regression to predict minimum belowground
-                ratio from annual precipitation
-            prbmx_1_path (string): path to raster containing the parameter
-                prbmx_1, intercept of regression to predict maximum belowground
-                ratio from annual precipitation
-            prbmx_2_path (string): path to raster containing the parameter
-                prbmx_2, slope of regression to predict maximum belowground
-                ratio from annual precipitation
-            annual_precip_path (string): path to annual precipitation raster
-            month_reg (dict): map of key, path pairs giving paths to
-                intermediate calculated values that are shared between
-                submodels
-            pft_i (int): plant functional type index
-            iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
-
-        Modifies:
-            rasters indicated by
-                `month_reg['cercrp_min_above_<iel>_<pft_i>']`,
-                `month_reg['cercrp_max_above_<iel>_<pft_i>']`,
-                `month_reg['cercrp_min_below_<iel>_<pft_i>']`,
-                `month_reg['cercrp_max_below_<iel>_<pft_i>']`,
-
-        Returns:
-            None
-        """
-        def calc_above_ratio(pra_1, pra_2, aglivc, biomax):
-            """Calculate carbon to nutrient ratio for aboveground material.
-
-            Parameters:
-                pra_1 (numpy.ndarray): parameter, minimum or maximum ratio
-                    with zero biomass
-                pra_2 (numpy.ndarray): parameter, minimum or maximum ratio
-                    with biomass greater than or equal to biomax
-                aglivc (numpy.ndarray): state variable, carbon in aboveground
-                    live material
-                biomax (numpy:ndarray): parameter, biomass above which the
-                    ratio equals pra_2
-
-            Returns:
-                cercrp_above, carbon to nutrient ratio for aboveground
-                    material
-            """
-            valid_mask = (
-                (pra_1 != _IC_NODATA)
-                & (pra_2 != _IC_NODATA)
-                & (aglivc != aglivc_nodata)
-                & (biomax != _IC_NODATA))
-
-            cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
-            cercrp_above[:] = _TARGET_NODATA
-
-            cercrp_above[valid_mask] = numpy.minimum(
-                (pra_1[valid_mask] + (pra_2[valid_mask] - pra_1[valid_mask])
-                    * 2.5 * aglivc[valid_mask] / biomax[valid_mask]),
-                pra_2[valid_mask])
-            return cercrp_above
-
-        def calc_below_ratio(prb_1, prb_2, annual_precip):
-            """Calculate carbon to nutrient ratio for belowground material.
-
-            Parameters:
-                prb_1 (numpy.ndarray): parameter, intercept of regression
-                    to predict ratio from annual precipitation
-                prb_2 (numpy.ndarray): parameter, slope of regression to
-                    predict ratio from annual precipitation
-                annual_precip (numpy.ndarray): derived, precipitation in twelve
-                    months including the current month
-
-            Returns:
-                cercrp_below, carbon to nutrient ratio for belowground
-                    material
-            """
-            valid_mask = (
-                (prb_1 != _IC_NODATA)
-                & (prb_2 != _IC_NODATA)
-                & (annual_precip != annual_precip_nodata))
-
-            cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
-            cercrp_below[:] = _TARGET_NODATA
-
-            cercrp_below[valid_mask] = (
-                prb_1[valid_mask]
-                + (prb_2[valid_mask] * annual_precip[valid_mask]))
-            return cercrp_below
-
-        aglivc_nodata = pygeoprocessing.get_raster_info(
-            aglivc_path)['nodata'][0]
-        annual_precip_nodata = pygeoprocessing.get_raster_info(
-            annual_precip_path)['nodata'][0]
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                pramn_1_path, pramn_2_path, aglivc_path, biomax_path]],
-            calc_above_ratio,
-            month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                pramx_1_path, pramx_2_path, aglivc_path, biomax_path]],
-            calc_above_ratio,
-            month_reg['cercrp_max_above_{}_{}'.format(iel, pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                prbmn_1_path, prbmn_2_path, annual_precip_path]],
-            calc_below_ratio,
-            month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                prbmx_1_path, prbmx_2_path, annual_precip_path]],
-            calc_below_ratio,
-            month_reg['cercrp_max_below_{}_{}'.format(iel, pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-    def calc_revised_fracrc(
-            frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
-            demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
-            cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path):
-        """
-        Calculate revised fraction of carbon allocated to roots.
-
-        The revised fraction of carbon allocated to roots includes the
-        impacts of water and nutrient limitation. The method of the
-        revised calculation depends on whether the plant functional
-        type is modeled as a perennial plant or with the "Great Plains"
-        equation of Parton et al. 1987, "Analysis of factors controlling soil
-        organic matter levels in Great Plains grasslands", Soil Science
-        Society of America Journal. Lines 96-104, cropDynC.f, froota.f
-
-        Parameters:
-            frtcindx_path (string): path to raster containing the parameter
-                frtcindx
-            fracrc_p_path (string): path to raster containing provisional
-                fraction of carbon allocated to roots
-            totale_1_path (string): path to raster containing total available
-                nitrogen
-            totale_2_path (string): path to raster containing total available
-                phosphorus
-            demand_1_path (string): path to raster containing nitrogen demand
-            demand_2_path (string): path to raster containing phosphorus demand
-            h2ogef_1_path (string): path to raster containing the limiting
-                effect of water availability on growth
-            cfrtcw_1_path (string): path to raster containing the parameter
-                cfrtcw_1
-            cfrtcw_2_path (string): path to raster containing the parameter
-                cfrtcw_2
-            cfrtcn_1_path (string): path to raster containing the parameter
-                cfrtcn_1
-            cfrtcn_2_path (string): path to raster containing the parameter
-                cfrtcn_2
-            fracrc_r_path (string): path to raster that should contain the
-                result, revised fraction of carbon allocated to roots
-
-        Modifies:
-            the raster indicated by `fracrc_r_path`
-
-        Returns:
-            None
-        """
-        def calc_a2drat(totale, demand):
-            """Calculate the ratio of available nutrient to nutrient demand.
-
-            The ratio of nutrient available to demand for the nutrient is
-            restricted to be between 0 and 1.
-
-            Parameters:
-                totale (numpy.ndarray): derived, nutrient available
-                demand (numpy.ndarray): derived, demand for the nutrient
-
-            Returns:
-                a2drat, the ratio of available nutrient to demand, restricted
-                    to be between 0 and 1
-            """
-            valid_mask = (
-                (totale != _TARGET_NODATA)
-                & (demand != _TARGET_NODATA))
-
-            a2drat = numpy.empty(totale.shape, dtype=numpy.float32)
-            a2drat[:] = _TARGET_NODATA
-
-            a2drat[valid_mask] = numpy.minimum(
-                1., (totale[valid_mask] / demand[valid_mask]))
-            a2drat[valid_mask] = numpy.maximum(0., a2drat[valid_mask])
-            return a2drat
-
-        def calc_perennial_fracrc(
-                h2ogef, cfrtcw_1, cfrtcw_2, a2drat_1, a2drat_2, cfrtcn_1,
-                cfrtcn_2):
-            """Calculate fraction C allocated to roots for a perennial plant.
-
-            The fraction of carbon allocated to roots is determined by
-            water availability, described by h2ogef, and nutrient availability,
-            described by a2drat_1 for nitrogen and a2drat_2 for phosphorus.
-            Lines 114-125 froota.f
-
-            Parameters:
-                h2ogef (numpy.ndarray): derived, the limiting factor of water
-                    availability on growth
-                cfrtcw_1 (numpy.ndarray): parameter, the maximum fraction of
-                    carbon allocated to roots with maximum water stress
-                cfrtcw_2 (numpy.ndarray): parameter, the minimum fraction of
-                    carbon allocated to roots with no water stress
-                a2drat_1 (numpy.ndarray): derived, the ratio of available
-                    nitrogen to nitrogen demand, restricted to be between 0
-                    and 1
-                a2drat_2 (numpy.ndarray): derived, the ratio of available
-                    phosphorus to phosphorus demand, restricted to be between
-                    0 and 1
-                cfrtcn_1 (numpy.ndarray): parameter, maximum fraction of
-                    carbon allocated to roots with maximum nutrient stress
-                cfrtcn_2 (numpy.ndarray): parameter, minimum fraction of
-                    carbon allocated to roots with no nutrient stress
-
-            Returns:
-                fracrc_perennial, revised fraction of C allocated to roots for
-                    a perennial plant
-            """
-            valid_mask = (
-                (h2ogef != _TARGET_NODATA)
-                & (cfrtcw_1 != _IC_NODATA)
-                & (cfrtcw_2 != _IC_NODATA)
-                & (a2drat_1 != _TARGET_NODATA)
-                & (a2drat_2 != _TARGET_NODATA)
-                & (cfrtcn_1 != _IC_NODATA)
-                & (cfrtcn_2 != _IC_NODATA))
-
-            h2oeff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
-            h2oeff[:] = _TARGET_NODATA
-            h2oeff[valid_mask] = (
-                (cfrtcw_2[valid_mask] - cfrtcw_1[valid_mask])
-                * (h2ogef[valid_mask] - 1.) + cfrtcw_2[valid_mask])
-
-            ntreff_1 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
-            ntreff_1[:] = _TARGET_NODATA
-            ntreff_1[valid_mask] = (
-                (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
-                * (a2drat_1[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
-
-            ntreff_2 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
-            ntreff_2[:] = _TARGET_NODATA
-            ntreff_1[valid_mask] = (
-                (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
-                * (a2drat_2[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
-
-            ntreff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
-            ntreff[:] = _TARGET_NODATA
-            ntreff[valid_mask] = numpy.maximum(
-                ntreff_1[valid_mask], ntreff_2[valid_mask])
-
-            fracrc_perennial = numpy.empty(
-                h2ogef.shape, dtype=numpy.float32)
-            fracrc_perennial[:] = _TARGET_NODATA
-            fracrc_perennial[valid_mask] = numpy.minimum(
-                numpy.maximum(h2oeff[valid_mask], ntreff[valid_mask]), 0.99)
-            return fracrc_perennial
-
-        def revised_fracrc_op(frtcindx, fracrc_p, fracrc_perennial):
-            """Calculate revised fraction of carbon allocated to roots.
-
-            The revised fraction of carbon allocated to roots is calculated
-            according to the parameter frtcindx.  If frtcindx=0 (use the "Great
-            Plains equation"), the revised fraction is equal to the provisional
-            fraction.  If frtcindx=1 (a perennial plant), the revised fraction
-            is calculated from water and nutrient stress.
-
-            Parameters:
-                frtcindx (numpy.ndarray): parameter, indicates whether revised
-                    fraction of carbon allocated to roots should follow the
-                    "Great Plains equation" or the algorithm for a perennial
-                    plant
-                fracrc_p (numpy.ndarray): derived, provisional fraction of
-                    carbon allocated to roots
-                fracrc_perennial (numpy.ndarray): derived, fraction of
-                    carbon allocated to roots for a perennial plant
-
-            Returns:
-                fracrc_r, revised fraction of carbon allocated to roots
-            """
-            valid_mask = (
-                (frtcindx != _IC_NODATA)
-                & (fracrc_p != _TARGET_NODATA)
-                & (fracrc_perennial != _TARGET_NODATA))
-
-            fracrc_r = numpy.empty(frtcindx.shape, dtype=numpy.float32)
-            fracrc_r[:] = _TARGET_NODATA
-            fracrc_r[valid_mask] = numpy.where(
-                frtcindx[valid_mask] == 0, fracrc_p[valid_mask],
-                fracrc_perennial[valid_mask])
-            return fracrc_r
-
-        # temporary intermediate rasters for calculating revised fracrc
-        temp_dir = tempfile.mkdtemp()
-        temp_val_dict = {}
-        for val in ['a2drat_1', 'a2drat_2', 'fracrc_perennial']:
-            temp_val_dict[val] = os.path.join(
-                temp_dir, '{}.tif'.format(val))
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [totale_1_path, demand_1_path]],
-            calc_a2drat, temp_val_dict['a2drat_1'], gdal.GDT_Float32,
-            _TARGET_NODATA)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [totale_2_path, demand_2_path]],
-            calc_a2drat, temp_val_dict['a2drat_2'], gdal.GDT_Float32,
-            _TARGET_NODATA)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                h2ogef_1_path, cfrtcw_1_path, cfrtcw_2_path,
-                temp_val_dict['a2drat_1'], temp_val_dict['a2drat_2'],
-                cfrtcn_1_path, cfrtcn_2_path]],
-            calc_perennial_fracrc, temp_val_dict['fracrc_perennial'],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                frtcindx_path, fracrc_p_path,
-                temp_val_dict['fracrc_perennial']]],
-            revised_fracrc_op, fracrc_r_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-        # clean up temporary files
-        shutil.rmtree(temp_dir)
-
-    def calc_final_tgprod_rtsh(
-            tgprod_pot_prod_path, fracrc_path, flgrem_path, grzeff_path,
-            gremb_path, tgprod_path, rtsh_path):
-        """Calculate final potential production and root:shoot ratio.
-
-        Final potential production and root:shoot ratio include the impact of
-        grazing. First calculate final aboveground production including the
-        impact of grazing; then calculate rtsh, the final root:shoot ratio
-        including the impact of grazing; then calculate tgprod, final total
-        potential production, from final aboveground production and final
-        root:shoot ratio. Grazrst.f
-
-        Parameters:
-            tgprod_pot_prod_path (string): path to raster containing total
-                potential biomass production restricted by water and nutrient
-                availability, prior to effects of grazing
-            fracrc_path (string): path to raster containing the fraction of
-                carbon production allocated to roots according to restriction
-                by water and nutrient availability, prior to effects of
-                grazing
-            flgrem_path (string): path to raster containing the fraction of
-                live aboveground biomass removed by herbivores according to
-                diet selection in the previous step
-            grzeff_path (string): path to raster containing the parameter
-                grzeff, the effect of defolation on production and root:shoot
-                ratio
-            gremb_path (string): path to raster containing the parameter
-                gremb, the grazing effect multiplier
-            tgprod_path (string): path to raster containing final total
-                potential production
-            rtsh_path (string): path to raster containing final root:shoot
-                ratio
-
-        Modifies:
-            The raster indicated by tgprod_path
-            The raster indicated by rtsh_path
-
-        Returns:
-            None
-        """
-        def grazing_effect_on_aboveground_production(
-                tgprod, fracrc, flgrem, grzeff):
-            """Adjust aboveground production with the impact of grazing.
-
-            Removal of biomass by herbivores directly impacts potential
-            aboveground production according to the amount of biomass removed
-            and the parameter grzeff, which acts as a switch to determine the
-            effect. If grzeff=0, 3, or 4, aboveground production is not
-            changed. If grzeff=1 or 6, production decreases linearly with
-            biomass removed; if grzeff=2 or 5, biomass removed has a quadratic
-            impact on production. Grazrst.f
-
-            Parameters:
-                tgprod (numpy.ndarray): derived, total potential biomass
-                    production restricted by water and nutrient availability
-                fracrc (numpy.ndarray): derived, fraction of carbon allocated
-                    to roots according to water and nutrient availability
-                flgrem (numpy.ndarray): derived, fraction of live biomass
-                    removed by grazing in previous monthly step
-                grzeff (numpy.ndarray): parameter, the effect of defoliation on
-                    production and root:shoot ratio
-
-            Returns:
-                agprod, aboveground production impacted by grazing
-            """
-            valid_mask = (
-                (tgprod != _TARGET_NODATA)
-                & (fracrc != _TARGET_NODATA)
-                & (flgrem != _IC_NODATA)
-                & (grzeff != _IC_NODATA))
-
-            agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
-            agprod_prior[:] = _TARGET_NODATA
-            agprod_prior[valid_mask] = (
-                tgprod[valid_mask] * (1. - fracrc[valid_mask]))
-
-            linear_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
-            linear_effect[:] = _TARGET_NODATA
-            linear_effect[valid_mask] = numpy.maximum(
-                (1. - (2.21*flgrem[valid_mask])) * agprod_prior[valid_mask],
-                0.02)
-
-            quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
-            quadratic_effect[:] = _TARGET_NODATA
-            quadratic_effect[valid_mask] = numpy.maximum(
-                (1. + 2.6*flgrem[valid_mask]
-                    - (5.83*(numpy.power(flgrem[valid_mask], 2))))
-                * agprod_prior[valid_mask],
-                0.02)
-
-            no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
-            linear_mask = (valid_mask & numpy.isin(grzeff, [1, 6]))
-            quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 5]))
-
-            agprod = numpy.empty(tgprod.shape, dtype=numpy.float32)
-            agprod[:] = _TARGET_NODATA
-            agprod[no_effect_mask] = agprod_prior[no_effect_mask]
-            agprod[linear_mask] = linear_effect[linear_mask]
-            agprod[quadratic_mask] = quadratic_effect[quadratic_mask]
-            return agprod
-
-        def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
-            """Adjust root:shoot ratio according to the impact of grazing.
-
-            Removal of biomass by herbivores directly impacts the root:shoot
-            ratio of production according to the amount of biomass removed and
-            the parameter grzeff, which acts as a switch to determine the
-            effect. If grzeff=0 or 1, the root:shoot ratio is not changed.
-            If grzeff=2 or 3, biomass removed has a quadratic impact on the
-            root:shoot ratio. If grzeff=4, 5, or 6, biomass removed has a
-            linear effect on the root:shoot ratio. The parameter gremb
-            multiplies the linear impact of grazing when grzeff=4, 5 or 6.
-            Grzrst.f
-
-            Parameters:
-                fracrc (numpy.ndarray): derived, fraction of carbon allocated
-                    to roots according to water and nutrient availability
-                flgrem (numpy.ndarray): derived, fraction of live biomass
-                    removed by grazing in previous monthly step
-                grzeff (numpy.ndarray): parameter, the effect of defoliation on
-                    production and root:shoot ratio
-                grzemb (numpy.ndarray): parameter, grazing effect multiplier
-
-            Returns:
-                rtsh, root:shoot ratio impacted by grazing
-            """
-            valid_mask = (
-                (fracrc != _TARGET_NODATA)
-                & (flgrem != _TARGET_NODATA)
-                & (grzeff != _IC_NODATA)
-                & (gremb != _IC_NODATA))
-
-            rtsh_prior = numpy.empty(fracrc.shape, dtype=numpy.float32)
-            rtsh_prior[:] = _TARGET_NODATA
-            rtsh_prior[valid_mask] = (
-                fracrc[valid_mask] / (1. - fracrc[valid_mask]))
-
-            quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
-            quadratic_effect[:] = _TARGET_NODATA
-            quadratic_effect[valid_mask] = (
-                rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask]
-                - 11.78 * numpy.power(flgrem[valid_mask], 2))
-
-            linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
-            linear_effect[:] = _TARGET_NODATA
-            linear_effect[valid_mask] = (
-                1. - (flgrem[valid_mask] * gremb[valid_mask]))
-
-            no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 1]))
-            quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 3]))
-            linear_mask = (valid_mask & numpy.isin(grzeff, [4, 5, 6]))
-
-            rtsh = numpy.empty(fracrc.shape, dtype=numpy.float32)
-            rtsh[:] = _TARGET_NODATA
-            rtsh[no_effect_mask] = rtsh_prior[no_effect_mask]
-            rtsh[quadratic_mask] = quadratic_effect[quadratic_mask]
-            rtsh[linear_mask] = linear_effect[linear_mask]
-            return rtsh
-
-        def calc_tgprod_final(rtsh, agprod):
-            """Calculate final total potential production.
-
-            Final total potential production is calculated from aboveground
-            production impacted by grazing and the final root:shoot ratio
-            impacted by grazing.
-
-            Parameters:
-                rtsh (numpy.ndarray): derived, final root:shoot ratio impacted
-                    by grazing
-                agprod (numpy.ndarray): derived, final aboveground potential
-                    production impacted by grazing
-
-            Returns:
-                tgprod, final total potential production
-            """
-            valid_mask = (
-                (rtsh != _TARGET_NODATA)
-                & (agprod != _TARGET_NODATA))
-            tgprod = numpy.empty(rtsh.shape, dtype=numpy.float32)
-            tgprod[:] = _TARGET_NODATA
-            tgprod[valid_mask] = (
-                agprod[valid_mask] + (rtsh[valid_mask] * agprod[valid_mask]))
-            return tgprod
-
-        # temporary intermediate rasters for grazing effect
-        temp_dir = tempfile.mkdtemp()
-        agprod_path = os.path.join(temp_dir, 'agprod.tif')
-
-        # grazing effect on aboveground production
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
-                tgprod_pot_prod_path, fracrc_path, flgrem_path,
-                grzeff_path],
-            grazing_effect_on_aboveground_production,
-            agprod_path, gdal.GDT_Float32, _TARGET_NODATA)
-        # grazing effect on final root:shoot ratio
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
-                fracrc_path, flgrem_path, grzeff_path, gremb_path],
-            grazing_effect_on_root_shoot,
-            month_reg['rtsh_{}'.format(pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-        # final total potential production
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
-                month_reg['rtsh_{}'.format(pft_i)],
-                agprod_path],
-            calc_tgprod_final,
-            month_reg['tgprod_{}'.format(pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
-
-        # clean up temporary files
-        shutil.rmtree(temp_dir)
 
     # temporary intermediate rasters for root:shoot submodel
     temp_dir = tempfile.mkdtemp()
