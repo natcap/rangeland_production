@@ -1988,11 +1988,13 @@ class foragetests(unittest.TestCase):
         calculate rtsh, root:shoot ratio including the effects of grazing.
         Test that agprod and rtsh match values calculated by hand. Introduce
         nodata values into inputs and ensure that calculated agprod and rtsh
-        still matche value calculated by hand.
+        still match value calculated by hand.
 
         Raises:
             AssertionError if agprod is not within 0.0001 of value
                 calculated by hand
+            AssertionError if rtsh if not within 0.0001 of value calculated by
+                hand
 
         Returns:
             None
@@ -2051,7 +2053,6 @@ class foragetests(unittest.TestCase):
             rtsh, rtsh_grzeff_3 - tolerance, rtsh_grzeff_3 + tolerance,
             _TARGET_NODATA)
 
-
         grzeff = numpy.full(array_shape, 4)
         agprod_grzeff_4 = 190
         rtsh_grzeff_4 = 0.9968
@@ -2067,7 +2068,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
         grzeff = numpy.full(array_shape, 5)
-        agprod_grzeff_5 =240.6828
+        agprod_grzeff_5 = 240.6828
         rtsh_grzeff_5 = 0.9968
         agprod = forage.grazing_effect_on_aboveground_production(
             tgprod, fracrc, flgrem, grzeff)
@@ -2151,4 +2152,3 @@ class foragetests(unittest.TestCase):
         assert_all_values_in_array_within_range(
             tgprod, known_tgprod - tolerance, known_tgprod + tolerance,
             _TARGET_NODATA)
-
