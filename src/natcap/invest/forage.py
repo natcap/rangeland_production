@@ -342,9 +342,9 @@ def execute(args):
             missing_precip_path_list.append(precip_path)
     if missing_precip_path_list:
         raise ValueError(
-            "Couldn't find the following precipitation paths given the "
-            + "pattern: %s\n\t" % args['monthly_precip_path_pattern']
-            + "\n\t".join(missing_precip_path_list))
+            "Couldn't find the following precipitation paths given the " +
+            "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
+            "\n\t".join(missing_precip_path_list))
     # the model requires 12 months of precipitation data to calculate
     # atmospheric N deposition and potential production from annual precip
     n_precip_months = int(args['n_months'])
@@ -376,10 +376,10 @@ def execute(args):
                 missing_min_temperature_path_list.append(monthly_temp_path)
         if missing_temperature_path_list:
             raise ValueError(
-                "Couldn't find the following temperature raster paths"
-                + " given the pattern: %s\n\t" % args[
-                    '%s_temp_path_pattern' % substring]
-                + "\n\t".join(missing_temperature_path_list))
+                "Couldn't find the following temperature raster paths" +
+                " given the pattern: %s\n\t" % args[
+                    '%s_temp_path_pattern' % substring] +
+                "\n\t".join(missing_temperature_path_list))
 
     # lookup to provide path to soil percent given soil type
     for soil_type in SOIL_TYPE_LIST:
@@ -420,8 +420,8 @@ def execute(args):
         site_index_set.difference(site_param_table.iterkeys()))
     if missing_site_index_list:
         raise ValueError(
-            "Couldn't find parameter values for the following site "
-            + "indices: %s\n\t" + ", ".join(missing_site_index_list))
+            "Couldn't find parameter values for the following site " +
+            "indices: %s\n\t" + ", ".join(missing_site_index_list))
 
     # make sure veg traits exist for each pft raster
     pft_dir = os.path.dirname(args['veg_spatial_composition_path_pattern'])
@@ -443,8 +443,8 @@ def execute(args):
     missing_pft_trait_list = pft_id_set.difference(veg_trait_table.iterkeys())
     if missing_pft_trait_list:
         raise ValueError(
-            "Couldn't find trait values for the following plant functional "
-            + "types: %s\n\t" + ", ".join(missing_pft_trait_list))
+            "Couldn't find trait values for the following plant functional " +
+            "types: %s\n\t" + ", ".join(missing_pft_trait_list))
     frtcindx_set = set([
         veg_trait_table[k]['frtcindx'] for k in veg_trait_table.iterkeys()])
     if frtcindx_set.difference(set([0, 1])):
@@ -472,8 +472,8 @@ def execute(args):
         anim_id_list).difference(anim_trait_table.iterkeys())
     if missing_animal_trait_list:
         raise ValueError(
-            "Couldn't find trait values for the following animal "
-            + "ids: %s\n\t" + ", ".join(missing_animal_trait_list))
+            "Couldn't find trait values for the following animal " +
+            "ids: %s\n\t" + ", ".join(missing_animal_trait_list))
 
     # find the smallest target_pixel_size
     target_pixel_size = min(*[
@@ -531,8 +531,8 @@ def execute(args):
                     missing_initial_values.append(sv_path)
         if missing_initial_values:
             raise ValueError(
-                "Couldn't find the following required initial values: "
-                + "\n\t".join(missing_initial_values))
+                "Couldn't find the following required initial values: " +
+                "\n\t".join(missing_initial_values))
 
         # align and resample initialization rasters with inputs
         sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
@@ -541,12 +541,12 @@ def execute(args):
                 for key, path in resample_initial_path_map.iteritems()])
         initial_path_list = (
             [resample_initial_path_map[k] for k in
-                sorted(resample_initial_path_map.iterkeys())]
-            + source_input_path_list)
+                sorted(resample_initial_path_map.iterkeys())] +
+            source_input_path_list)
         aligned_initial_path_list = (
             [aligned_initial_path_map[k] for k in
-                sorted(aligned_initial_path_map.iterkeys())]
-            + aligned_input_path_list)
+                sorted(aligned_initial_path_map.iterkeys())] +
+            aligned_input_path_list)
         pygeoprocessing.align_and_resize_raster_stack(
             initial_path_list, aligned_initial_path_list,
             ['nearest'] * len(initial_path_list),
@@ -744,9 +744,9 @@ def _calc_ompc(
             & (bulkd != bulkd_nodata)
             & (edepth != _IC_NODATA))
         ompc[valid_mask] = (
-            (som1c_2[valid_mask] + som2c_2[valid_mask]
-                + som3c[valid_mask]) * 1.724
-            / (10000. * bulkd[valid_mask] * edepth[valid_mask]))
+            (som1c_2[valid_mask] + som2c_2[valid_mask] +
+                som3c[valid_mask]) * 1.724 /
+            (10000. * bulkd[valid_mask] * edepth[valid_mask]))
         return ompc
 
     som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
@@ -808,9 +808,9 @@ def _calc_afiel(
             & (ompc != _TARGET_NODATA)
             & (bulkd != bulkd_nodata))
         afiel[valid_mask] = (
-            0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask]
-            + 0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask]
-            + -0.1434 * bulkd[valid_mask])
+            0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask] +
+            0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask] +
+            -0.1434 * bulkd[valid_mask])
         return afiel
 
     sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
@@ -877,9 +877,9 @@ def _calc_awilt(
             & (ompc != _TARGET_NODATA)
             & (bulkd != bulkd_nodata))
         awilt[valid_mask] = (
-            -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask]
-            + 0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask]
-            + 0.02671 * bulkd[valid_mask])
+            -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask] +
+            0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask] +
+            0.02671 * bulkd[valid_mask])
         return awilt
 
     sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
@@ -1337,8 +1337,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
-            (pcemic1_2[valid_mask] - pcemic1_1[valid_mask])
-            / pcemic1_3[valid_mask])
+            (pcemic1_2[valid_mask] - pcemic1_1[valid_mask]) /
+            pcemic1_3[valid_mask])
 
         rnewas1 = _aboveground_ratio(
             struce_1, strucc_1, pcemic1_1, pcemic1_2, pcemic1_3, cemicb1)
@@ -1397,8 +1397,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         cemicb2 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb2[:] = _TARGET_NODATA
         cemicb2[valid_mask] = (
-            (pcemic2_2[valid_mask] - pcemic2_1[valid_mask])
-            / pcemic2_3[valid_mask])
+            (pcemic2_2[valid_mask] - pcemic2_1[valid_mask]) /
+            pcemic2_3[valid_mask])
 
         rnewas2 = _aboveground_ratio(
             struce_1, strucc_1, pcemic2_1, pcemic2_2, pcemic2_3, cemicb2)
@@ -1406,8 +1406,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         radds1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         radds1[:] = _TARGET_NODATA
         radds1[valid_mask] = (
-            rad1p_1[valid_mask] + rad1p_2[valid_mask]
-            * (rnewas1[valid_mask] - pcemic1_2[valid_mask]))
+            rad1p_1[valid_mask] + rad1p_2[valid_mask] *
+            (rnewas1[valid_mask] - pcemic1_2[valid_mask]))
         rnewas2[valid_mask] = rnewas1[valid_mask] + radds1[valid_mask]
         rnewas2[valid_mask] = numpy.maximum(
             rnewas2[valid_mask], rad1p_3[valid_mask])
@@ -1560,8 +1560,8 @@ def _yearly_tasks(
             & (epnfa_2 != _IC_NODATA)
             & (prcann != _TARGET_NODATA))
         baseNdep[valid_mask] = (
-            epnfa_1[valid_mask]
-            + (epnfa_2[valid_mask] * numpy.minimum(prcann[valid_mask], 80.)))
+            epnfa_1[valid_mask] +
+            (epnfa_2[valid_mask] * numpy.minimum(prcann[valid_mask], 80.)))
         baseNdep[baseNdep < 0] = 0.
         return baseNdep
 
@@ -1632,9 +1632,9 @@ def _shortwave_radiation(template_raster, month, shwave_path):
 
             solrad = (
                 917.0 * transcof * (
-                    ahou * numpy.sin(rlatitude) * numpy.sin(declin)
-                    + numpy.cos(rlatitude)
-                    * numpy.cos(declin) * numpy.sin(ahou)))
+                    ahou * numpy.sin(rlatitude) * numpy.sin(declin) +
+                    numpy.cos(rlatitude) *
+                    numpy.cos(declin) * numpy.sin(ahou)))
 
             # short wave radiation outside the atmosphere
             shwave = solrad / transcof
@@ -1763,9 +1763,9 @@ def _reference_evapotranspiration(
         in2 = numpy.sqrt(trange[valid_mask])
         in3 = (shwave[valid_mask] / langleys2watts)
         daypet[valid_mask] = (
-            const1 * (tmean[valid_mask] + const2)
-            * numpy.sqrt(trange[valid_mask])
-            * (shwave[valid_mask] / langleys2watts))
+            const1 * (tmean[valid_mask] + const2) *
+            numpy.sqrt(trange[valid_mask]) *
+            (shwave[valid_mask] / langleys2watts))
 
         # monthly reference evapotranspiration, from mm to cm,
         # bounded to be at least 0.5
@@ -1888,15 +1888,15 @@ def _potential_production(
         tmxs[:] = _IC_NODATA
         tmxs[valid_mask] = (
             maxtmp[valid_mask] + (
-                (25.4/(1. + 18. * numpy.exp(-0.20 * maxtmp[valid_mask])))
-                * (numpy.exp(pmxtmp[valid_mask] * bio[valid_mask]) - 0.13)))
+                (25.4/(1. + 18. * numpy.exp(-0.20 * maxtmp[valid_mask]))) *
+                (numpy.exp(pmxtmp[valid_mask] * bio[valid_mask]) - 0.13)))
 
         # Minimum temperature
         tmns = numpy.empty(aglivc.shape, dtype=numpy.float32)
         tmns[:] = _IC_NODATA
         tmns[valid_mask] = (
-            mintmp[valid_mask]
-            + (pmntmp[valid_mask] * bio[valid_mask] - 1.78))
+            mintmp[valid_mask] +
+            (pmntmp[valid_mask] * bio[valid_mask] - 1.78))
 
         # Average temperature
         ctemp = numpy.empty(aglivc.shape, dtype=numpy.float32)
@@ -1936,14 +1936,14 @@ def _potential_production(
         frac = numpy.empty(ctemp.shape, dtype=numpy.float32)
         frac[:] = _TARGET_NODATA
         frac[valid_mask] = (
-            (ppdf_2[valid_mask] - ctemp[valid_mask])
-            / (ppdf_2[valid_mask] - ppdf_1[valid_mask]))
+            (ppdf_2[valid_mask] - ctemp[valid_mask]) /
+            (ppdf_2[valid_mask] - ppdf_1[valid_mask]))
         gpdf = numpy.empty(ctemp.shape, dtype=numpy.float32)
         gpdf[:] = _TARGET_NODATA
         gpdf[valid_mask] = (numpy.exp(
-            (ppdf_3[valid_mask]/ppdf_4[valid_mask])
-            * (1. - numpy.power(frac[valid_mask], ppdf_4[valid_mask])))
-            * numpy.power(frac[valid_mask], ppdf_3[valid_mask]))
+            (ppdf_3[valid_mask]/ppdf_4[valid_mask]) *
+            (1. - numpy.power(frac[valid_mask], ppdf_4[valid_mask]))) *
+            numpy.power(frac[valid_mask], ppdf_3[valid_mask]))
         return gpdf
 
     def calc_h2ogef_1(
@@ -1997,8 +1997,8 @@ def _potential_production(
         h2ogef_1 = numpy.empty(pevap.shape, dtype=numpy.float32)
         h2ogef_1[:] = _TARGET_NODATA
         h2ogef_1[valid_mask] = (
-            1.0 + slope[valid_mask]
-            * (h2ogef_prior[valid_mask] - pprpts_3[valid_mask]))
+            1.0 + slope[valid_mask] *
+            (h2ogef_prior[valid_mask] - pprpts_3[valid_mask]))
 
         h2ogef_1[valid_mask] = numpy.where(
             h2ogef_1[valid_mask] > 1., 1., h2ogef_1[valid_mask])
@@ -2064,8 +2064,8 @@ def _potential_production(
             (bioprd[valid_mask] + (temp2[valid_mask] * ratlc[valid_mask])),
             numpy.where(
                 ratlc[valid_mask] <= 2.,
-                (bioprd[valid_mask] + temp2[valid_mask])
-                + temp3[valid_mask] * (ratlc[valid_mask] - 1.),
+                (bioprd[valid_mask] + temp2[valid_mask]) +
+                temp3[valid_mask] * (ratlc[valid_mask] - 1.),
                 1.))
         return biof
 
@@ -2104,8 +2104,8 @@ def _potential_production(
         tgprod_pot_prod[:] = _TARGET_NODATA
 
         tgprod_pot_prod[valid_mask] = (
-            prdx_1[valid_mask] * shwave[valid_mask] * potprd[valid_mask]
-            * h2ogef_1[valid_mask] * biof[valid_mask])
+            prdx_1[valid_mask] * shwave[valid_mask] * potprd[valid_mask] *
+            h2ogef_1[valid_mask] * biof[valid_mask])
         return tgprod_pot_prod
 
     # temporary intermediate rasters for calculating total potential production
@@ -2304,9 +2304,9 @@ def _calc_favail_P(sv_reg, param_val_dict):
         interim[:] = _IC_NODATA
 
         interim[valid_mask] = (
-            favail_4[valid_mask] + minerl_1_1[valid_mask]
-            * (favail_5[valid_mask] - favail_4[valid_mask])
-            / favail_6[valid_mask])
+            favail_4[valid_mask] + minerl_1_1[valid_mask] *
+            (favail_5[valid_mask] - favail_4[valid_mask]) /
+            favail_6[valid_mask])
 
         favail_P = numpy.empty(minerl_1_1.shape, dtype=numpy.float32)
         favail_P[:] = _IC_NODATA
@@ -2402,8 +2402,8 @@ def _calc_available_nutrient(
         eavail = numpy.empty(rictrl.shape, dtype=numpy.float32)
         eavail[:] = _TARGET_NODATA
         eavail[valid_mask] = (
-            (availm[valid_mask] * favail[valid_mask] * rimpct[valid_mask])
-            + crpstg[valid_mask])
+            (availm[valid_mask] * favail[valid_mask] * rimpct[valid_mask]) +
+            crpstg[valid_mask])
         return eavail
 
     def add_symbiotic_fixed_N(eavail_prior, snfxmx, tgprod):
@@ -2565,16 +2565,16 @@ def _calc_nutrient_demand(
         demand_above = numpy.empty(root_fraction.shape, dtype=numpy.float32)
         demand_above[:] = _TARGET_NODATA
         demand_above[valid_mask] = (
-            ((biomass_production[valid_mask]
-                * (1. - root_fraction[valid_mask])) / 2.5)
-            * (1. / cercrp_min_above[valid_mask]))
+            ((biomass_production[valid_mask] *
+                (1. - root_fraction[valid_mask])) / 2.5) *
+            (1. / cercrp_min_above[valid_mask]))
 
         demand_below = numpy.empty(root_fraction.shape, dtype=numpy.float32)
         demand_below[:] = _TARGET_NODATA
         demand_below[valid_mask] = (
-            ((biomass_production[valid_mask]
-                * (root_fraction[valid_mask])) / 2.5)
-            * (1. / cercrp_min_below[valid_mask]))
+            ((biomass_production[valid_mask] *
+                (root_fraction[valid_mask])) / 2.5) *
+            (1. / cercrp_min_below[valid_mask]))
 
         demand_e = numpy.empty(root_fraction.shape, dtype=numpy.float32)
         demand_e[:] = _TARGET_NODATA
@@ -2639,18 +2639,18 @@ def calc_provisional_fracrc(
     rtsh = numpy.empty(annual_precip.shape, dtype=numpy.float32)
     rtsh[:] = _TARGET_NODATA
     rtsh[valid_mask] = (
-        (bgppa[valid_mask]
-            + annual_precip[valid_mask] * bgppb[valid_mask])
-        / (agppa[valid_mask] + annual_precip[valid_mask]
-            * agppb[valid_mask]))
+        (bgppa[valid_mask] +
+            annual_precip[valid_mask] * bgppb[valid_mask]) /
+        (agppa[valid_mask] + annual_precip[valid_mask] *
+            agppb[valid_mask]))
 
     fracrc_p = numpy.empty(annual_precip.shape, dtype=numpy.float32)
     fracrc_p[:] = _TARGET_NODATA
     fracrc_p[valid_mask] = numpy.where(
         frtcindx[valid_mask] == 0,
         (1.0 / (1.0 / rtsh[valid_mask] + 1.0)),
-        ((cfrtcw_1[valid_mask] + cfrtcw_2[valid_mask]
-            + cfrtcn_1[valid_mask] + cfrtcn_2[valid_mask]) / 4.0))
+        ((cfrtcw_1[valid_mask] + cfrtcw_2[valid_mask] +
+            cfrtcn_1[valid_mask] + cfrtcn_2[valid_mask]) / 4.0))
     return fracrc_p
 
 
@@ -2738,8 +2738,8 @@ def calc_ce_ratios(
         cercrp_above[:] = _TARGET_NODATA
 
         cercrp_above[valid_mask] = numpy.minimum(
-            (pra_1[valid_mask] + (pra_2[valid_mask] - pra_1[valid_mask])
-                * 2.5 * aglivc[valid_mask] / biomax[valid_mask]),
+            (pra_1[valid_mask] + (pra_2[valid_mask] - pra_1[valid_mask]) *
+                2.5 * aglivc[valid_mask] / biomax[valid_mask]),
             pra_2[valid_mask])
         return cercrp_above
 
@@ -2767,8 +2767,8 @@ def calc_ce_ratios(
         cercrp_below[:] = _TARGET_NODATA
 
         cercrp_below[valid_mask] = (
-            prb_1[valid_mask]
-            + (prb_2[valid_mask] * annual_precip[valid_mask]))
+            prb_1[valid_mask] +
+            (prb_2[valid_mask] * annual_precip[valid_mask]))
         return cercrp_below
 
     aglivc_nodata = pygeoprocessing.get_raster_info(
@@ -2920,20 +2920,20 @@ def calc_revised_fracrc(
         h2oeff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
         h2oeff[:] = _TARGET_NODATA
         h2oeff[valid_mask] = (
-            (cfrtcw_2[valid_mask] - cfrtcw_1[valid_mask])
-            * (h2ogef[valid_mask] - 1.) + cfrtcw_2[valid_mask])
+            (cfrtcw_2[valid_mask] - cfrtcw_1[valid_mask]) *
+            (h2ogef[valid_mask] - 1.) + cfrtcw_2[valid_mask])
 
         ntreff_1 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
         ntreff_1[:] = _TARGET_NODATA
         ntreff_1[valid_mask] = (
-            (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
-            * (a2drat_1[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
+            (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask]) *
+            (a2drat_1[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
 
         ntreff_2 = numpy.empty(h2ogef.shape, dtype=numpy.float32)
         ntreff_2[:] = _TARGET_NODATA
         ntreff_1[valid_mask] = (
-            (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask])
-            * (a2drat_2[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
+            (cfrtcn_2[valid_mask] - cfrtcn_1[valid_mask]) *
+            (a2drat_2[valid_mask] - 1.0) + cfrtcn_2[valid_mask])
 
         ntreff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
         ntreff[:] = _TARGET_NODATA
@@ -3062,9 +3062,9 @@ def grazing_effect_on_aboveground_production(
     quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
     quadratic_effect[:] = _TARGET_NODATA
     quadratic_effect[valid_mask] = numpy.maximum(
-        (1. + 2.6*flgrem[valid_mask]
-            - (5.83*(numpy.power(flgrem[valid_mask], 2))))
-        * agprod_prior[valid_mask],
+        (1. + 2.6*flgrem[valid_mask] -
+            (5.83*(numpy.power(flgrem[valid_mask], 2)))) *
+        agprod_prior[valid_mask],
         0.02)
 
     no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
@@ -3118,8 +3118,8 @@ def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
     quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
     quadratic_effect[:] = _TARGET_NODATA
     quadratic_effect[valid_mask] = (
-        rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask]
-        - 11.78 * numpy.power(flgrem[valid_mask], 2))
+        rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask] -
+        11.78 * numpy.power(flgrem[valid_mask], 2))
 
     linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
     linear_effect[:] = _TARGET_NODATA
