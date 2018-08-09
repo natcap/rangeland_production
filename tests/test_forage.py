@@ -121,37 +121,6 @@ def insert_nodata_values_into_raster(target_raster, nodata_value):
     os.remove(prior_copy)
 
 
-def assert_all_values_in_raster_within_range(
-        raster_to_test, minimum_acceptable_value,
-        maximum_acceptable_value, nodata_value):
-    """Test that `raster_to_test` contains values within acceptable range.
-
-    The values within `raster_to_test` that are not null must be
-    greater than or equal to `minimum_acceptable_value` and
-    less than or equal to `maximum_acceptable_value`.
-
-    Raises:
-        AssertionError if values are outside acceptable range
-
-    Returns:
-        None
-    """
-    for offset_map, raster_block in pygeoprocessing.iterblocks(
-            raster_to_test):
-        if len(raster_block[raster_block != nodata_value]) == 0:
-            continue
-        min_val = numpy.amin(
-            raster_block[raster_block != nodata_value])
-        assert min_val >= minimum_acceptable_value, (
-            "Raster contains values smaller than acceptable "
-            + "minimum: {}, {}".format(raster_to_test, min_val))
-        max_val = numpy.amax(
-            raster_block[raster_block != nodata_value])
-        assert max_val <= maximum_acceptable_value, (
-            "Raster contains values larger than acceptable "
-            + "maximum: {}, {}".format(raster_to_test, max_val))
-
-
 def create_constant_raster(target_path, fill_value):
     """Create a single-pixel raster with value `fill_value`."""
     geotransform = [0, 1, 0, 44.5, 0, 1]
@@ -171,33 +140,6 @@ def create_constant_raster(target_path, fill_value):
     target_band.SetNoDataValue(_TARGET_NODATA)
     target_band.Fill(fill_value)
     target_raster = None
-
-
-def assert_all_values_in_array_within_range(
-        array_to_test, minimum_acceptable_value,
-        maximum_acceptable_value, nodata_value):
-    """Test that `array_to_test` contains values within acceptable range.
-
-    The values within `array_to_test` that are not null must be
-    greater than or equal to `minimum_acceptable_value` and
-    less than or equal to `maximum_acceptable_value`.
-
-    Raises:
-        AssertionError if values are outside acceptable range
-
-    Returns:
-        None
-    """
-    if len(array_to_test[array_to_test != nodata_value]) == 0:
-        return
-    min_val = numpy.amin(
-        array_to_test[array_to_test != nodata_value])
-    assert min_val >= minimum_acceptable_value, (
-        "Array contains values smaller than acceptable minimum")
-    max_val = numpy.amax(
-        array_to_test[array_to_test != nodata_value])
-    assert max_val <= maximum_acceptable_value, (
-        "Array contains values larger than acceptable maximum")
 
 
 def insert_nodata_values_into_array(target_array, nodata_value):
@@ -270,6 +212,67 @@ class foragetests(unittest.TestCase):
         }
         return args
 
+    def assert_all_values_in_raster_within_range(
+            self, raster_to_test, minimum_acceptable_value,
+            maximum_acceptable_value, nodata_value):
+        """Test that `raster_to_test` contains values within acceptable range.
+
+        The values within `raster_to_test` that are not null must be
+        greater than or equal to `minimum_acceptable_value` and
+        less than or equal to `maximum_acceptable_value`.
+
+        Raises:
+            AssertionError if values are outside acceptable range
+
+        Returns:
+            None
+        """
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                raster_to_test):
+            if len(raster_block[raster_block != nodata_value]) == 0:
+                continue
+            min_val = numpy.amin(
+                raster_block[raster_block != nodata_value])
+            self.assertGreaterEqual(
+                min_val, minimum_acceptable_value,
+                msg="Raster contains values smaller than acceptable "
+                + "minimum: {}, {}".format(raster_to_test, min_val))
+            max_val = numpy.amax(
+                raster_block[raster_block != nodata_value])
+            self.assertLessEqual(
+                max_val, maximum_acceptable_value,
+                msg="Raster contains values larger than acceptable "
+                + "maximum: {}, {}".format(raster_to_test, max_val))
+
+    def assert_all_values_in_array_within_range(
+            self, array_to_test, minimum_acceptable_value,
+            maximum_acceptable_value, nodata_value):
+        """Test that `array_to_test` contains values within acceptable range.
+
+        The values within `array_to_test` that are not null must be
+        greater than or equal to `minimum_acceptable_value` and
+        less than or equal to `maximum_acceptable_value`.
+
+        Raises:
+            AssertionError if values are outside acceptable range
+
+        Returns:
+            None
+        """
+        if len(array_to_test[array_to_test != nodata_value]) == 0:
+            return
+        min_val = numpy.amin(
+            array_to_test[array_to_test != nodata_value])
+        self.assertGreaterEqual(
+            min_val, minimum_acceptable_value,
+            msg="Array contains values smaller than acceptable minimum")
+        max_val = numpy.amax(
+            array_to_test[array_to_test != nodata_value])
+        self.assertLessEqual(
+            max_val, maximum_acceptable_value,
+            msg="Array contains values larger than acceptable maximum")
+
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Launch forage model, ensure it runs!."""
         from natcap.invest import forage
@@ -279,7 +282,7 @@ class foragetests(unittest.TestCase):
                 "Sample input directory not found at %s" % SAMPLE_DATA)
 
         args = foragetests.generate_base_args(self.workspace_dir)
-        # forage.execute(args)
+        forage.execute(args)
 
     def test_shortwave_radiation(self):
         """Test calculation of shortwave radiation outside the atmosphere.
@@ -314,11 +317,13 @@ class foragetests(unittest.TestCase):
         for offset_map, raster_block in pygeoprocessing.iterblocks(
                 shwave_path):
             result_set.update(numpy.unique(raster_block))
-        assert len(result_set) == 1, (
-            "One unique value expected in shortwave radiation raster")
+        self.assertEqual(
+            len(result_set), 1,
+            msg="One unique value expected in shortwave radiation raster")
         test_result = list(result_set)[0]
-        assert abs(test_result - 990.7401) < 0.01, (
-            "Test result does not match expected value")
+        self.assertAlmostEqual(
+            test_result, 990.7401, delta=0.01,
+            msg="Test result does not match expected value")
 
     def test_calc_ompc(self):
         """Test the function `_calc_ompc` against value calculated by hand.
@@ -361,11 +366,13 @@ class foragetests(unittest.TestCase):
         for offset_map, raster_block in pygeoprocessing.iterblocks(
                 ompc_path):
             result_set.update(numpy.unique(raster_block))
-        assert len(result_set) == 1, (
-            "One unique value expected in organic matter raster")
+        self.assertEqual(
+            len(result_set), 1,
+            msg="One unique value expected in organic matter raster")
         test_result = list(result_set)[0]
-        assert abs(test_result - 0.913304) < 0.0001, (
-            "Test result does not match expected value")
+        self.assertAlmostEqual(
+            test_result, 0.913304, delta=0.0001,
+            msg="Test result does not match expected value")
 
     def test_calc_afiel(self):
         """Test the function `_calc_afiel` against value calculated by hand.
@@ -407,11 +414,13 @@ class foragetests(unittest.TestCase):
         for offset_map, raster_block in pygeoprocessing.iterblocks(
                 afiel_path):
             result_set.update(numpy.unique(raster_block))
-        assert len(result_set) == 1, (
-            "One unique value expected in organic matter raster")
+        self.assertEqual(
+            len(result_set), 1,
+            msg="One unique value expected in field capacity raster")
         test_result = list(result_set)[0]
-        assert abs(test_result - 0.30895) < 0.0001, (
-            "Test result does not match expected value")
+        self.assertAlmostEqual(
+            test_result, 0.30895, delta=0.0001,
+            msg="Test result does not match expected value")
 
     def test_calc_awilt(self):
         """Test the function `_calc_awilt` against value calculated by hand.
@@ -453,11 +462,13 @@ class foragetests(unittest.TestCase):
         for offset_map, raster_block in pygeoprocessing.iterblocks(
                 awilt_path):
             result_set.update(numpy.unique(raster_block))
-        assert len(result_set) == 1, (
-            "One unique value expected in organic matter raster")
+        self.assertEqual(
+            len(result_set), 1,
+            msg="One unique value expected in wilting point raster")
         test_result = list(result_set)[0]
-        assert abs(test_result - 0.201988) < 0.0001, (
-            "Test result does not match expected value")
+        self.assertAlmostEqual(
+            test_result, 0.201988, delta=0.0001,
+            msg="Test result does not match expected value")
 
     def test_afiel_awilt(self):
         """Test that values calculated by `_afiel_awilt` are reasonable.
@@ -530,7 +541,7 @@ class foragetests(unittest.TestCase):
             bulk_d_path, pp_reg)
 
         for key, path in pp_reg.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 path, minimum_acceptable_value,
                 maximum_acceptable_value, nodata_value)
 
@@ -543,7 +554,7 @@ class foragetests(unittest.TestCase):
                 som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
                 bulk_d_path, pp_reg)
             for key, path in pp_reg.iteritems():
-                assert_all_values_in_raster_within_range(
+                self.assert_all_values_in_raster_within_range(
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
 
@@ -568,19 +579,18 @@ class foragetests(unittest.TestCase):
             som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
             bulk_d_path, pp_reg)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pp_reg['afiel_1_path'], known_afiel_1 - tolerance,
             known_afiel_1 + tolerance, nodata_value)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pp_reg['awilt_1_path'], known_awilt_1 - tolerance,
             known_awilt_1 + tolerance, nodata_value)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pp_reg['afiel_4_path'], known_afiel_4 - tolerance,
             known_afiel_4 + tolerance, nodata_value)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pp_reg['awilt_6_path'], known_awilt_6 - tolerance,
             known_awilt_6 + tolerance, nodata_value)
-
 
     def test_persistent_params(self):
         """Test that values calculated by `persistent_params` are reasonable.
@@ -675,7 +685,7 @@ class foragetests(unittest.TestCase):
             site_index_path, site_param_table, sand_path, clay_path, pp_reg)
 
         for path, ranges in acceptable_range_dict.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 pp_reg[path], ranges['minimum_acceptable_value'],
                 ranges['maximum_acceptable_value'],
                 ranges['nodata_value'])
@@ -688,7 +698,7 @@ class foragetests(unittest.TestCase):
                 pp_reg)
 
             for path, ranges in acceptable_range_dict.iteritems():
-                assert_all_values_in_raster_within_range(
+                self.assert_all_values_in_raster_within_range(
                     pp_reg[path], ranges['minimum_acceptable_value'],
                     ranges['maximum_acceptable_value'],
                     ranges['nodata_value'])
@@ -743,7 +753,7 @@ class foragetests(unittest.TestCase):
             pp_reg)
 
         for path, values in known_value_dict.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 pp_reg[path], values['value'] - tolerance,
                 values['value'] + tolerance, values['nodata_value'])
 
@@ -784,7 +794,7 @@ class foragetests(unittest.TestCase):
         agdrat = forage._aboveground_ratio(
             anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
 
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
             agdrat_nodata)
 
@@ -793,7 +803,7 @@ class foragetests(unittest.TestCase):
             agdrat = forage._aboveground_ratio(
                 anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
 
-            assert_all_values_in_array_within_range(
+            self.assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
         for input_array in [pcemic_1, pcemic_2, pcemic_3, cemicb]:
@@ -801,7 +811,7 @@ class foragetests(unittest.TestCase):
             agdrat = forage._aboveground_ratio(
                 anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
 
-            assert_all_values_in_array_within_range(
+            self.assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
 
@@ -819,7 +829,7 @@ class foragetests(unittest.TestCase):
         agdrat = forage._aboveground_ratio(
             anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
 
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agdrat, known_agdrat - tolerance, known_agdrat + tolerance,
             agdrat_nodata)
 
@@ -917,7 +927,7 @@ class foragetests(unittest.TestCase):
             site_index_path, site_param_table, sv_reg, pp_reg)
 
         for key, path in pp_reg.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 path, minimum_acceptable_value,
                 maximum_acceptable_value, nodata_value)
 
@@ -929,7 +939,7 @@ class foragetests(unittest.TestCase):
                 site_index_path, site_param_table, sv_reg, pp_reg)
 
             for key, path in pp_reg.iteritems():
-                assert_all_values_in_raster_within_range(
+                self.assert_all_values_in_raster_within_range(
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
 
@@ -1014,10 +1024,10 @@ class foragetests(unittest.TestCase):
         forage._yearly_tasks(
             site_index_path, site_param_table, complete_aligned_inputs,
             month_index, year_reg)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             year_reg['annual_precip_path'], minimum_acceptable_annual_precip,
             maximum_acceptabe_annual_precip, precip_nodata)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             year_reg['baseNdep_path'], minimum_acceptable_Ndep,
             maximum_acceptable_Ndep, Ndep_nodata)
 
@@ -1028,11 +1038,11 @@ class foragetests(unittest.TestCase):
             forage._yearly_tasks(
                 site_index_path, site_param_table, complete_aligned_inputs,
                 month_index, year_reg)
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 year_reg['annual_precip_path'],
                 minimum_acceptable_annual_precip,
                 maximum_acceptabe_annual_precip, precip_nodata)
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 year_reg['baseNdep_path'], minimum_acceptable_Ndep,
                 maximum_acceptable_Ndep, Ndep_nodata)
 
@@ -1061,7 +1071,7 @@ class foragetests(unittest.TestCase):
         shwave_path = os.path.join(self.workspace_dir, 'shwave.tif')
         fwloss_4_path = os.path.join(self.workspace_dir, 'fwloss_4.tif')
 
-        create_random_raster(max_temp_path, 0, 40)
+        create_random_raster(max_temp_path, 21, 40)
         create_random_raster(min_temp_path, -20, 20)
         create_random_raster(shwave_path, 0, 1125)
         create_random_raster(fwloss_4_path, 0, 1)
@@ -1076,7 +1086,7 @@ class foragetests(unittest.TestCase):
             max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
             pevap_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pevap_path, minimum_acceptable_ET, maximum_acceptable_ET,
             ET_nodata)
 
@@ -1089,7 +1099,7 @@ class foragetests(unittest.TestCase):
             max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
             pevap_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pevap_path, minimum_acceptable_ET, maximum_acceptable_ET,
             ET_nodata)
 
@@ -1106,7 +1116,7 @@ class foragetests(unittest.TestCase):
             max_temp_path, min_temp_path, shwave_path, fwloss_4_path,
             pevap_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             pevap_path, known_ET - tolerance, known_ET + tolerance,
             ET_nodata)
 
@@ -1221,11 +1231,11 @@ class foragetests(unittest.TestCase):
             pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
 
         for pft_i in pft_id_set:
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg['h2ogef_1_{}'.format(pft_i)],
                 minimum_acceptable_h2ogef_1,
                 maximum_acceptable_h2ogef_1, _TARGET_NODATA)
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 minimum_acceptable_potential_production,
                 maximum_acceptable_potential_production, _TARGET_NODATA)
@@ -1253,11 +1263,11 @@ class foragetests(unittest.TestCase):
             pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
 
         for pft_i in pft_id_set:
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg['h2ogef_1_{}'.format(pft_i)],
                 minimum_acceptable_h2ogef_1,
                 maximum_acceptable_h2ogef_1, _TARGET_NODATA)
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 minimum_acceptable_potential_production,
                 maximum_acceptable_potential_production, _TARGET_NODATA)
@@ -1303,7 +1313,7 @@ class foragetests(unittest.TestCase):
         minimum_acceptable_favail_P = 0
         maximum_acceptable_favail_P = 1
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             param_val_dict['favail_2'],
             minimum_acceptable_favail_P,
             maximum_acceptable_favail_P, _IC_NODATA)
@@ -1313,7 +1323,7 @@ class foragetests(unittest.TestCase):
                 param_val_dict['favail_5'], param_val_dict['favail_6']]:
             insert_nodata_values_into_raster(input_raster, _IC_NODATA)
             forage._calc_favail_P(sv_reg, param_val_dict)
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 param_val_dict['favail_2'],
                 minimum_acceptable_favail_P,
                 maximum_acceptable_favail_P, _IC_NODATA)
@@ -1328,7 +1338,7 @@ class foragetests(unittest.TestCase):
         tolerance = 0.0001
 
         forage._calc_favail_P(sv_reg, param_val_dict)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             param_val_dict['favail_2'],
             known_favail_2 - tolerance, known_favail_2 + tolerance,
             _IC_NODATA)
@@ -1366,13 +1376,13 @@ class foragetests(unittest.TestCase):
         forage.raster_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=False)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             target_path, num_rasters, num_rasters, target_nodata)
 
         forage.raster_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=True)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             target_path, num_rasters, num_rasters, target_nodata)
 
         # one input raster includes nodata values
@@ -1381,7 +1391,7 @@ class foragetests(unittest.TestCase):
         forage.raster_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=False)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             target_path, num_rasters, num_rasters, target_nodata)
 
         # assert that raster_list[0] and target_path include nodata
@@ -1396,9 +1406,10 @@ class foragetests(unittest.TestCase):
         sum_input_mask = numpy.sum(input_array[input_array == input_nodata])
         sum_result_mask = numpy.sum(input_array[result_array == target_nodata])
 
-        assert sum_input_mask == sum_result_mask, (
-            "Result raster must contain nodata values in same "
-            + "position as input")
+        self.assertEqual(
+            sum_input_mask, sum_result_mask,
+            msg="Result raster must contain nodata values in same " +
+            "position as input")
 
         input_band = None
         result_band = None
@@ -1416,8 +1427,9 @@ class foragetests(unittest.TestCase):
                 continue
             min_val = numpy.amin(
                 raster_block[raster_block != target_nodata])
-            assert min_val >= (num_rasters - 1), (
-                "Raster appears to contain nodata values")
+            self.assertGreaterEqual(
+                min_val, (num_rasters - 1),
+                msg="Raster appears to contain nodata values")
 
     def test_calc_available_nutrient(self):
         """Test that `_calc_available_nutrient` returns valid results.
@@ -1487,7 +1499,7 @@ class foragetests(unittest.TestCase):
                 pft_i, iel, pft_param_dict, sv_reg, site_param_table,
                 site_index_path, favail_path, tgprod_path, eavail_path)
 
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
                 maximum_acceptable_evail, _TARGET_NODATA)
 
@@ -1503,7 +1515,7 @@ class foragetests(unittest.TestCase):
                 pft_i, iel, pft_param_dict, sv_reg, site_param_table,
                 site_index_path, favail_path, tgprod_path, eavail_path)
 
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
                 maximum_acceptable_evail, _TARGET_NODATA)
 
@@ -1537,7 +1549,7 @@ class foragetests(unittest.TestCase):
             pft_i, iel, pft_param_dict, sv_reg, site_param_table,
             site_index_path, favail_path, tgprod_path, eavail_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             eavail_path, known_N_avail - tolerance,
             known_N_avail + tolerance, _TARGET_NODATA)
 
@@ -1547,7 +1559,7 @@ class foragetests(unittest.TestCase):
             pft_i, iel, pft_param_dict, sv_reg, site_param_table,
             site_index_path, favail_path, tgprod_path, eavail_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             eavail_path, known_P_avail - tolerance,
             known_P_avail + tolerance, _TARGET_NODATA)
 
@@ -1595,7 +1607,7 @@ class foragetests(unittest.TestCase):
             biomass_production_path, fraction_allocated_to_roots_path,
             cercrp_min_above_path, cercrp_min_below_path, demand_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             demand_path, minimum_acceptable_demand,
             maximum_acceptable_demand, _TARGET_NODATA)
 
@@ -1611,7 +1623,7 @@ class foragetests(unittest.TestCase):
             biomass_production_path, fraction_allocated_to_roots_path,
             cercrp_min_above_path, cercrp_min_below_path, demand_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             demand_path, minimum_acceptable_demand,
             maximum_acceptable_demand, _TARGET_NODATA)
 
@@ -1628,7 +1640,7 @@ class foragetests(unittest.TestCase):
             biomass_production_path, fraction_allocated_to_roots_path,
             cercrp_min_above_path, cercrp_min_below_path, demand_path)
 
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             demand_path, known_demand - tolerance, known_demand + tolerance,
             _TARGET_NODATA)
 
@@ -1672,7 +1684,7 @@ class foragetests(unittest.TestCase):
         fracrc_p = forage.calc_provisional_fracrc(
             annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
             cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             fracrc_p, minimum_acceptable_fracrc_p,
             maximum_acceptable_fracrc_p, _TARGET_NODATA)
 
@@ -1680,7 +1692,7 @@ class foragetests(unittest.TestCase):
         fracrc_p = forage.calc_provisional_fracrc(
             annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
             cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             fracrc_p, minimum_acceptable_fracrc_p,
             maximum_acceptable_fracrc_p, _TARGET_NODATA)
 
@@ -1705,7 +1717,7 @@ class foragetests(unittest.TestCase):
         fracrc_p = forage.calc_provisional_fracrc(
             annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
             cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             fracrc_p, known_fracrc_p_frtcindx_0 - tolerance,
             known_fracrc_p_frtcindx_0 + tolerance, _TARGET_NODATA)
 
@@ -1713,7 +1725,7 @@ class foragetests(unittest.TestCase):
         fracrc_p = forage.calc_provisional_fracrc(
             annual_precip, frtcindx, bgppa, bgppb, agppa, agppb,
             cfrtcw_1, cfrtcw_2, cfrtcn_1, cfrtcn_2)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             fracrc_p, known_fracrc_p_frtcindx_1 - tolerance,
             known_fracrc_p_frtcindx_1 + tolerance, _TARGET_NODATA)
 
@@ -1804,7 +1816,7 @@ class foragetests(unittest.TestCase):
             prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
             pft_i, iel)
         for path, ranges in acceptable_range_dict.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg[path], ranges['minimum_acceptable_value'],
                 ranges['maximum_acceptable_value'], _TARGET_NODATA)
 
@@ -1817,7 +1829,7 @@ class foragetests(unittest.TestCase):
             prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
             pft_i, iel)
         for path, ranges in acceptable_range_dict.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg[path], ranges['minimum_acceptable_value'],
                 ranges['maximum_acceptable_value'], _TARGET_NODATA)
 
@@ -1851,7 +1863,7 @@ class foragetests(unittest.TestCase):
             prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
             pft_i, iel)
         for path, value in known_value_dict.iteritems():
-            assert_all_values_in_raster_within_range(
+            self.assert_all_values_in_raster_within_range(
                 month_reg[path], value - tolerance,
                 value + tolerance, _TARGET_NODATA)
 
@@ -1909,7 +1921,7 @@ class foragetests(unittest.TestCase):
             frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
             demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
             cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             fracrc_r_path, minimum_acceptable_fracrc_r,
             maximum_acceptable_fracrc_r, _TARGET_NODATA)
 
@@ -1918,7 +1930,7 @@ class foragetests(unittest.TestCase):
             frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
             demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
             cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             fracrc_r_path, minimum_acceptable_fracrc_r,
             maximum_acceptable_fracrc_r, _TARGET_NODATA)
 
@@ -1932,7 +1944,7 @@ class foragetests(unittest.TestCase):
             frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
             demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
             cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             fracrc_r_path, minimum_acceptable_fracrc_r,
             maximum_acceptable_fracrc_r, _TARGET_NODATA)
 
@@ -1941,7 +1953,7 @@ class foragetests(unittest.TestCase):
             frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
             demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
             cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             fracrc_r_path, minimum_acceptable_fracrc_r,
             maximum_acceptable_fracrc_r, _TARGET_NODATA)
 
@@ -1966,7 +1978,7 @@ class foragetests(unittest.TestCase):
             frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
             demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
             cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             fracrc_r_path, known_fracrc_r_frtcindx_0 - tolerance,
             known_fracrc_r_frtcindx_0 + tolerance, _TARGET_NODATA)
 
@@ -1975,7 +1987,7 @@ class foragetests(unittest.TestCase):
             frtcindx_path, fracrc_p_path, totale_1_path, totale_2_path,
             demand_1_path, demand_2_path, h2ogef_1_path, cfrtcw_1_path,
             cfrtcw_2_path, cfrtcn_1_path, cfrtcn_2_path, fracrc_r_path)
-        assert_all_values_in_raster_within_range(
+        self.assert_all_values_in_raster_within_range(
             fracrc_r_path, known_fracrc_r_frtcindx_1 - tolerance,
             known_fracrc_r_frtcindx_1 + tolerance, _TARGET_NODATA)
 
@@ -2018,10 +2030,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_1 - tolerance, agprod_grzeff_1 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_1 - tolerance, rtsh_grzeff_1 + tolerance,
             _TARGET_NODATA)
 
@@ -2032,10 +2044,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_2 - tolerance, agprod_grzeff_2 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_2 - tolerance, rtsh_grzeff_2 + tolerance,
             _TARGET_NODATA)
 
@@ -2046,10 +2058,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_3 - tolerance, agprod_grzeff_3 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_3 - tolerance, rtsh_grzeff_3 + tolerance,
             _TARGET_NODATA)
 
@@ -2060,10 +2072,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_4 - tolerance, agprod_grzeff_4 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_4 - tolerance, rtsh_grzeff_4 + tolerance,
             _TARGET_NODATA)
 
@@ -2074,10 +2086,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_5 - tolerance, agprod_grzeff_5 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_5 - tolerance, rtsh_grzeff_5 + tolerance,
             _TARGET_NODATA)
 
@@ -2088,10 +2100,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_6 - tolerance, agprod_grzeff_6 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_6 - tolerance, rtsh_grzeff_6 + tolerance,
             _TARGET_NODATA)
 
@@ -2104,10 +2116,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_4 - tolerance, agprod_grzeff_4 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_4 - tolerance, rtsh_grzeff_4 + tolerance,
             _TARGET_NODATA)
 
@@ -2118,10 +2130,10 @@ class foragetests(unittest.TestCase):
             tgprod, fracrc, flgrem, grzeff)
         rtsh = forage.grazing_effect_on_root_shoot(
             fracrc, flgrem, grzeff, gremb)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             agprod, agprod_grzeff_2 - tolerance, agprod_grzeff_2 + tolerance,
             _TARGET_NODATA)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             rtsh, rtsh_grzeff_2 - tolerance, rtsh_grzeff_2 + tolerance,
             _TARGET_NODATA)
 
@@ -2149,6 +2161,6 @@ class foragetests(unittest.TestCase):
         known_tgprod = 572.76
         tolerance = 0.0001
         tgprod = forage.calc_tgprod_final(rtsh, agprod)
-        assert_all_values_in_array_within_range(
+        self.assert_all_values_in_array_within_range(
             tgprod, known_tgprod - tolerance, known_tgprod + tolerance,
             _TARGET_NODATA)
