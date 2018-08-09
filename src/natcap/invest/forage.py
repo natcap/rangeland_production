@@ -738,11 +738,11 @@ def _calc_ompc(
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
-            (som1c_2 != som1c_2_nodata)
-            & (som2c_2 != som2c_2_nodata)
-            & (som3c != som3c_nodata)
-            & (bulkd != bulkd_nodata)
-            & (edepth != _IC_NODATA))
+            (som1c_2 != som1c_2_nodata) &
+            (som2c_2 != som2c_2_nodata) &
+            (som3c != som3c_nodata) &
+            (bulkd != bulkd_nodata) &
+            (edepth != _IC_NODATA))
         ompc[valid_mask] = (
             (som1c_2[valid_mask] + som2c_2[valid_mask] +
                 som3c[valid_mask]) * 1.724 /
@@ -802,11 +802,11 @@ def _calc_afiel(
         afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
         valid_mask = (
-            (sand != sand_nodata)
-            & (silt != silt_nodata)
-            & (clay != clay_nodata)
-            & (ompc != _TARGET_NODATA)
-            & (bulkd != bulkd_nodata))
+            (sand != sand_nodata) &
+            (silt != silt_nodata) &
+            (clay != clay_nodata) &
+            (ompc != _TARGET_NODATA) &
+            (bulkd != bulkd_nodata))
         afiel[valid_mask] = (
             0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask] +
             0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask] +
@@ -871,11 +871,11 @@ def _calc_awilt(
         awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
         valid_mask = (
-            (sand != sand_nodata)
-            & (silt != silt_nodata)
-            & (clay != clay_nodata)
-            & (ompc != _TARGET_NODATA)
-            & (bulkd != bulkd_nodata))
+            (sand != sand_nodata) &
+            (silt != silt_nodata) &
+            (clay != clay_nodata) &
+            (ompc != _TARGET_NODATA) &
+            (bulkd != bulkd_nodata))
         awilt[valid_mask] = (
             -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask] +
             0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask] +
@@ -1068,9 +1068,9 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         eftext = numpy.empty(sand.shape, dtype=numpy.float32)
         eftext[:] = _IC_NODATA
         valid_mask = (
-            (peftxa != _IC_NODATA)
-            & (peftxb != _IC_NODATA)
-            & (sand != sand_nodata))
+            (peftxa != _IC_NODATA) &
+            (peftxb != _IC_NODATA) &
+            (sand != sand_nodata))
         eftext[valid_mask] = (
             peftxa[valid_mask] + (peftxb[valid_mask] * sand[valid_mask]))
         return eftext
@@ -1101,9 +1101,9 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         p1co2_2 = numpy.empty(sand.shape, dtype=numpy.float32)
         p1co2_2[:] = _IC_NODATA
         valid_mask = (
-            (p1co2a_2 != _IC_NODATA)
-            & (p1co2b_2 != _IC_NODATA)
-            & (sand != sand_nodata))
+            (p1co2a_2 != _IC_NODATA) &
+            (p1co2b_2 != _IC_NODATA) &
+            (sand != sand_nodata))
         p1co2_2[valid_mask] = (
             p1co2a_2[valid_mask] + (p1co2b_2[valid_mask] * sand[valid_mask]))
         return p1co2_2
@@ -1133,9 +1133,9 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         fps1s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps1s3[:] = _IC_NODATA
         valid_mask = (
-            (ps1s3_1 != _IC_NODATA)
-            & (ps1s3_2 != _IC_NODATA)
-            & (clay != clay_nodata))
+            (ps1s3_1 != _IC_NODATA) &
+            (ps1s3_2 != _IC_NODATA) &
+            (clay != clay_nodata))
         fps1s3[valid_mask] = (
             ps1s3_1[valid_mask] + (ps1s3_2[valid_mask] * clay[valid_mask]))
         return fps1s3
@@ -1164,9 +1164,9 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         fps2s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps2s3[:] = _IC_NODATA
         valid_mask = (
-            (ps2s3_1 != _IC_NODATA)
-            & (ps2s3_2 != _IC_NODATA)
-            & (clay != clay_nodata))
+            (ps2s3_1 != _IC_NODATA) &
+            (ps2s3_2 != _IC_NODATA) &
+            (clay != clay_nodata))
         fps2s3[valid_mask] = (
             ps2s3_1[valid_mask] + (ps2s3_2[valid_mask] * clay[valid_mask]))
         return fps2s3
@@ -1195,9 +1195,9 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         orglch = numpy.empty(sand.shape, dtype=numpy.float32)
         orglch[:] = _IC_NODATA
         valid_mask = (
-            (omlech_1 != _IC_NODATA)
-            & (omlech_2 != _IC_NODATA)
-            & (sand != sand_nodata))
+            (omlech_1 != _IC_NODATA) &
+            (omlech_2 != _IC_NODATA) &
+            (sand != sand_nodata))
         orglch[valid_mask] = (
             omlech_1[valid_mask] + (omlech_2[valid_mask] * sand[valid_mask]))
         return orglch
@@ -1232,12 +1232,12 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
         agdrat, the C/<iel> ratio of new material
     """
     valid_mask = (
-        (anps != _TARGET_NODATA)
-        & (tca != _TARGET_NODATA)
-        & (pcemic_1 != _IC_NODATA)
-        & (pcemic_2 != _IC_NODATA)
-        & (pcemic_3 != _IC_NODATA)
-        & (cemicb != _IC_NODATA))
+        (anps != _TARGET_NODATA) &
+        (tca != _TARGET_NODATA) &
+        (pcemic_1 != _IC_NODATA) &
+        (pcemic_2 != _IC_NODATA) &
+        (pcemic_3 != _IC_NODATA) &
+        (cemicb != _IC_NODATA))
     econt = numpy.empty(anps.shape, dtype=numpy.float32)
     econt[:] = _TARGET_NODATA
     econt[valid_mask] = numpy.where(
@@ -1329,11 +1329,11 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             into som1 for one nutrient
         """
         valid_mask = (
-            (pcemic1_2 != _IC_NODATA)
-            & (pcemic1_1 != _IC_NODATA)
-            & (pcemic1_3 != _IC_NODATA)
-            & (struce_1 != struce_1_nodata)
-            & (strucc_1 != strucc_1_nodata))
+            (pcemic1_2 != _IC_NODATA) &
+            (pcemic1_1 != _IC_NODATA) &
+            (pcemic1_3 != _IC_NODATA) &
+            (struce_1 != struce_1_nodata) &
+            (strucc_1 != strucc_1_nodata))
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
@@ -1384,16 +1384,16 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             into som2 for one nutrient
         """
         valid_mask = (
-            (pcemic2_2 != _IC_NODATA)
-            & (pcemic2_1 != _IC_NODATA)
-            & (pcemic2_3 != _IC_NODATA)
-            & (struce_1 != struce_1_nodata)
-            & (strucc_1 != strucc_1_nodata)
-            & (rad1p_1 != _IC_NODATA)
-            & (rad1p_2 != _IC_NODATA)
-            & (rad1p_3 != _IC_NODATA)
-            & (pcemic1_2 != _IC_NODATA)
-            & (rnewas1 != _TARGET_NODATA))
+            (pcemic2_2 != _IC_NODATA) &
+            (pcemic2_1 != _IC_NODATA) &
+            (pcemic2_3 != _IC_NODATA) &
+            (struce_1 != struce_1_nodata) &
+            (strucc_1 != strucc_1_nodata) &
+            (rad1p_1 != _IC_NODATA) &
+            (rad1p_2 != _IC_NODATA) &
+            (rad1p_3 != _IC_NODATA) &
+            (pcemic1_2 != _IC_NODATA) &
+            (rnewas1 != _TARGET_NODATA))
         cemicb2 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb2[:] = _TARGET_NODATA
         cemicb2[valid_mask] = (
@@ -1556,9 +1556,9 @@ def _yearly_tasks(
         baseNdep = numpy.empty(prcann.shape, dtype=numpy.float32)
         baseNdep[:] = 0.
         valid_mask = (
-            (epnfa_1 != _IC_NODATA)
-            & (epnfa_2 != _IC_NODATA)
-            & (prcann != _TARGET_NODATA))
+            (epnfa_1 != _IC_NODATA) &
+            (epnfa_2 != _IC_NODATA) &
+            (prcann != _TARGET_NODATA))
         baseNdep[valid_mask] = (
             epnfa_1[valid_mask] +
             (epnfa_2[valid_mask] * numpy.minimum(prcann[valid_mask], 80.)))
@@ -1745,10 +1745,10 @@ def _reference_evapotranspiration(
         langleys2watts = 54.0
 
         valid_mask = (
-            (max_temp != maxtmp_nodata)
-            & (min_temp != mintmp_nodata)
-            & (shwave != _TARGET_NODATA)
-            & (fwloss_4 != _IC_NODATA))
+            (max_temp != maxtmp_nodata) &
+            (min_temp != mintmp_nodata) &
+            (shwave != _TARGET_NODATA) &
+            (fwloss_4 != _IC_NODATA))
         trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
         trange[:] = _TARGET_NODATA
         trange[valid_mask] = max_temp[valid_mask] - min_temp[valid_mask]
@@ -1873,12 +1873,12 @@ def _potential_production(
         bio = numpy.empty(aglivc.shape, dtype=numpy.float32)
         bio[:] = _IC_NODATA
         valid_mask = (
-            (aglivc >= 0.)
-            & (pmxbio != _IC_NODATA)
-            & (maxtmp != maxtmp_nodata)
-            & (pmxtmp != _IC_NODATA)
-            & (mintmp != mintmp_nodata)
-            & (pmntmp != _IC_NODATA))
+            (aglivc >= 0.) &
+            (pmxbio != _IC_NODATA) &
+            (maxtmp != maxtmp_nodata) &
+            (pmxtmp != _IC_NODATA) &
+            (mintmp != mintmp_nodata) &
+            (pmntmp != _IC_NODATA))
         bio[valid_mask] = aglivc[valid_mask] * 2.5
         bio[bio > pmxbio] = pmxbio[bio > pmxbio]
         bio[pmxbio < 0] = _IC_NODATA
@@ -1928,11 +1928,11 @@ def _potential_production(
                 by temperature
         """
         valid_mask = (
-            (ctemp != _IC_NODATA)
-            & (ppdf_1 != _IC_NODATA)
-            & (ppdf_2 != _IC_NODATA)
-            & (ppdf_3 != _IC_NODATA)
-            & (ppdf_4 != _IC_NODATA))
+            (ctemp != _IC_NODATA) &
+            (ppdf_1 != _IC_NODATA) &
+            (ppdf_2 != _IC_NODATA) &
+            (ppdf_3 != _IC_NODATA) &
+            (ppdf_4 != _IC_NODATA))
         frac = numpy.empty(ctemp.shape, dtype=numpy.float32)
         frac[:] = _TARGET_NODATA
         frac[valid_mask] = (
@@ -1977,13 +1977,13 @@ def _potential_production(
 
         """
         valid_mask = (
-            (pevap != _TARGET_NODATA)
-            & (avh2o_1 != avh2o_1_nodata)
-            & (precip != precip_nodata)
-            & (wc != _TARGET_NODATA)
-            & (pprpts_1 != _IC_NODATA)
-            & (pprpts_2 != _IC_NODATA)
-            & (pprpts_3 != _IC_NODATA))
+            (pevap != _TARGET_NODATA) &
+            (avh2o_1 != avh2o_1_nodata) &
+            (precip != precip_nodata) &
+            (wc != _TARGET_NODATA) &
+            (pprpts_1 != _IC_NODATA) &
+            (pprpts_2 != _IC_NODATA) &
+            (pprpts_3 != _IC_NODATA))
         h2ogef_prior = numpy.empty(pevap.shape, dtype=numpy.float32)
         h2ogef_prior[:] = _TARGET_NODATA
         h2ogef_prior[valid_mask] = numpy.where(
@@ -2028,9 +2028,9 @@ def _potential_production(
                 by obstruction
         """
         valid_mask = (
-            (strucc_1 != strucc_1_nodata)
-            & (pmxbio != _IC_NODATA)
-            & (biok5 != _IC_NODATA))
+            (strucc_1 != strucc_1_nodata) &
+            (pmxbio != _IC_NODATA) &
+            (biok5 != _IC_NODATA))
 
         bioc = numpy.empty(sum_stdedc.shape, dtype=numpy.float32)
         bioc[:] = _IC_NODATA
@@ -2092,11 +2092,11 @@ def _potential_production(
                 production
         """
         valid_mask = (
-            (prdx_1 != _IC_NODATA)
-            & (shwave != _TARGET_NODATA)
-            & (potprd != _TARGET_NODATA)
-            & (h2ogef_1 != _TARGET_NODATA)
-            & (biof != _TARGET_NODATA))
+            (prdx_1 != _IC_NODATA) &
+            (shwave != _TARGET_NODATA) &
+            (potprd != _TARGET_NODATA) &
+            (h2ogef_1 != _TARGET_NODATA) &
+            (biof != _TARGET_NODATA))
         tgprod_pot_prod = numpy.empty(prdx_1.shape, dtype=numpy.float32)
         tgprod_pot_prod[:] = _TARGET_NODATA
 
@@ -2292,10 +2292,10 @@ def _calc_favail_P(sv_reg, param_val_dict):
             favail_P, fraction of mineral P available to plants
         """
         valid_mask = (
-            (minerl_1_1 != minerl_1_1_nodata)
-            & (favail_4 != _IC_NODATA)
-            & (favail_5 != _IC_NODATA)
-            & (favail_6 != _IC_NODATA))
+            (minerl_1_1 != minerl_1_1_nodata) &
+            (favail_4 != _IC_NODATA) &
+            (favail_5 != _IC_NODATA) &
+            (favail_6 != _IC_NODATA))
 
         interim = numpy.empty(minerl_1_1.shape, dtype=numpy.float32)
         interim[:] = _IC_NODATA
@@ -2383,11 +2383,11 @@ def _calc_available_nutrient(
             eavail, the nutrient available to the plant functional type
         """
         valid_mask = (
-            (rictrl != _IC_NODATA)
-            & (bglivc != bglivc_nodata)
-            & (riint != _IC_NODATA)
-            & (favail != _IC_NODATA)
-            & (crpstg != crpstg_nodata))
+            (rictrl != _IC_NODATA) &
+            (bglivc != bglivc_nodata) &
+            (riint != _IC_NODATA) &
+            (favail != _IC_NODATA) &
+            (crpstg != crpstg_nodata))
 
         rimpct = numpy.empty(rictrl.shape, dtype=numpy.float32)
         rimpct[:] = _TARGET_NODATA
@@ -2423,9 +2423,9 @@ def _calc_available_nutrient(
             eavail, total N available including N fixed by the plant
         """
         valid_mask = (
-            (eavail_prior != _TARGET_NODATA)
-            & (snfxmx != _IC_NODATA)
-            & (tgprod != _TARGET_NODATA))
+            (eavail_prior != _TARGET_NODATA)  &
+            (snfxmx != _IC_NODATA)  &
+            (tgprod != _TARGET_NODATA))
 
         maxNfix = numpy.empty(eavail_prior.shape, dtype=numpy.float32)
         maxNfix[:] = _TARGET_NODATA
@@ -2554,10 +2554,10 @@ def _calc_nutrient_demand(
             demand_e, nutrient demand
         """
         valid_mask = (
-            (biomass_production != _TARGET_NODATA)
-            & (root_fraction != _TARGET_NODATA)
-            & (cercrp_min_above != _TARGET_NODATA)
-            & (cercrp_min_below != _TARGET_NODATA))
+            (biomass_production != _TARGET_NODATA) &
+            (root_fraction != _TARGET_NODATA) &
+            (cercrp_min_above != _TARGET_NODATA) &
+            (cercrp_min_below != _TARGET_NODATA))
 
         demand_above = numpy.empty(root_fraction.shape, dtype=numpy.float32)
         demand_above[:] = _TARGET_NODATA
@@ -2631,8 +2631,8 @@ def calc_provisional_fracrc(
         fracrc_p, provisional fraction of carbon allocated to roots
     """
     valid_mask = (
-        (annual_precip != _TARGET_NODATA)
-        & (frtcindx != _IC_NODATA))
+        (annual_precip != _TARGET_NODATA) &
+        (frtcindx != _IC_NODATA))
     rtsh = numpy.empty(annual_precip.shape, dtype=numpy.float32)
     rtsh[:] = _TARGET_NODATA
     rtsh[valid_mask] = (
@@ -2726,10 +2726,10 @@ def calc_ce_ratios(
                 material
         """
         valid_mask = (
-            (pra_1 != _IC_NODATA)
-            & (pra_2 != _IC_NODATA)
-            & (aglivc != aglivc_nodata)
-            & (biomax != _IC_NODATA))
+            (pra_1 != _IC_NODATA) &
+            (pra_2 != _IC_NODATA) &
+            (aglivc != aglivc_nodata) &
+            (biomax != _IC_NODATA))
 
         cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
         cercrp_above[:] = _TARGET_NODATA
@@ -2756,9 +2756,9 @@ def calc_ce_ratios(
                 material
         """
         valid_mask = (
-            (prb_1 != _IC_NODATA)
-            & (prb_2 != _IC_NODATA)
-            & (annual_precip != annual_precip_nodata))
+            (prb_1 != _IC_NODATA) &
+            (prb_2 != _IC_NODATA) &
+            (annual_precip != annual_precip_nodata))
 
         cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
         cercrp_below[:] = _TARGET_NODATA
@@ -2862,8 +2862,8 @@ def calc_revised_fracrc(
                 to be between 0 and 1
         """
         valid_mask = (
-            (totale != _TARGET_NODATA)
-            & (demand != _TARGET_NODATA))
+            (totale != _TARGET_NODATA) &
+            (demand != _TARGET_NODATA))
 
         a2drat = numpy.empty(totale.shape, dtype=numpy.float32)
         a2drat[:] = _TARGET_NODATA
@@ -2904,13 +2904,13 @@ def calc_revised_fracrc(
                 a perennial plant
         """
         valid_mask = (
-            (h2ogef != _TARGET_NODATA)
-            & (cfrtcw_1 != _IC_NODATA)
-            & (cfrtcw_2 != _IC_NODATA)
-            & (a2drat_1 != _TARGET_NODATA)
-            & (a2drat_2 != _TARGET_NODATA)
-            & (cfrtcn_1 != _IC_NODATA)
-            & (cfrtcn_2 != _IC_NODATA))
+            (h2ogef != _TARGET_NODATA) &
+            (cfrtcw_1 != _IC_NODATA) &
+            (cfrtcw_2 != _IC_NODATA) &
+            (a2drat_1 != _TARGET_NODATA) &
+            (a2drat_2 != _TARGET_NODATA) &
+            (cfrtcn_1 != _IC_NODATA) &
+            (cfrtcn_2 != _IC_NODATA))
 
         h2oeff = numpy.empty(h2ogef.shape, dtype=numpy.float32)
         h2oeff[:] = _TARGET_NODATA
@@ -2965,9 +2965,9 @@ def calc_revised_fracrc(
             fracrc_r, revised fraction of carbon allocated to roots
         """
         valid_mask = (
-            (frtcindx != _IC_NODATA)
-            & (fracrc_p != _TARGET_NODATA)
-            & (fracrc_perennial != _TARGET_NODATA))
+            (frtcindx != _IC_NODATA) &
+            (fracrc_p != _TARGET_NODATA) &
+            (fracrc_perennial != _TARGET_NODATA))
 
         fracrc_r = numpy.empty(frtcindx.shape, dtype=numpy.float32)
         fracrc_r[:] = _TARGET_NODATA
@@ -3038,10 +3038,10 @@ def grazing_effect_on_aboveground_production(
         agprod, aboveground production impacted by grazing
     """
     valid_mask = (
-        (tgprod != _TARGET_NODATA)
-        & (fracrc != _TARGET_NODATA)
-        & (flgrem != _IC_NODATA)
-        & (grzeff != _IC_NODATA))
+        (tgprod != _TARGET_NODATA) &
+        (fracrc != _TARGET_NODATA) &
+        (flgrem != _IC_NODATA) &
+        (grzeff != _IC_NODATA))
 
     agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
     agprod_prior[:] = _TARGET_NODATA
@@ -3100,10 +3100,10 @@ def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
         rtsh, root:shoot ratio impacted by grazing
     """
     valid_mask = (
-        (fracrc != _TARGET_NODATA)
-        & (flgrem != _TARGET_NODATA)
-        & (grzeff != _IC_NODATA)
-        & (gremb != _IC_NODATA))
+        (fracrc != _TARGET_NODATA) &
+        (flgrem != _TARGET_NODATA) &
+        (grzeff != _IC_NODATA) &
+        (gremb != _IC_NODATA))
 
     rtsh_prior = numpy.empty(fracrc.shape, dtype=numpy.float32)
     rtsh_prior[:] = _TARGET_NODATA
@@ -3150,8 +3150,8 @@ def calc_tgprod_final(rtsh, agprod):
         tgprod, final total potential production
     """
     valid_mask = (
-        (rtsh != _TARGET_NODATA)
-        & (agprod != _TARGET_NODATA))
+        (rtsh != _TARGET_NODATA) &
+        (agprod != _TARGET_NODATA))
     tgprod = numpy.empty(rtsh.shape, dtype=numpy.float32)
     tgprod[:] = _TARGET_NODATA
     tgprod[valid_mask] = (
