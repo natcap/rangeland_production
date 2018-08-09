@@ -669,11 +669,11 @@ def raster_sum(
     """
     def raster_sum_op(*raster_list):
         """Add the rasters in raster_list without removing nodata values."""
+        invalid_mask = numpy.any(
+            numpy.array(raster_list) == input_nodata, axis=0)
         sum_of_rasters = numpy.sum(raster_list, axis=0)
-        masked_sum = numpy.where(
-            (numpy.any(numpy.array(raster_list) == input_nodata, axis=0)),
-            target_nodata, sum_of_rasters)
-        return masked_sum
+        sum_of_rasters[invalid_mask] = target_nodata
+        return sum_of_rasters
 
     def raster_sum_op_nodata_remove(*raster_list):
         """Add the rasters in raster_list, treating nodata as zero."""
@@ -1622,13 +1622,13 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             declin = 0.401426 * numpy.sin(6.283185 * (jday - 77.0) / 365.0)
 
             temp = 1.0 - (-numpy.tan(rlatitude) * numpy.tan(declin))**2
-            temp = numpy.where(temp < 0., 0., temp)
+            temp[temp < 0.] = 0.
 
             par1 = numpy.sqrt(temp)
             par2 = (-numpy.tan(rlatitude) * numpy.tan(declin))
 
             ahou = numpy.arctan2(par1, par2)
-            ahou = numpy.where(ahou < 0., 0., ahou)
+            ahou[ahou < 0.] = 0.
 
             solrad = (
                 917.0 * transcof * (
@@ -1769,9 +1769,8 @@ def _reference_evapotranspiration(
 
         # monthly reference evapotranspiration, from mm to cm,
         # bounded to be at least 0.5
-        monpet = numpy.where(
-            ((daypet * 30.) / 10.) > 0.5,
-            ((daypet * 30.) / 10.), 0.5)
+        monpet = (daypet * 30.) / 10.
+        monpet[monpet <= 0.5] = 0.5
 
         pevap = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
         pevap[:] = _TARGET_NODATA
@@ -1843,9 +1842,10 @@ def _potential_production(
 
     def multiply_positive_rasters(raster1, raster2):
         """Multiply positive values in two rasters."""
-        masked_r1 = numpy.where(raster1 < 0., 0., raster1)
-        masked_r2 = numpy.where(raster2 < 0., 0., raster2)
-        return masked_r1 * masked_r2
+        valid_mask = (raster1 > 0.) & (raster2 > 0.)
+        result = numpy.zeros(raster1.shape)
+        result[valid_mask] = raster1[valid_mask] * raster2[valid_mask]
+        return result
 
     def calc_ctemp(aglivc, pmxbio, maxtmp, pmxtmp, mintmp, pmntmp):
         """Calculate soil temperature relative to its effect on growth.
@@ -1880,7 +1880,7 @@ def _potential_production(
             & (mintmp != mintmp_nodata)
             & (pmntmp != _IC_NODATA))
         bio[valid_mask] = aglivc[valid_mask] * 2.5
-        bio = numpy.where(bio > pmxbio, pmxbio, bio)
+        bio[bio > pmxbio] = pmxbio[bio > pmxbio]
         bio[pmxbio < 0] = _IC_NODATA
 
         # Maximum temperature
@@ -2000,10 +2000,7 @@ def _potential_production(
             1.0 + slope[valid_mask] *
             (h2ogef_prior[valid_mask] - pprpts_3[valid_mask]))
 
-        h2ogef_1[valid_mask] = numpy.where(
-            h2ogef_1[valid_mask] > 1., 1., h2ogef_1[valid_mask])
-        h2ogef_1[valid_mask] = numpy.where(
-            h2ogef_1[valid_mask] < 0.01, 0.01, h2ogef_1[valid_mask])
+        h2ogef_1[valid_mask] = numpy.clip(h2ogef_1[valid_mask], 0.01, 1.)
         return h2ogef_1
 
     def calc_biof(sum_stdedc, sum_aglivc, strucc_1, pmxbio, biok5):
@@ -2870,10 +2867,8 @@ def calc_revised_fracrc(
 
         a2drat = numpy.empty(totale.shape, dtype=numpy.float32)
         a2drat[:] = _TARGET_NODATA
-
-        a2drat[valid_mask] = numpy.minimum(
-            1., (totale[valid_mask] / demand[valid_mask]))
-        a2drat[valid_mask] = numpy.maximum(0., a2drat[valid_mask])
+        a2drat[valid_mask] = numpy.clip(
+            totale[valid_mask] / demand[valid_mask], 0., 1.)
         return a2drat
 
     def calc_perennial_fracrc(
@@ -3219,16 +3214,12 @@ def calc_final_tgprod_rtsh(
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
             fracrc_path, flgrem_path, grzeff_path, gremb_path],
-        grazing_effect_on_root_shoot,
-        month_reg['rtsh_{}'.format(pft_i)],
+        grazing_effect_on_root_shoot, rtsh_path,
         gdal.GDT_Float32, _TARGET_NODATA)
     # final total potential production
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
-            month_reg['rtsh_{}'.format(pft_i)],
-            agprod_path],
-        calc_tgprod_final,
-        month_reg['tgprod_{}'.format(pft_i)],
+        [(path, 1) for path in rtsh_path, agprod_path],
+        calc_tgprod_final, tgprod_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
