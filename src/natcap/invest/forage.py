@@ -625,10 +625,10 @@ def execute(args):
         utils.make_directories([sv_dir])
 
         # track state variables from previous step
-        # prev_sv_reg = sv_reg
-        # sv_reg = utils.build_file_registry(
-        #     [(_SITE_STATE_VARIABLE_FILES, sv_dir),
-        #         (pft_sv_dict, sv_dir)], file_suffix)
+        prev_sv_reg = sv_reg
+        sv_reg = utils.build_file_registry(
+            [(_SITE_STATE_VARIABLE_FILES, sv_dir),
+                (pft_sv_dict, sv_dir)], file_suffix)
 
         # update state variables from previous month
         LOGGER.info(
@@ -1497,22 +1497,18 @@ def _yearly_tasks(
     Raises:
         ValueError if less than 12 monthly precipitation rasters can be found
     """
+    offset = -12
     annual_precip_rasters = []
-    for precip_month in xrange(month_index, month_index + 12):
-        try:
-            annual_precip_rasters.append(
-                aligned_inputs['precip_%d' % precip_month])
-        except KeyError:
-            continue
-    offset = 1
     while len(annual_precip_rasters) < 12:
-        precip_month = month_index - offset
+        offset += 1
+        if offset == 12:
+            raise ValueError("Insufficient precipitation rasters were found")
+        precip_month = month_index + offset
         try:
             annual_precip_rasters.append(
                     aligned_inputs['precip_%d' % precip_month])
         except KeyError:
-            raise KeyError("Insufficient precipitation rasters were found")
-        offset = offset + 1
+            continue
 
     precip_nodata = set([])
     for precip_raster in annual_precip_rasters:
@@ -2423,8 +2419,8 @@ def _calc_available_nutrient(
             eavail, total N available including N fixed by the plant
         """
         valid_mask = (
-            (eavail_prior != _TARGET_NODATA)  &
-            (snfxmx != _IC_NODATA)  &
+            (eavail_prior != _TARGET_NODATA) &
+            (snfxmx != _IC_NODATA) &
             (tgprod != _TARGET_NODATA))
 
         maxNfix = numpy.empty(eavail_prior.shape, dtype=numpy.float32)
@@ -3056,11 +3052,12 @@ def grazing_effect_on_aboveground_production(
 
     quadratic_effect = numpy.empty(tgprod.shape, dtype=numpy.float32)
     quadratic_effect[:] = _TARGET_NODATA
-    quadratic_effect[valid_mask] = numpy.maximum(
+    quadratic_effect[valid_mask] = (
         (1. + 2.6*flgrem[valid_mask] -
             (5.83*(numpy.power(flgrem[valid_mask], 2)))) *
-        agprod_prior[valid_mask],
-        0.02)
+        agprod_prior[valid_mask])
+    quadratic_effect[valid_mask] = numpy.maximum(
+        quadratic_effect[valid_mask], 0.02)
 
     no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 3, 4]))
     linear_mask = (valid_mask & numpy.isin(grzeff, [1, 6]))

@@ -18,6 +18,8 @@ REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 _TARGET_NODATA = -1.0
 _IC_NODATA = numpy.finfo('float32').min
 
+numpy.random.seed(100)
+
 
 def create_random_raster(target_path, lower_bound, upper_bound):
     """Create a small raster of random floats.
@@ -998,7 +1000,7 @@ class foragetests(unittest.TestCase):
         modified_inputs = complete_aligned_inputs.copy()
         removed_key = modified_inputs.pop('precip_{}'.format(
             numpy.random.randint(month_index, month_index + 12)))
-        with self.assertRaises(KeyError):
+        with self.assertRaises(ValueError):
             forage._yearly_tasks(
                 site_index_path, site_param_table, modified_inputs,
                 month_index, year_reg)
@@ -1007,7 +1009,7 @@ class foragetests(unittest.TestCase):
         # current month
         modified_inputs['precip_{}'.format(month_index + 13)] = os.path.join(
             'precip_{}.tif'.format(month_index + 13))
-        with self.assertRaises(KeyError):
+        with self.assertRaises(ValueError):
             forage._yearly_tasks(
                 site_index_path, site_param_table, modified_inputs,
                 month_index, year_reg)
