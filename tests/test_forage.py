@@ -18,13 +18,16 @@ REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 _TARGET_NODATA = -1.0
 _IC_NODATA = numpy.finfo('float32').min
 
+NROWS = 3
+NCOLS = 3
+
 numpy.random.seed(100)
 
 
 def create_random_raster(target_path, lower_bound, upper_bound):
     """Create a small raster of random floats.
 
-    The raster will have 10 rows and 10 columns and will be in the
+    The raster will have NROWS rows and NCOLS columns and will be in the
     unprojected coordinate system WGS 1984. The values in the raster
     will be between `lower_bound` (included) and `upper_bound`
     (excluded).
@@ -40,15 +43,13 @@ def create_random_raster(target_path, lower_bound, upper_bound):
         None
     """
     geotransform = [0, 1, 0, 44.5, 0, 1]
-    n_cols = 10
-    n_rows = 10
     n_bands = 1
     datatype = gdal.GDT_Float32
     projection = osr.SpatialReference()
     projection.SetWellKnownGeogCS('WGS84')
     driver = gdal.GetDriverByName('GTiff')
     target_raster = driver.Create(
-        target_path.encode('utf-8'), n_cols, n_rows, n_bands,
+        target_path.encode('utf-8'), NCOLS, NROWS, n_bands,
         datatype)
     target_raster.SetProjection(projection.ExportToWkt())
     target_raster.SetGeoTransform(geotransform)
@@ -56,7 +57,7 @@ def create_random_raster(target_path, lower_bound, upper_bound):
     target_band.SetNoDataValue(_TARGET_NODATA)
 
     random_array = numpy.random.uniform(
-        lower_bound, upper_bound, (n_rows, n_cols))
+        lower_bound, upper_bound, (NROWS, NCOLS))
     target_band.WriteArray(random_array)
     target_raster = None
 
@@ -238,13 +239,15 @@ class foragetests(unittest.TestCase):
             self.assertGreaterEqual(
                 min_val, minimum_acceptable_value,
                 msg="Raster contains values smaller than acceptable "
-                + "minimum: {}, {}".format(raster_to_test, min_val))
+                + "minimum: {}, {} (acceptable min: {})".format(
+                    raster_to_test, min_val, minimum_acceptable_value))
             max_val = numpy.amax(
                 raster_block[raster_block != nodata_value])
             self.assertLessEqual(
                 max_val, maximum_acceptable_value,
                 msg="Raster contains values larger than acceptable "
-                + "maximum: {}, {}".format(raster_to_test, max_val))
+                + "maximum: {}, {} (acceptable max: {})".format(
+                    raster_to_test, max_val, maximum_acceptable_value))
 
     def assert_all_values_in_array_within_range(
             self, array_to_test, minimum_acceptable_value,
@@ -2165,4 +2168,267 @@ class foragetests(unittest.TestCase):
         tgprod = forage.calc_tgprod_final(rtsh, agprod)
         self.assert_all_values_in_array_within_range(
             tgprod, known_tgprod - tolerance, known_tgprod + tolerance,
+            _TARGET_NODATA)
+
+    def test_snow(self):
+        """Test that `_snow` reproduces results calculated by test function.
+
+        Use the function `_snow` to modify snow pack, evaporate from snow pack,
+        melt snow, and determine liquid inputs to soil after snow. Test
+        the raster-based function against a point-based function defined
+        here.
+
+        Raises:
+            AssertionError if raster-based outputs do not match outputs
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def snow_point(
+                precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
+                shwave):
+            """Point-based implementation of `_snow`.
+
+            This implementation reproduces Century's process for determining
+            snowfall, evaporation from snow, snowmelt, and liquid draining
+            into soil after snow is accounted.
+
+            Parameters:
+                precip (float): precipitation this month
+                max_temp (float): maximum temperature this month
+                min_temp (float): minimum temperature this month
+                snow (float): existing snow prior to new precipitation
+                snlq (float): existing liquid in snow prior to new
+                    precipitation
+                pet (float): potential evapotranspiration
+                tmelt_1 (float): parameter, temperature above which some
+                    snow melts
+                tmelt_2 (float): parameter, ratio between degrees above the
+                    minimum temperature and cm of snow that will melt
+
+            Returns:
+                dict of modified quantities: snow, snlq, pet, inputs_after_snow
+
+            """
+            tave = (max_temp + min_temp) / 2.
+            inputs_after_snow = precip
+            # precip falls as snow when temperature is below freezing
+            if tave <= 0:
+                snow = snow + precip
+                # all precip is snow, none left
+                inputs_after_snow = 0
+            else:
+                if snow > 0:
+                    snlq = snlq + precip
+                    # all precip is rain on snow, none left
+                    inputs_after_snow = 0
+            if snow > 0:
+                snowtot = snow + snlq
+                evsnow = min(snowtot, (pet * 0.87))
+                snow = max(snow - evsnow * (snow/snowtot), 0.)
+                snlq = max(snlq-evsnow * (snlq/snowtot), 0.)
+                pet = max((pet - evsnow / 0.87), 0)
+
+                if tave >= tmelt_1:
+                    snowmelt = tmelt_2 * (tave - tmelt_1) * shwave
+                    snowmelt = max(snowmelt, 0)
+                    snowmelt = min(snowmelt, snow)
+                    snow = snow - snowmelt
+                    snlq = snlq + snowmelt
+                    if snlq > (0.5 * snow):
+                        add = snlq - 0.5 * snow
+                        snlq = snlq - add
+                        inputs_after_snow = add
+
+            results_dict = {
+                'snow': snow,
+                'snlq': snlq,
+                'pet': pet,
+                'inputs_after_snow': inputs_after_snow,
+            }
+            return results_dict
+
+        from natcap.invest import forage
+
+        # shortwave radiation and pet calculated by hand
+        CURRENT_MONTH = 10
+        SHWAVE = 437.04
+        TMELT_1 = 0.
+        TMELT_2 = 0.002
+        FWLOSS_4 = 0.6
+
+        # rain on snow, all snow melts
+        test_dict = {
+            'precip': 10.,
+            'max_temp': 23.,
+            'min_temp': -2.,
+            'snow': 2.,
+            'snlq': 1.,
+            'pet': 4.74,
+            'tmelt_1': TMELT_1,
+            'tmelt_2': TMELT_2,
+            'shwave': SHWAVE,
+        }
+
+        site_param_table = {
+            1: {
+                'tmelt_1': TMELT_1,
+                'tmelt_2': TMELT_2,
+                'fwloss_4': FWLOSS_4,
+            }
+        }
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+        precip_path = os.path.join(self.workspace_dir, 'precip.tif')
+        max_temp_path = os.path.join(self.workspace_dir, 'max_temp.tif')
+        min_temp_path = os.path.join(self.workspace_dir, 'min_temp.tif')
+        prev_snow_path = os.path.join(self.workspace_dir, 'prev_snow.tif')
+        prev_snlq_path = os.path.join(self.workspace_dir, 'prev_snlq.tif')
+        snow_path = os.path.join(self.workspace_dir, 'snow.tif')
+        snlq_path = os.path.join(self.workspace_dir, 'snlq.tif')
+        inputs_after_snow_path = os.path.join(
+            self.workspace_dir, 'inputs_after_snow.tif')
+        pet_rem_path = os.path.join(self.workspace_dir, 'pet_rem.tif')
+
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(
+            precip_path, test_dict['precip'], test_dict['precip'])
+        create_random_raster(
+            max_temp_path, test_dict['max_temp'], test_dict['max_temp'])
+        create_random_raster(
+            min_temp_path, test_dict['min_temp'], test_dict['min_temp'])
+        create_random_raster(
+            prev_snow_path, test_dict['snow'], test_dict['snow'])
+        create_random_raster(
+            prev_snlq_path, test_dict['snlq'], test_dict['snlq'])
+
+        result_dict = snow_point(
+            test_dict['precip'], test_dict['max_temp'], test_dict['min_temp'],
+            test_dict['snow'], test_dict['snlq'], test_dict['pet'],
+            test_dict['tmelt_1'], test_dict['tmelt_2'], SHWAVE)
+
+        forage._snow(
+            site_index_path, site_param_table, precip_path, max_temp_path,
+            min_temp_path, prev_snow_path, prev_snlq_path, CURRENT_MONTH,
+            snow_path, snlq_path, inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snow_path, result_dict['snow'], result_dict['snow'],
+            _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            snlq_path, result_dict['snlq'], result_dict['snlq'],
+            _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            inputs_after_snow_path,
+            result_dict['inputs_after_snow'] - 0.2,
+            result_dict['inputs_after_snow'] + 0.2, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            pet_rem_path, result_dict['pet'], result_dict['pet'],
+            _TARGET_NODATA)
+
+        # new snowfall, no snowmelt
+        test_dict = {
+            'precip': 10.,
+            'max_temp': 2.,
+            'min_temp': -6.,
+            'snow': 2.,
+            'snlq': 1.,
+            'pet': 1.497,
+            'tmelt_1': TMELT_1,
+            'tmelt_2': TMELT_2,
+            'shwave': SHWAVE,
+        }
+
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(
+            precip_path, test_dict['precip'], test_dict['precip'])
+        create_random_raster(
+            max_temp_path, test_dict['max_temp'], test_dict['max_temp'])
+        create_random_raster(
+            min_temp_path, test_dict['min_temp'], test_dict['min_temp'])
+        create_random_raster(
+            prev_snow_path, test_dict['snow'], test_dict['snow'])
+        create_random_raster(
+            prev_snlq_path, test_dict['snlq'], test_dict['snlq'])
+
+        result_dict = snow_point(
+            test_dict['precip'], test_dict['max_temp'], test_dict['min_temp'],
+            test_dict['snow'], test_dict['snlq'], test_dict['pet'],
+            test_dict['tmelt_1'], test_dict['tmelt_2'], SHWAVE)
+
+        forage._snow(
+            site_index_path, site_param_table, precip_path, max_temp_path,
+            min_temp_path, prev_snow_path, prev_snlq_path, CURRENT_MONTH,
+            snow_path, snlq_path, inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snow_path, result_dict['snow'] - 0.06, result_dict['snow'] + 0.06,
+            _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            snlq_path, result_dict['snlq'] - 0.04, result_dict['snlq'] + 0.04,
+            _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            inputs_after_snow_path,
+            result_dict['inputs_after_snow'] - 0.1,
+            result_dict['inputs_after_snow'] + 0.1, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            pet_rem_path, result_dict['pet'], result_dict['pet'],
+            _TARGET_NODATA)
+
+        # new snowfall, some snowmelt
+        test_dict = {
+            'precip': 10.,
+            'max_temp': 2.,
+            'min_temp': -2.01,
+            'snow': 2.,
+            'snlq': 1.,
+            'pet': 1.194,
+            'tmelt_1': TMELT_1,
+            'tmelt_2': TMELT_2,
+            'shwave': SHWAVE,
+        }
+
+        create_random_raster(site_index_path, 1, 1)
+        create_random_raster(
+            precip_path, test_dict['precip'], test_dict['precip'])
+        create_random_raster(
+            max_temp_path, test_dict['max_temp'], test_dict['max_temp'])
+        create_random_raster(
+            min_temp_path, test_dict['min_temp'], test_dict['min_temp'])
+        create_random_raster(
+            prev_snow_path, test_dict['snow'], test_dict['snow'])
+        create_random_raster(
+            prev_snlq_path, test_dict['snlq'], test_dict['snlq'])
+
+        result_dict = snow_point(
+            test_dict['precip'], test_dict['max_temp'], test_dict['min_temp'],
+            test_dict['snow'], test_dict['snlq'], test_dict['pet'],
+            test_dict['tmelt_1'], test_dict['tmelt_2'], SHWAVE)
+
+        forage._snow(
+            site_index_path, site_param_table, precip_path, max_temp_path,
+            min_temp_path, prev_snow_path, prev_snlq_path, CURRENT_MONTH,
+            snow_path, snlq_path, inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snow_path, result_dict['snow'] - 0.06, result_dict['snow'] + 0.06,
+            _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            snlq_path, result_dict['snlq'] - 0.01, result_dict['snlq'] + 0.01,
+            _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            inputs_after_snow_path,
+            result_dict['inputs_after_snow'] - 0.1,
+            result_dict['inputs_after_snow'] + 0.1, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            pet_rem_path, result_dict['pet'], result_dict['pet'],
             _TARGET_NODATA)
