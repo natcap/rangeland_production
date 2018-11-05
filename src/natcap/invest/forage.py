@@ -705,6 +705,57 @@ def raster_sum(
             target_path, gdal.GDT_Float32, target_nodata)
 
 
+def weighted_state_variable_sum(
+        sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path):
+    """Calculate weighted sum of state variable across plant functional types.
+
+    To sum a state variable across PFTs within a grid cell, the state variable
+    must be weighted by the percent cover of each PFT inside the grid cell.
+    First multiply the state variable by its percent cover, and then add up the
+    weighted products.
+
+    Parameters:
+        sv (string): state variable to be summed across plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state variables,
+            including sv, the state variable to be summed
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including percent cover of each plant
+            functional type
+        pft_id_set (set): set of integers identifying plant functional types
+        weighted_sum_path (string): path to raster that should contain the
+            weighted sum across PFTs
+
+    Modifies:
+        the raster indicated by `weighted_sum_path`
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp()
+    temp_val_dict = {}
+    for pft_i in pft_id_set:
+        val = '{}_weighted'.format(sv)
+        temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+            temp_dir, '{}_{}.tif'.format(val, pft_i))
+
+    weighted_path_list = []
+    for pft_index in pft_id_set:
+        target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                sv_reg['{}_{}_path'.format(sv, pft_index)],
+                aligned_inputs['pft_{}'.format(pft_index)]],
+            multiply_positive_rasters, target_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        weighted_path_list.append(target_path)
+    raster_sum(
+        weighted_path_list, _TARGET_NODATA, weighted_sum, _TARGET_NODATA,
+        nodata_remove=True)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
 def _calc_ompc(
         som1c_2_path, som2c_2_path, som3c_path, bulkd_path, edepth_path,
         ompc_path):
@@ -2145,9 +2196,6 @@ def _potential_production(
                 aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
                 [_IC_NODATA], fill_value_list=[fill_val])
 
-    # calculate intermediate quantities that do not differ between PFTs:
-    # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
-    # across PFTs, weighted by % cover of each PFT
     maxtmp_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
     mintmp_nodata = pygeoprocessing.get_raster_info(
@@ -2156,22 +2204,14 @@ def _potential_production(
         aligned_inputs['precip_{}'.format(month_index)])['nodata'][0]
     strucc_1_nodata = pygeoprocessing.get_raster_info(
         prev_sv_reg['strucc_1_path'])['nodata'][0]
-    for sv in ['aglivc', 'stdedc']:
-        weighted_path_list = []
-        for pft_index in pft_id_set:
-            target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in
-                    prev_sv_reg['{}_{}_path'.format(sv, pft_index)],
-                    aligned_inputs['pft_{}'.format(pft_index)]],
-                multiply_positive_rasters, target_path,
-                gdal.GDT_Float32, _TARGET_NODATA)
-            weighted_path_list.append(target_path)
 
-        raster_sum(
-            weighted_path_list, _TARGET_NODATA,
-            temp_val_dict['sum_{}'.format(sv)], _TARGET_NODATA,
-            nodata_remove=True)
+    # calculate intermediate quantities that do not differ between PFTs:
+    # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
+    # across PFTs, weighted by % cover of each PFT
+    for sv in ['aglivc', 'stdedc']:
+        weighted_sum_path = temp_val_dict['sum_{}'.format(sv)]
+        weighted_state_variable_sum(
+            sv, prev_sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
 
     # ctemp, soil temperature relative to impacts on growth
     pygeoprocessing.raster_calculator(
@@ -3908,7 +3948,7 @@ def _calc_standing_biomass(aliv, sum_stdedc):
 
 
 def _subtract_surface_losses(
-        inputs_after_snow, fracro, precro, snow, alit, aliv, sd, fwloss_1,
+        inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
         fwloss_2, pet_rem):
     """Subtract moisture losses to runoff, interception, and evaporation.
 
@@ -3924,13 +3964,12 @@ def _subtract_surface_losses(
     Parameters:
         inputs_after_snow (numpy.ndarray): derived, surface water inputs
             from precipitation and snowmelt, prior to runoff
-        fracrco (numpy.ndarray): parameter, fraction of surface water
+        fracro (numpy.ndarray): parameter, fraction of surface water
             above precro that is lost to runoff
         precro (numpy.ndarray): parameter, amount of surface water that
             must be available for runoff to occur
         snow (numpy.ndarray): derived, current snowpack
         alit (numpy.ndarray): derived, biomass in surface litter
-        aliv (numpy.ndarray): derived, aboveground live biomass
         sd (numpy.ndarray): derived, total standing biomass
         fwloss_1 (numpy.ndarray): parameter, scaling factor for
             interception and evaporation of precip by vegetation
@@ -3949,7 +3988,6 @@ def _subtract_surface_losses(
         (precro != _IC_NODATA) &
         (snow != _TARGET_NODATA) &
         (alit != _TARGET_NODATA) &
-        (aliv != _TARGET_NODATA) &
         (sd != _TARGET_NODATA) &
         (fwloss_1 != _IC_NODATA) &
         (fwloss_2 != _IC_NODATA) &
@@ -4051,7 +4089,7 @@ def _soil_water(
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
-        for val in ['aglivc_weighted', 'stdedc_weighted', 'tgprod_weighted']:
+        for val in ['tgprod_weighted']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
 
@@ -4077,20 +4115,10 @@ def _soil_water(
     # calculate the sum of aglivc (standing live biomass) and stdedc
     # (standing dead biomass) across PFTs, weighted by % cover of each PFT
     for sv in ['aglivc', 'stdedc']:
-        weighted_path_list = []
-        for pft_index in pft_id_set:
-            target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in
-                    prev_sv_reg['{}_{}_path'.format(sv, pft_index)],
-                    aligned_inputs['pft_{}'.format(pft_index)]],
-                multiply_positive_rasters, target_path,
-                gdal.GDT_Float32, _TARGET_NODATA)
-            weighted_path_list.append(target_path)
-        raster_sum(
-            weighted_path_list, _TARGET_NODATA,
-            temp_val_dict['sum_{}'.format(sv)], _TARGET_NODATA,
-            nodata_remove=True)
+        weighted_sum_path = temp_val_dict['sum_{}'.format(sv)]
+        weighted_state_variable_sum(
+            sv, prev_sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
+
     # calculate the weighted sum of tgprod, potential production, across PFTs
     weighted_path_list = []
     for pft_index in pft_id_set:
@@ -4144,7 +4172,7 @@ def _soil_water(
         [(path, 1) for path in [
             temp_val_dict['current_moisture_inputs'],
             param_val_dict['fracro'], param_val_dict['precro'],
-            sv_reg['snow'], temp_val_dict['alit'], temp_val_dict['aliv'],
+            sv_reg['snow'], temp_val_dict['alit'],
             temp_val_dict['sd'], param_val_dict['fwloss_1'],
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
         _subtract_surface_losses, temp_val_dict['modified_moisture_inputs'],
