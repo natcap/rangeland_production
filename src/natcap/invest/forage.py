@@ -749,7 +749,7 @@ def weighted_state_variable_sum(
             gdal.GDT_Float32, _TARGET_NODATA)
         weighted_path_list.append(target_path)
     raster_sum(
-        weighted_path_list, _TARGET_NODATA, weighted_sum, _TARGET_NODATA,
+        weighted_path_list, _TARGET_NODATA, weighted_sum_path, _TARGET_NODATA,
         nodata_remove=True)
 
     # clean up temporary files
@@ -3993,13 +3993,16 @@ def _subtract_surface_losses(
         (fwloss_2 != _IC_NODATA) &
         (pet_rem != _TARGET_NODATA))
 
+    runoff = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+    runoff[:] = _TARGET_NODATA
+    runoff[valid_mask] = numpy.maximum(
+        fracro[valid_mask] *
+        (inputs_after_snow[valid_mask] - precro[valid_mask]), 0.)
     inputs_after_runoff = numpy.empty(
         inputs_after_snow.shape, dtype=numpy.float32)
     inputs_after_runoff[:] = _TARGET_NODATA
     inputs_after_runoff[valid_mask] = (
-        inputs_after_snow[valid_mask] -
-        (fracro[valid_mask] * (
-            inputs_after_snow[valid_mask] - precro[valid_mask])))
+        inputs_after_snow[valid_mask] - runoff[valid_mask])
 
     evap_mask = (valid_mask & (snow <= 0))
     # loss to interception
@@ -4019,8 +4022,7 @@ def _subtract_surface_losses(
         numpy.minimum(((absev[evap_mask] + aint[evap_mask]) *
         inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
     # remaining inputs after evaporation
-    inputs_after_surface = numpy.zeros(
-        inputs_after_runoff.shape, dtype=numpy.float32)
+    inputs_after_surface = numpy.copy(inputs_after_runoff)
     inputs_after_surface[evap_mask] = (
         inputs_after_runoff[evap_mask] - evl[evap_mask])
     return inputs_after_surface

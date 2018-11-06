@@ -5,6 +5,7 @@ import tempfile
 import shutil
 import os
 import sys
+import math
 
 import numpy
 from osgeo import osr
@@ -270,12 +271,16 @@ class foragetests(unittest.TestCase):
             array_to_test[array_to_test != nodata_value])
         self.assertGreaterEqual(
             min_val, minimum_acceptable_value,
-            msg="Array contains values smaller than acceptable minimum")
+            msg="Array contains values smaller than acceptable minimum: " +
+            "min value: {}, acceptable min: {}".format(
+                min_val, minimum_acceptable_value))
         max_val = numpy.amax(
             array_to_test[array_to_test != nodata_value])
         self.assertLessEqual(
             max_val, maximum_acceptable_value,
-            msg="Array contains values larger than acceptable maximum")
+            msg="Array contains values larger than acceptable maximum: " +
+            "max value: {}, acceptable max: {}".format(
+                max_val, maximum_acceptable_value))
 
     @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
@@ -1436,6 +1441,85 @@ class foragetests(unittest.TestCase):
                 min_val, (num_rasters - 1),
                 msg="Raster appears to contain nodata values")
 
+    def test_weighted_state_variable_sum(self):
+        """Test `weighted_state_variable_sum` against calculations by hand.
+
+        Use the function `weighted_state_variable_sum` to calculate the
+        weighted sum of a state variable across plant functional types. Test
+        that the calculated sum matches values calculated by hand.
+
+        Raises:
+            AssertionError if the result calculated by
+                `weighted_state_variable_sum` is outside the range
+                [known result += 0.0001]
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        sv = 'state_variable'
+        pft_id_set = [2, 5, 7]
+        percent_cover_dict = {
+            pft_id_set[0]: 0.3,
+            pft_id_set[1]: 0.001,
+            pft_id_set[2]: 0.58,
+        }
+        sv_value_dict = {
+            pft_id_set[0]: 20.,
+            pft_id_set[1]: 300.84,
+            pft_id_set[2]: 102.,
+        }
+        sv_reg = {}
+        aligned_inputs = {}
+        for pft_i in pft_id_set:
+            aligned_inputs['pft_{}'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'pft_{}.tif'.format(pft_i))
+            create_constant_raster(
+                aligned_inputs['pft_{}'.format(pft_i)],
+                percent_cover_dict[pft_i])
+            sv_reg['{}_{}_path'.format(sv, pft_i)] = os.path.join(
+                self.workspace_dir, '{}_{}.tif'.format(sv, pft_i))
+            create_constant_raster(
+                sv_reg['{}_{}_path'.format(sv, pft_i)],
+                sv_value_dict[pft_i])
+        weighted_sum_path = os.path.join(
+            self.workspace_dir, 'weighted_sum.tif')
+
+        tolerance = 0.0001
+
+        # known inputs
+        known_weighted_sum = 65.46084
+        forage.weighted_state_variable_sum(
+            sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
+        self.assert_all_values_in_raster_within_range(
+            weighted_sum_path, known_weighted_sum - tolerance,
+            known_weighted_sum + tolerance, _TARGET_NODATA)
+
+        # one pft has zero percent cover
+        percent_cover_dict[pft_id_set[0]] = 0.
+        create_constant_raster(
+                aligned_inputs['pft_{}'.format(pft_id_set[0])],
+                percent_cover_dict[pft_id_set[0]])
+
+        known_weighted_sum = 59.46084
+        forage.weighted_state_variable_sum(
+            sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
+        self.assert_all_values_in_raster_within_range(
+            weighted_sum_path, known_weighted_sum - tolerance,
+            known_weighted_sum + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(
+            aligned_inputs['pft_{}'.format(pft_id_set[0])], _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            sv_reg['{}_{}_path'.format(sv, pft_id_set[2])], _TARGET_NODATA)
+
+        forage.weighted_state_variable_sum(
+            sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
+        self.assert_all_values_in_raster_within_range(
+            weighted_sum_path, known_weighted_sum - tolerance,
+            known_weighted_sum + tolerance, _TARGET_NODATA)
+
     def test_calc_available_nutrient(self):
         """Test that `_calc_available_nutrient` returns valid results.
 
@@ -2432,3 +2516,274 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             pet_rem_path, result_dict['pet'], result_dict['pet'],
             _TARGET_NODATA)
+
+    def test_calc_aboveground_live_biomass(self):
+        """Test the function `_calc_aboveground_live_biomass`.
+
+        Use the function `_calc_aboveground_live_biomass` to calculate
+        aboveground live biomass for the purposes of soil water. Test that the
+        function reproduces results calculated by hand.
+
+        Raises:
+            AssertionError if `_calc_aboveground_live_biomass` does not match
+                results calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        array_size = (3, 3)
+        # known values
+        sum_aglivc = numpy.full(array_size, 200.)
+        sum_tgprod = numpy.full(array_size, 180.)
+
+        known_aliv = 545.
+        tolerance = 0.00001
+        aliv = forage._calc_aboveground_live_biomass(sum_aglivc, sum_tgprod)
+        self.assert_all_values_in_array_within_range(
+            aliv, known_aliv - tolerance, known_aliv + tolerance,
+            _TARGET_NODATA)
+
+    def test_calc_standing_biomass(self):
+        """Test that `_calc_standing_biomass` matches result generated by hand.
+
+        Use the function `_calc_standing_biomass` to calculate total
+        aboveground standing biomass for soil water. Test that the function
+        reproduces results calculated by hand.
+
+        Raises:
+            AssertionError if `_calc_standing_biomass` does not match results
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        array_size = (3, 3)
+        # known values
+        aliv = numpy.full(array_size, 545)
+        sum_stdedc = numpy.full(array_size, 232)
+
+        known_sd = 800.
+        tolerance = 0.00001
+        sd = forage._calc_standing_biomass(aliv, sum_stdedc)
+        self.assert_all_values_in_array_within_range(
+            sd, known_sd - tolerance, known_sd + tolerance, _TARGET_NODATA)
+
+        # known values
+        aliv = numpy.full(array_size, 233.2)
+        sum_stdedc = numpy.full(array_size, 172)
+
+        known_sd = 663.2
+        tolerance = 0.0001
+        sd = forage._calc_standing_biomass(aliv, sum_stdedc)
+        self.assert_all_values_in_array_within_range(
+            sd, known_sd - tolerance, known_sd + tolerance, _TARGET_NODATA)
+
+    def test_subtract_surface_losses(self):
+        """Test `_subtract_surface_losses` against test function.
+
+        Use the function `_subtract_surface_losses` to calculate moisture
+        losses to runoff, canopy interception, and evaporation.  Test that
+        the function reproduces results calculated by a point-based function
+        defined here.
+
+        Raises:
+            AssertionError if `_subtract_surface_losses` does not match
+                point-based results calculated by test function
+
+        Returns:
+            None
+        """
+        def surface_losses_point(
+                inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+                fwloss_2, pet_rem):
+            """Point- based implementation of `_subtract_surface_losses`.
+
+            This implementation reproduces Century's process for determining
+            loss of moisture inputs to runoff, canopy interception, and surface
+            evaporation.
+
+            Parameters:
+                inputs_after_snow (float): surface water inputs from
+                    precipitation and snowmelt, prior to runoff
+                fracro (float): parameter, fraction of surface water
+                    above precro that is lost to runoff
+                precro (float): parameter, amount of surface water that
+                    must be available for runoff to occur
+                snow (float): current snowpack
+                alit (float): biomass in surface litter
+                sd (float): total standing biomass
+                fwloss_1 (float): parameter, scaling factor for
+                    interception and evaporation of precip by vegetation
+                fwloss_2 (float): parameter, scaling factor for bare soil
+                    evaporation of precip
+                pet_rem (float): potential evaporation remaining after
+                    evaporation of snow
+
+            Returns:
+                inputs_after_surface, surface water inputs to soil after runoff
+                    and surface evaporation are subtracted
+            """
+            runoff = max(fracro * (inputs_after_snow - precro), 0.)
+            inputs_after_runoff = inputs_after_snow - runoff
+            if snow == 0:
+                aint = (0.0003 * alit + 0.0006 * sd) * fwloss_1
+                absevap = (
+                    0.5 * math.exp((-0.002 * alit) - (0.004 * sd)) * fwloss_2)
+                evl = min(
+                    ((absevap + aint) * inputs_after_runoff), 0.4 * pet_rem)
+            else:
+                evl = 0
+            inputs_after_surface = inputs_after_runoff - evl
+            return inputs_after_surface
+
+        from natcap.invest import forage
+
+        array_size = (10, 10)
+
+        # snow cover, runoff losses only
+        test_dict = {
+            'inputs_after_snow': 34.,
+            'fracro': 0.15,
+            'precro': 8.,
+            'snow': 20.,
+            'alit': 100.,
+            'sd': 202.5,
+            'fwloss_1': 0.9,
+            'fwloss_2': 0.7,
+            'pet_rem': 3.88,
+        }
+
+        inputs_after_snow = numpy.full(
+            array_size, test_dict['inputs_after_snow'])
+        fracro = numpy.full(array_size, test_dict['fracro'])
+        precro = numpy.full(array_size, test_dict['precro'])
+        snow = numpy.full(array_size, test_dict['snow'])
+        alit = numpy.full(array_size, test_dict['alit'])
+        sd = numpy.full(array_size, test_dict['sd'])
+        fwloss_1 = numpy.full(array_size, test_dict['fwloss_1'])
+        fwloss_2 = numpy.full(array_size, test_dict['fwloss_2'])
+        pet_rem = numpy.full(array_size, test_dict['pet_rem'])
+
+        known_inputs_after_surface = surface_losses_point(
+            test_dict['inputs_after_snow'], test_dict['fracro'],
+            test_dict['precro'], test_dict['snow'], test_dict['alit'],
+            test_dict['sd'], test_dict['fwloss_1'], test_dict['fwloss_2'],
+            test_dict['pet_rem'])
+        tolerance = 0.00001
+        inputs_after_surface = forage._subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem)
+        self.assert_all_values_in_array_within_range(
+            inputs_after_surface, known_inputs_after_surface - tolerance,
+            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(pet_rem, _TARGET_NODATA)
+        insert_nodata_values_into_array(snow, _TARGET_NODATA)
+        insert_nodata_values_into_array(fracro, _IC_NODATA)
+
+        inputs_after_surface = forage._subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem)
+        self.assert_all_values_in_array_within_range(
+            inputs_after_surface, known_inputs_after_surface - tolerance,
+            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+
+        # no snow cover, large surface biomass
+        test_dict = {
+            'inputs_after_snow': 12.,
+            'fracro': 0.15,
+            'precro': 8.,
+            'snow': 0.,
+            'alit': 200.1,
+            'sd': 800.,
+            'fwloss_1': 0.8,
+            'fwloss_2': 0.8,
+            'pet_rem': 3.88,
+        }
+
+        inputs_after_snow = numpy.full(
+            array_size, test_dict['inputs_after_snow'])
+        fracro = numpy.full(array_size, test_dict['fracro'])
+        precro = numpy.full(array_size, test_dict['precro'])
+        snow = numpy.full(array_size, test_dict['snow'])
+        alit = numpy.full(array_size, test_dict['alit'])
+        sd = numpy.full(array_size, test_dict['sd'])
+        fwloss_1 = numpy.full(array_size, test_dict['fwloss_1'])
+        fwloss_2 = numpy.full(array_size, test_dict['fwloss_2'])
+        pet_rem = numpy.full(array_size, test_dict['pet_rem'])
+
+        known_inputs_after_surface = surface_losses_point(
+            test_dict['inputs_after_snow'], test_dict['fracro'],
+            test_dict['precro'], test_dict['snow'], test_dict['alit'],
+            test_dict['sd'], test_dict['fwloss_1'], test_dict['fwloss_2'],
+            test_dict['pet_rem'])
+        tolerance = 0.00001
+        inputs_after_surface = forage._subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem)
+        self.assert_all_values_in_array_within_range(
+            inputs_after_surface, known_inputs_after_surface - tolerance,
+            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(alit, _TARGET_NODATA)
+        insert_nodata_values_into_array(precro, _IC_NODATA)
+        insert_nodata_values_into_array(fwloss_2, _IC_NODATA)
+
+        inputs_after_surface = forage._subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem)
+        self.assert_all_values_in_array_within_range(
+            inputs_after_surface, known_inputs_after_surface - tolerance,
+            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+
+        # no snow cover, small surface biomass
+        test_dict = {
+            'inputs_after_snow': 12.,
+            'fracro': 0.15,
+            'precro': 8.,
+            'snow': 0.,
+            'alit': 300.1,
+            'sd': 80.5,
+            'fwloss_1': 0.8,
+            'fwloss_2': 0.8,
+            'pet_rem': 4.99,
+        }
+
+        inputs_after_snow = numpy.full(
+            array_size, test_dict['inputs_after_snow'])
+        fracro = numpy.full(array_size, test_dict['fracro'])
+        precro = numpy.full(array_size, test_dict['precro'])
+        snow = numpy.full(array_size, test_dict['snow'])
+        alit = numpy.full(array_size, test_dict['alit'])
+        sd = numpy.full(array_size, test_dict['sd'])
+        fwloss_1 = numpy.full(array_size, test_dict['fwloss_1'])
+        fwloss_2 = numpy.full(array_size, test_dict['fwloss_2'])
+        pet_rem = numpy.full(array_size, test_dict['pet_rem'])
+
+        known_inputs_after_surface = surface_losses_point(
+            test_dict['inputs_after_snow'], test_dict['fracro'],
+            test_dict['precro'], test_dict['snow'], test_dict['alit'],
+            test_dict['sd'], test_dict['fwloss_1'], test_dict['fwloss_2'],
+            test_dict['pet_rem'])
+        tolerance = 0.00001
+        inputs_after_surface = forage._subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem)
+        self.assert_all_values_in_array_within_range(
+            inputs_after_surface, known_inputs_after_surface - tolerance,
+            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(inputs_after_snow, _TARGET_NODATA)
+        insert_nodata_values_into_array(fwloss_1, _IC_NODATA)
+        insert_nodata_values_into_array(fwloss_2, _IC_NODATA)
+
+        inputs_after_surface = forage._subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem)
+        self.assert_all_values_in_array_within_range(
+            inputs_after_surface, known_inputs_after_surface - tolerance,
+            known_inputs_after_surface + tolerance, _TARGET_NODATA)
