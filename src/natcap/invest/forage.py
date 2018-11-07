@@ -3504,300 +3504,122 @@ def _snow(
         tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
         return tave
 
-    def calc_snowfall(tave, precip, snow):
-        """Calculate the fall of precipitation as snow.
+    def calc_snow_moisture(return_type):
+        """Calculate change in snow, pet, snow liquid, and moisture inputs.
 
-        If average temperature is less than or equal to zero, precipitation
-        falls as snow.  Add the new fallen snow to any existing snowpack.
-
-        Parameters:
-            tave (numpy.ndarray): derived, average temperature
-            precip (numpy.ndarray): input, precipitation for this month
-            snow (numpy.ndarray): derived, existing snowpack prior to new
-                snowfall
-
-        Returns:
-            snow_intermediate, existing snowfall plus any new snowfall
-        """
-        valid_mask = (
-            (tave != _IC_NODATA) &
-            (precip != precip_nodata) &
-            (snow != snow_nodata))
-        snow_intermediate = snow.copy()
-        snowfall_mask = (valid_mask & (tave <= 0))
-        snow_intermediate[snowfall_mask] = (
-            snow[snowfall_mask] + precip[snowfall_mask])
-        return snow_intermediate
-
-    def calc_rain_on_snow(tave, precip, snow, snlq):
-        """Calculate the fall of precipitation as rain on snow.
-
-        If average temperature is greater than zero and some snow exists,
-        precipitation falls as rain on snow.  Add this to existing liquid in
-        the snowpack.
+        Record changes in snowpack, liquid in snow, potential
+        evapotranspiration energy, and liquid draining into soil from snow.
 
         Parameters:
-            tave (numpy.ndarray): derived, average temperature
-            precip (numpy.ndarray): input, precipitation
-            snow (numpy.ndarray): derived, existing snowpack
-            snlq (numpy.ndarray): derived, existing liquid in snowpack
+            return_type (string): flag indicating whether modified snowpack,
+                modified liquid in snow, modified potential evapotranspiration,
+                or soil moisture inputs after snow should be returned
 
         Returns:
-            snlq_intermediate, existing liquid in snowpack plus any new
-                rainfall on snow
+            the function `calc_inputs_after_snow`
         """
-        valid_mask = (
-            (tave != _IC_NODATA) &
-            (precip != precip_nodata) &
-            (snow != snow_nodata) &
-            (snlq != snlq_nodata))
-        snlq_intermediate = snlq.copy()
-        rain_mask = (valid_mask & (tave > 0) & (snow > 0))
-        snlq_intermediate[rain_mask] = (
-            snlq[rain_mask] + precip[rain_mask])
-        return snlq_intermediate
+        def _calc_snow_moisture(
+                tave, precip, snow, snlq, pet, tmelt_1, tmelt_2, shwave):
+            """Calculate the fate of moisture from snow.
 
-    def subtract_evaporation_snowmelt_from_snow(
-            snow_intermediate, snlq_intermediate, pet, tave, tmelt_1, tmelt_2,
-            shwave):
-        """Calculate evaporation and snowmelt and remove them from snowpack.
+            Calculate new snowfall or rain on snow. Calculate direct
+            evaporation of snow and consumption of potential
+            evapotranspiration energy. Calculate snowmelt and liquid draining
+            from snow into the soil.
 
-        If there is existing snowpack, some snow is loss to evaporation. If
-        there is snowpack and average temperature is above the parameter
-        tmelt_1, some snow is loss to snowmelt. Calculate revised snowpack
-        after evaporation and snowmelt.
+            Parameters:
+                tave (numpy.ndarray): derived, average temperature
+                precip (numpy.ndarray): input, precipitation for this month
+                snow (numpy.ndarray): derived, existing snowpack prior to new
+                    snowfall
+                snlq (numpy.ndarray): derived, existing liquid in snowpack
+                pet (numpy.ndarray): derived, potential evapotranspiration
+                tmelt_1 (numpy.ndarray): parameter, minimum temperature above
+                    which snow will melt
+                tmelt_2 (numpy.ndarray): parameter, ratio between degrees above
+                    the minimum temperature and cm of snow that will melt
+                shwave (numpy.ndarray): derived, shortwave radiation outside
+                    the atmosphere
 
-        Parameters:
-            snow_intermediate (numpy.ndarray): derived, snowpack following
-                precipitation as snow or rain on snow
-            snlq_intermediate (numpy.ndarray): derived, liquid in snow
-                following precipitation as snow or rain on snow
-            pet (numpy.ndarray): derived, potential evapotranspiration
-            tave (numpy.ndarray): derived, average temperature
-            tmelt_1 (numpy.ndarray): parameter, minimum temperature above
-                which snow will melt
-            tmelt_2 (numpy.ndarray): parameter, ratio between degrees above
-                the minimum temperature and cm of snow that will melt
-            shwave (numpy.ndarray): derived, shortwave radiation outside
-                the atmosphere
+            Returns:
+                snow_revised if return_type is `snow`
+                snlq_revised if return_type is `snlq`
+                pet_revised if return_type is `pet`
+                inputs_after_snow if return_type is `inputs_after_snow`
+            """
+            valid_mask = (
+                (tave != _IC_NODATA) &
+                (precip != precip_nodata) &
+                (snow != snow_nodata) &
+                (snlq != snlq_nodata) &
+                (pet != _TARGET_NODATA) &
+                (tmelt_1 != _IC_NODATA) &
+                (tmelt_2 != _IC_NODATA) &
+                (shwave != _TARGET_NODATA))
+            inputs_after_snow = numpy.empty(precip.shape, dtype=numpy.float32)
+            inputs_after_snow[:] = _TARGET_NODATA
+            inputs_after_snow[valid_mask] = precip[valid_mask]
 
-        Returns:
-            snow_revised, snowpack minus evaporated snow and snowmelt
-        """
-        valid_mask = (
-            (snow_intermediate != snow_nodata) &
-            (snlq_intermediate != snlq_nodata) &
-            (pet != _TARGET_NODATA) &
-            (tave != _IC_NODATA) &
-            (tmelt_1 != _IC_NODATA) &
-            (tmelt_2 != _IC_NODATA))
-        snowtot = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowtot[valid_mask] = (
-            snow_intermediate[valid_mask] + snlq_intermediate[valid_mask])
-        evsnow = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        evsnow[valid_mask] = numpy.minimum(
-            snowtot[valid_mask], pet[valid_mask] * 0.87)
-        snow_revised = numpy.zeros(
-            snow_intermediate.shape, dtype=numpy.float32)
-        snow_revised[valid_mask] = numpy.maximum(
-            snow_intermediate[valid_mask] - evsnow[valid_mask] *
-            (snow_intermediate[valid_mask] / snowtot[valid_mask]), 0.)
+            snowfall_mask = (valid_mask & (tave <= 0))
+            snow[snowfall_mask] = (snow[snowfall_mask] + precip[snowfall_mask])
+            inputs_after_snow[snowfall_mask] = 0.
 
-        melt_mask = (valid_mask & (tave >= tmelt_1))
-        snowmelt = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowmelt[melt_mask] = numpy.clip(
-            tmelt_2[melt_mask] * (tave[melt_mask] - tmelt_1[melt_mask]) *
-            shwave[melt_mask], 0., snow_revised[melt_mask])
-        snow_revised[melt_mask] = snow_revised[melt_mask] - snowmelt[melt_mask]
-        return snow_revised
+            rain_on_snow_mask = (
+                (valid_mask) &
+                (tave > 0) &
+                (snow > 0))
+            snlq[rain_on_snow_mask] = (
+                snlq[rain_on_snow_mask] + precip[rain_on_snow_mask])
+            inputs_after_snow[rain_on_snow_mask] = 0.
 
-    def revise_pet(snow_intermediate, snlq_intermediate, pet):
-        """Revise potential evapotranspiration after evaporation of snow.
+            snowtot = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snowtot[valid_mask] = (snow[valid_mask] + snlq[valid_mask])
+            evsnow = numpy.zeros(snow.shape, dtype=numpy.float32)
+            evsnow[valid_mask] = numpy.minimum(
+                snowtot[valid_mask], pet[valid_mask] * 0.87)
+            snow_revised = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snow_revised[valid_mask] = numpy.maximum(
+                snow[valid_mask] - evsnow[valid_mask] *
+                (snow[valid_mask] / snowtot[valid_mask]), 0.)
+            snlq_revised = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snlq_revised[valid_mask] = numpy.maximum(
+                snlq[valid_mask] - evsnow[valid_mask] *
+                (snlq[valid_mask] / snowtot[valid_mask]), 0.)
+            pet_revised = numpy.empty(snow.shape, dtype=numpy.float32)
+            pet_revised[:] = _TARGET_NODATA
+            pet_revised[valid_mask] = numpy.maximum(
+                (pet[valid_mask] - evsnow[valid_mask] / 0.87), 0.)
 
-        If evaporation of snow occurs, some energy from potential
-        evapotranspiration is consumed. Revise the potential evapotranspiration
-        available after this evaporation is accounted.
+            melt_mask = (valid_mask & (tave >= tmelt_1))
+            snowmelt = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snowmelt[melt_mask] = numpy.clip(
+                tmelt_2[melt_mask] * (tave[melt_mask] - tmelt_1[melt_mask]) *
+                shwave[melt_mask], 0., snow_revised[melt_mask])
+            snow_revised[melt_mask] = (
+                snow_revised[melt_mask] - snowmelt[melt_mask])
+            snlq_revised[melt_mask] = (
+                snlq_revised[melt_mask] + snowmelt[melt_mask])
 
-        Parameters:
-            snow_intermediate (numpy.ndarray): derived, snowpack following
-                precipitation as snow or rain on snow
-            snlq_intermediate (numpy.ndarray): derived, liquid in snow
-                following precipitation as snow or rain on snow
-            pet (numpy.ndarray): derived, potential evapotranspiration
+            drain_mask = (melt_mask & (snlq_revised > 0.5 * snow_revised))
+            inputs_after_snow[drain_mask] = (
+                snlq_revised[drain_mask] - 0.5 * snow_revised[drain_mask])
+            snlq_revised[drain_mask] = (
+                snlq_revised[drain_mask] - inputs_after_snow[drain_mask])
 
-        Returns:
-            pet_revised, revised potential evapotranspiration
-        """
-        valid_mask = (
-            (snow_intermediate != snow_nodata) &
-            (snlq_intermediate != snlq_nodata) &
-            (pet != _TARGET_NODATA))
-        snowtot = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowtot[valid_mask] = (
-            snow_intermediate[valid_mask] + snlq_intermediate[valid_mask])
-        evsnow = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        evsnow[valid_mask] = numpy.minimum(
-            snowtot[valid_mask], pet[valid_mask] * 0.87)
-        pet_revised = numpy.empty(snow_intermediate.shape, dtype=numpy.float32)
-        pet_revised[:] = _TARGET_NODATA
-        pet_revised[valid_mask] = numpy.maximum(
-            (pet[valid_mask] - evsnow[valid_mask] / 0.87), 0.)
-        return pet_revised
-
-    def revise_snlq(
-            snow_intermediate, snlq_intermediate, pet, tave, tmelt_1, tmelt_2,
-            shwave):
-        """Revise liquid in snowpack after evaporation and snowmelt.
-
-        If there is snowpack, some liquid in the snowpack evaporates directly.
-        If mean temperature is sufficiently high, some snow melts and is added
-        to the liquid in the snow pack. Liquid in the snowpack is restricted to
-        be 50% of snowpack.
-
-        Parameters:
-            snow_intermediate (numpy.ndarray): derived, snowpack following
-                precipitation as snow or rain on snow
-            snlq_intermediate (numpy.ndarray): derived, liquid in snow
-                following precipitation as snow or rain on snow
-            pet (numpy.ndarray): derived, potential evapotranspiration
-            tave (numpy.ndarray): derived, average temperature
-            tmelt_1 (numpy.ndarray): parameter, minimum temperature above
-                which snow will melt
-            tmelt_2 (numpy.ndarray): parameter, ratio between degrees above
-                the minimum temperature and cm of snow that will melt
-            shwave (numpy.ndarray): derived, shortwave radiation outside
-                the atmosphere
-
-        Returns:
-            snlq_revised, revised liquid in snowpack
-        """
-        valid_mask = (
-            (snow_intermediate != snow_nodata) &
-            (snlq_intermediate != snlq_nodata) &
-            (pet != _TARGET_NODATA) &
-            (tave != _IC_NODATA) &
-            (tmelt_1 != _IC_NODATA) &
-            (tmelt_2 != _IC_NODATA))
-        snowtot = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowtot[valid_mask] = (
-            snow_intermediate[valid_mask] + snlq_intermediate[valid_mask])
-        evsnow = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        evsnow[valid_mask] = numpy.minimum(
-            snowtot[valid_mask], pet[valid_mask] * 0.87)
-        snow_revised = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snow_revised[valid_mask] = numpy.maximum(
-            snow_intermediate[valid_mask] - evsnow[valid_mask] *
-            (snow_intermediate[valid_mask] / snowtot[valid_mask]), 0.)
-        snlq_revised = numpy.zeros(
-            snow_intermediate.shape, dtype=numpy.float32)
-        snlq_revised[valid_mask] = numpy.maximum(
-            snlq_intermediate[valid_mask] - evsnow[valid_mask] *
-            (snlq_intermediate[valid_mask] / snowtot[valid_mask]), 0.)
-
-        melt_mask = (valid_mask & (tave >= tmelt_1))
-        snowmelt = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowmelt[melt_mask] = numpy.clip(
-            tmelt_2[melt_mask] * (tave[melt_mask] - tmelt_1[melt_mask]) *
-            shwave[melt_mask], 0, snow_revised[melt_mask])
-        snow_revised[melt_mask] = snow_revised[melt_mask] - snowmelt[melt_mask]
-        snlq_revised[melt_mask] = snlq_revised[melt_mask] + snowmelt[melt_mask]
-
-        drain_mask = (melt_mask & (snlq_revised > 0.5 * snow_revised))
-        inputs_after_snow = numpy.zeros(
-            snow_intermediate.shape, dtype=numpy.float32)
-        inputs_after_snow[drain_mask] = (
-            snlq_revised[drain_mask] - 0.5 * snow_revised[drain_mask])
-        snlq_revised[drain_mask] = (
-            snlq_revised[drain_mask] - inputs_after_snow[drain_mask])
-        return snlq_revised
-
-    def calc_inputs_after_snow(
-            precip, snow, snow_intermediate, snlq_intermediate, pet, tave,
-            tmelt_1, tmelt_2, shwave):
-        """Calculate soil moisture inputs after snowfall and snowmelt.
-
-        If the temperature is below freezing, precipitation occurs as snow
-        and soil moisture inputs after snow are zero.  If the temperature is
-        above freezing, but there is some snow, precipitation is added to
-        existing snow and soil moisture inputs after snow are zero. If the
-        temperature is above freezing and there is no snow, soil moisture
-        inputs after snow are equal to precip.
-        After evaporation from snow, if there is snow and the average
-        temperature is sufficiently high for snow to melt, some liquid drains
-        from the snowpack as soil moisture inputs.
-
-        Parameters:
-            precip (numpy.ndarray): input, monthly precipitation
-            snow (numpy.ndarray): derived, standing snowpack before
-                addition of new precipitation
-            snow_intermediate (numpy.ndarray): derived, snowpack following
-                precipitation as snow or rain on snow
-            snlq_intermediate (numpy.ndarray): derived, liquid in snow
-                following precipitation as snow or rain on snow
-            pet (numpy.ndarray): derived, potential evapotranspiration
-            tave (numpy.ndarray): derived, average temperature
-            tmelt_1 (numpy.ndarray): parameter, minimum temperature above
-                which snow will melt
-            tmelt_2 (numpy.ndarray): parameter, ratio between degrees above
-                the minimum temperature and cm of snow that will melt
-            shwave (numpy.ndarray): derived, shortwave radiation outside
-                the atmosphere
-
-        Returns:
-            inputs_after_snow, soil moisture inputs after snowfall and snowmelt
-        """
-        default_mask = (
-            (tave != _IC_NODATA) &
-            (precip != precip_nodata) &
-            (snow != snow_nodata))
-        inputs_after_snow = numpy.empty(precip.shape, dtype=numpy.float32)
-        inputs_after_snow[:] = _TARGET_NODATA
-        inputs_after_snow[default_mask] = precip[default_mask]
-        inputs_after_snow[(default_mask) & (tave <= 0) & (snow > 0)] = 0
-
-        valid_mask = (
-            (snow_intermediate != snow_nodata) &
-            (snlq_intermediate != snlq_nodata) &
-            (pet != _TARGET_NODATA) &
-            (tave != _IC_NODATA) &
-            (tmelt_1 != _IC_NODATA) &
-            (tmelt_2 != _IC_NODATA))
-        snowtot = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowtot[valid_mask] = (
-            snow_intermediate[valid_mask] + snlq_intermediate[valid_mask])
-        evsnow = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        evsnow[valid_mask] = numpy.minimum(
-            snowtot[valid_mask], pet[valid_mask] * 0.87)
-        snow_revised = numpy.zeros(
-            snow_intermediate.shape, dtype=numpy.float32)
-        snow_revised[valid_mask] = numpy.maximum(
-            snow_intermediate[valid_mask] - evsnow[valid_mask] *
-            (snow_intermediate[valid_mask] / snowtot[valid_mask]), 0.)
-        snlq_revised = numpy.zeros(
-            snow_intermediate.shape, dtype=numpy.float32)
-        snlq_revised[valid_mask] = numpy.maximum(
-            snlq_intermediate[valid_mask] - evsnow[valid_mask] *
-            (snlq_intermediate[valid_mask] / snowtot[valid_mask]), 0.)
-
-        melt_mask = (valid_mask & (tave >= tmelt_1))
-        snowmelt = numpy.zeros(snow_intermediate.shape, dtype=numpy.float32)
-        snowmelt[melt_mask] = (
-            tmelt_2[melt_mask] * (tave[melt_mask] - tmelt_1[melt_mask]) *
-            shwave[melt_mask])
-        snowmelt[melt_mask] = numpy.clip(
-            snowmelt[melt_mask], 0, snow_revised[melt_mask])
-        snow_revised[melt_mask] = snow_revised[melt_mask] - snowmelt[melt_mask]
-        snlq_revised[melt_mask] = snlq_revised[melt_mask] + snowmelt[melt_mask]
-
-        drain_mask = (melt_mask & (snlq_revised > 0.5 * snow_revised))
-        inputs_after_snow[drain_mask] = (
-            snlq_revised[drain_mask] - 0.5 * snow_revised[drain_mask])
-        return inputs_after_snow
+            if return_type == 'snow':
+                return snow_revised
+            elif return_type == 'snlq':
+                return snlq_revised
+            elif return_type == 'pet':
+                return pet_revised
+            else:
+                return inputs_after_snow
+        return _calc_snow_moisture
 
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
     for val in [
-            'shwave', 'pet', 'tave', 'snow_intermediate', 'snlq_intermediate']:
+            'shwave', 'pet', 'tave']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     param_val_dict = {}
     for val in ['tmelt_1', 'tmelt_2', 'fwloss_4']:
@@ -3834,57 +3656,45 @@ def _snow(
         max_temp_path, min_temp_path, temp_val_dict['shwave'],
         param_val_dict['fwloss_4'], temp_val_dict['pet'])
 
-    # calculate additional snowfall
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
-            temp_val_dict['tave'], precip_path, prev_snow_path],
-        calc_snowfall, temp_val_dict['snow_intermediate'],
-        gdal.GDT_Float32, _TARGET_NODATA)
-
-    # calculate rain on snow
+    # calculate change in snow
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
             temp_val_dict['tave'], precip_path, prev_snow_path,
-            prev_snlq_path],
-        calc_rain_on_snow, temp_val_dict['snlq_intermediate'],
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']],
+        calc_snow_moisture("snow"), snow_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
-    # subtract evaporation and snowmelt from snow
+    # calculate change in liquid in snow
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            temp_val_dict['snow_intermediate'],
-            temp_val_dict['snlq_intermediate'], temp_val_dict['pet'],
-            temp_val_dict['tave'], param_val_dict['tmelt_1'],
-            param_val_dict['tmelt_2'], temp_val_dict['shwave']],
-        subtract_evaporation_snowmelt_from_snow, snow_path,
+            temp_val_dict['tave'], precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']],
+        calc_snow_moisture("snlq"), snlq_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
-    # revise pet accounting for energy lost to evaporation
+    # calculate change in potential evapotranspiration energy
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            temp_val_dict['snow_intermediate'],
-            temp_val_dict['snlq_intermediate'], temp_val_dict['pet']],
-        revise_pet, pet_rem_path, gdal.GDT_Float32, _TARGET_NODATA)
-
-    # revise liquid in snowpack
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
-            temp_val_dict['snow_intermediate'],
-            temp_val_dict['snlq_intermediate'], temp_val_dict['pet'],
-            temp_val_dict['tave'], param_val_dict['tmelt_1'],
-            param_val_dict['tmelt_2'], temp_val_dict['shwave']],
-        revise_snlq, snlq_path, gdal.GDT_Float32, _TARGET_NODATA)
+            temp_val_dict['tave'], precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']],
+        calc_snow_moisture("pet"), pet_rem_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate soil moisture inputs draining from snow after snowmelt
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            precip_path, prev_snow_path,
-            temp_val_dict['snow_intermediate'],
-            temp_val_dict['snlq_intermediate'], temp_val_dict['pet'],
-            temp_val_dict['tave'], param_val_dict['tmelt_1'],
-            param_val_dict['tmelt_2'], temp_val_dict['shwave']],
-        calc_inputs_after_snow, inputs_after_snow_path, gdal.GDT_Float32,
-        _TARGET_NODATA)
+            temp_val_dict['tave'], precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']],
+        calc_snow_moisture("inputs_after_snow"), inputs_after_snow_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -4022,7 +3832,7 @@ def _subtract_surface_losses(
         numpy.minimum(((absev[evap_mask] + aint[evap_mask]) *
         inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
     # remaining inputs after evaporation
-    inputs_after_surface = numpy.copy(inputs_after_runoff)
+    inputs_after_surface = inputs_after_runoff.copy()
     inputs_after_surface[evap_mask] = (
         inputs_after_runoff[evap_mask] - evl[evap_mask])
     return inputs_after_surface
