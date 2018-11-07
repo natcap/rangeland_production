@@ -3806,6 +3806,7 @@ def subtract_surface_losses(return_type):
             inputs_after_surface, surface water inputs to soil after runoff
                 and surface evaporation are subtracted, if return_type is
                 'inputs_after_surface'
+            absevap, bare soil evaporation, if return_type is 'absevap'
             evap_losses, total surface evaporation, if return_type is
                 'evap_losses'
         """
@@ -3838,8 +3839,9 @@ def subtract_surface_losses(return_type):
             (0.0003 * alit[evap_mask] + 0.0006 * sd[evap_mask]) *
             fwloss_1[evap_mask])
         # loss to bare soil evaporation
-        absev = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
-        absev[evap_mask] = (
+        absevap = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+        absevap[:] = _TARGET_NODATA
+        absevap[evap_mask] = (
             0.5 *
             numpy.exp((-0.002 * alit[evap_mask]) - (0.004 * sd[evap_mask])) *
             fwloss_2[evap_mask])
@@ -3847,7 +3849,7 @@ def subtract_surface_losses(return_type):
         evap_losses = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
         evap_losses[:] = _TARGET_NODATA
         evap_losses[evap_mask] = (
-            numpy.minimum(((absev[evap_mask] + aint[evap_mask]) *
+            numpy.minimum(((absevap[evap_mask] + aint[evap_mask]) *
             inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
         # remaining inputs after evaporation
         inputs_after_surface = inputs_after_runoff.copy()
@@ -3855,6 +3857,8 @@ def subtract_surface_losses(return_type):
             inputs_after_runoff[evap_mask] - evap_losses[evap_mask])
         if return_type == 'inputs_after_surface':
             return inputs_after_surface
+        elif return_type == 'absevap':
+            return absevap
         elif return_type == 'evap_losses':
             return evap_losses
     return _subtract_surface_losses
@@ -3920,7 +3924,7 @@ def _soil_water(
     for val in [
             'current_moisture_inputs', 'modified_moisture_inputs', 'pet_rem',
             'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod', 'aliv', 'sd',
-            'evap_losses']:
+            'absevap', 'evap_losses']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
@@ -4012,6 +4016,18 @@ def _soil_water(
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
         subtract_surface_losses('inputs_after_surface'),
         temp_val_dict['modified_moisture_inputs'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate bare soil evaporation
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['current_moisture_inputs'],
+            param_val_dict['fracro'], param_val_dict['precro'],
+            sv_reg['snow'], temp_val_dict['alit'],
+            temp_val_dict['sd'], param_val_dict['fwloss_1'],
+            param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
+        subtract_surface_losses('absevap'),
+        temp_val_dict['absevap'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate total losses to surface evaporation

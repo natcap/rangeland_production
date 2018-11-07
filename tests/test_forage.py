@@ -284,7 +284,7 @@ class foragetests(unittest.TestCase):
 
     @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
-        """Launch forage model, ensure it runs!."""
+        """Test forage model."""
         from natcap.invest import forage
 
         if not os.path.exists(SAMPLE_DATA):
@@ -295,7 +295,7 @@ class foragetests(unittest.TestCase):
         forage.execute(args)
 
     def test_shortwave_radiation(self):
-        """Test calculation of shortwave radiation outside the atmosphere.
+        """Test `_shortwave radiation`.
 
         Use one set of inputs, including a raster with known latitude, to test
         the function `_shortwave radiation` against a result calculated by
@@ -336,7 +336,7 @@ class foragetests(unittest.TestCase):
             msg="Test result does not match expected value")
 
     def test_calc_ompc(self):
-        """Test the function `_calc_ompc` against value calculated by hand.
+        """Test `_calc_ompc`.
 
         Use one set of inputs to test the estimation of total organic
         matter against a result calculated by hand.
@@ -385,7 +385,7 @@ class foragetests(unittest.TestCase):
             msg="Test result does not match expected value")
 
     def test_calc_afiel(self):
-        """Test the function `_calc_afiel` against value calculated by hand.
+        """Test `_calc_afiel`.
 
         Use one set of inputs to test the estimation of field capacity against
         a result calculated by hand.
@@ -433,7 +433,7 @@ class foragetests(unittest.TestCase):
             msg="Test result does not match expected value")
 
     def test_calc_awilt(self):
-        """Test the function `_calc_awilt` against value calculated by hand.
+        """Test `_calc_awilt`.
 
         Use one set of inputs to test the estimation of wilting point against
         a result calculated by hand.
@@ -481,7 +481,7 @@ class foragetests(unittest.TestCase):
             msg="Test result does not match expected value")
 
     def test_afiel_awilt(self):
-        """Test that values calculated by `_afiel_awilt` are reasonable.
+        """Test `_afiel_awilt`.
 
         Use the function `_afiel_awilt` to calculate field capacity and wilting
         point from randomly generated inputs. Test that calculated field
@@ -603,7 +603,7 @@ class foragetests(unittest.TestCase):
             known_awilt_6 + tolerance, nodata_value)
 
     def test_persistent_params(self):
-        """Test that values calculated by `persistent_params` are reasonable.
+        """Test `persistent_params`.
 
         Use the function `persistent_params` to calculate wc, eftext, p1co2_2,
         fps1s3, and fps2s3 from randomly generated inputs. Test that each of
@@ -768,7 +768,7 @@ class foragetests(unittest.TestCase):
                 values['value'] + tolerance, values['nodata_value'])
 
     def test_aboveground_ratio(self):
-        """Test that values calculated by `_aboveground_ratio` are valid.
+        """Test `_aboveground_ratio`.
 
         Use the function `_aboveground_ratio` to calculate the C/N or P
         ratio of decomposing aboveground material from random inputs. Test
@@ -845,7 +845,7 @@ class foragetests(unittest.TestCase):
 
 
     def test_structural_ratios(self):
-        """Test that values calculated by `_structural_ratios` are valid.
+        """Test `_structural_ratios`.
 
         Use the function `_structural_ratios` to calculate rnewas_1_1,
         rnewas_1_2, rnewas_2_1, rnewas_2_2, rnewbs_1_2, and rnewbs_2_2 from
@@ -954,7 +954,7 @@ class foragetests(unittest.TestCase):
                     maximum_acceptable_value, nodata_value)
 
     def test_yearly_tasks(self):
-        """Test that `_yearly_tasks` return reasonable values.
+        """Test `_yearly_tasks`.
 
         Use `_yearly_tasks` to calculate annual precipitation and annual
         atmospheric N deposition from random inputs. Test that the function
@@ -1057,7 +1057,7 @@ class foragetests(unittest.TestCase):
                 maximum_acceptable_Ndep, Ndep_nodata)
 
     def test_reference_evapotranspiration(self):
-        """Test that `_reference_evapotranspiration` returns valid results.
+        """Test `_reference_evapotranspiration`.
 
         Use the function `_reference_evapotranspiration` to calculate reference
         evapotranspiration (ET) from random inputs. Test that the calculated
@@ -1131,7 +1131,7 @@ class foragetests(unittest.TestCase):
             ET_nodata)
 
     def test_potential_production(self):
-        """Test that `_potential_production` returns valid results.
+        """Test `_potential_production`.
 
         Use the function `_potential_production` to calculate h2ogef_1 and
         total potential production from random inputs. Test that h2ogef_1, the
@@ -1283,7 +1283,7 @@ class foragetests(unittest.TestCase):
                 maximum_acceptable_potential_production, _TARGET_NODATA)
 
     def test_calc_favail_P(self):
-        """Test that `_calc_favail_P` returns valid results.
+        """Test `_calc_favail_P`.
 
         Use the function `_calc_favail_P` to calculate the intermediate
         parameter favail_P from random inputs.  Test that favail_P is
@@ -1354,7 +1354,7 @@ class foragetests(unittest.TestCase):
             _IC_NODATA)
 
     def test_raster_sum(self):
-        """Test the treatment of nodata values by `raster_sum`.
+        """Test `raster_sum`.
 
         Use the function `raster_sum` to calculate the sum across pixels
         in three rasters containing nodata.  Test that when
@@ -1442,7 +1442,7 @@ class foragetests(unittest.TestCase):
                 msg="Raster appears to contain nodata values")
 
     def test_weighted_state_variable_sum(self):
-        """Test `weighted_state_variable_sum` against calculations by hand.
+        """Test `weighted_state_variable_sum`.
 
         Use the function `weighted_state_variable_sum` to calculate the
         weighted sum of a state variable across plant functional types. Test
@@ -1521,7 +1521,7 @@ class foragetests(unittest.TestCase):
             known_weighted_sum + tolerance, _TARGET_NODATA)
 
     def test_calc_available_nutrient(self):
-        """Test that `_calc_available_nutrient` returns valid results.
+        """Test `_calc_available_nutrient`.
 
         Use the function `_calc_available_nutrient` to calculate available
         nutrient from random results. Test that the calculated nutrient
@@ -1653,7 +1653,7 @@ class foragetests(unittest.TestCase):
             known_P_avail + tolerance, _TARGET_NODATA)
 
     def test_calc_nutrient_demand(self):
-        """Test that `_calc_nutrient_demand` returns reasonable results.
+        """Test `_calc_nutrient_demand`.
 
         Use the function `_calc_nutrient_demand` to calculate demand for
         one nutrient by one plant functional type. Test that the calculated
@@ -1734,7 +1734,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
     def test_calc_provisional_fracrc(self):
-        """Test that `calc_provisional_fracrc` returns reasonable results.
+        """Test `calc_provisional_fracrc`.
 
         Use the function `calc_provisional_fracrc` to calculate fracrc_p, the
         fraction of carbon allocated to roots. Test that fracrc_p calculated
@@ -1819,7 +1819,7 @@ class foragetests(unittest.TestCase):
             known_fracrc_p_frtcindx_1 + tolerance, _TARGET_NODATA)
 
     def test_calc_ce_ratios(self):
-        """Test that `calc_ce_ratios` returns reasonable results.
+        """Test `calc_ce_ratios`.
 
         Use the funciton `calc_ce_ratios` to calculate minimum and maximum
         carbon to nutrient ratios. Test that ratios calculated from random
@@ -1957,7 +1957,7 @@ class foragetests(unittest.TestCase):
                 value + tolerance, _TARGET_NODATA)
 
     def test_calc_revised_fracrc(self):
-        """Test that `calc_revised_fracrc` returns reasonable results.
+        """Test `calc_revised_fracrc`.
 
         Use the function `calc_revised_fracrc` to calculate fracrc_r, the
         revised fraction of carbon allocated to roots. Test that fracrc_r
@@ -2081,7 +2081,7 @@ class foragetests(unittest.TestCase):
             known_fracrc_r_frtcindx_1 + tolerance, _TARGET_NODATA)
 
     def test_grazing_effect(self):
-        """Test grazing effect on aboveground production and root:shoot ratio.
+        """Test `grazing_effect_on_aboveground_production`.
 
         Use the function `grazing_effect_on_aboveground_production` to
         calculate agprod, revised aboveground production including the
@@ -2227,7 +2227,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
     def test_calc_tgprod_final(self):
-        """Test that `calc_tgprod_final` reproduces results calculated by hand.
+        """Test `calc_tgprod_final`.
 
         Use the function `calc_tgprod_final` to calculate tgprod, final total
         prodcution from root:shoot ratio and aboveground production. Test that
@@ -2255,7 +2255,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
     def test_snow(self):
-        """Test that `_snow` reproduces results calculated by test function.
+        """Test `_snow`.
 
         Use the function `_snow` to modify snow pack, evaporate from snow pack,
         melt snow, and determine liquid inputs to soil after snow. Test
@@ -2517,7 +2517,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
     def test_calc_aboveground_live_biomass(self):
-        """Test the function `_calc_aboveground_live_biomass`.
+        """Test `_calc_aboveground_live_biomass`.
 
         Use the function `_calc_aboveground_live_biomass` to calculate
         aboveground live biomass for the purposes of soil water. Test that the
@@ -2545,7 +2545,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
     def test_calc_standing_biomass(self):
-        """Test that `_calc_standing_biomass` matches result generated by hand.
+        """Test `_calc_standing_biomass`.
 
         Use the function `_calc_standing_biomass` to calculate total
         aboveground standing biomass for soil water. Test that the function
@@ -2582,7 +2582,7 @@ class foragetests(unittest.TestCase):
             sd, known_sd - tolerance, known_sd + tolerance, _TARGET_NODATA)
 
     def test_subtract_surface_losses(self):
-        """Test `subtract_surface_losses` against test function.
+        """Test `subtract_surface_losses`.
 
         Use the function `subtract_surface_losses` to calculate moisture
         losses to runoff, canopy interception, and evaporation.  Test that
@@ -2625,7 +2625,8 @@ class foragetests(unittest.TestCase):
             Returns:
                 dict of modified quantities: inputs_after_surface, surface
                     water inputs to soil after runoff and surface evaporation
-                    are subtracted; and evap_losses, total surface evaporation
+                    are subtracted; absevap, moisture lost to surface
+                    evaporation; and evap_losses, total surface evaporation
             """
             runoff = max(fracro * (inputs_after_snow - precro), 0.)
             inputs_after_runoff = inputs_after_snow - runoff
@@ -2636,11 +2637,13 @@ class foragetests(unittest.TestCase):
                 evap_losses = min(
                     ((absevap + aint) * inputs_after_runoff), 0.4 * pet_rem)
             else:
+                absevap = 0
                 evap_losses = 0
             inputs_after_surface = inputs_after_runoff - evap_losses
 
             results_dict = {
                 'inputs_after_surface': inputs_after_surface,
+                'absevap': absevap,
                 'evap_losses': evap_losses,
             }
             return results_dict
@@ -2683,6 +2686,10 @@ class foragetests(unittest.TestCase):
             'inputs_after_surface')(
                 inputs_after_snow, fracro, precro, snow,
                 alit, sd, fwloss_1, fwloss_2, pet_rem)
+        absevap = forage.subtract_surface_losses(
+            'absevap')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
         evap_losses = forage.subtract_surface_losses(
             'evap_losses')(
                 inputs_after_snow, fracro, precro, snow,
@@ -2692,6 +2699,9 @@ class foragetests(unittest.TestCase):
             inputs_after_surface,
             result_dict['inputs_after_surface'] - tolerance,
             result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            absevap, result_dict['absevap'] - tolerance,
+            result_dict['absevap'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
@@ -2704,6 +2714,10 @@ class foragetests(unittest.TestCase):
             'inputs_after_surface')(
                 inputs_after_snow, fracro, precro, snow,
                 alit, sd, fwloss_1, fwloss_2, pet_rem)
+        absevap = forage.subtract_surface_losses(
+            'absevap')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
         evap_losses = forage.subtract_surface_losses(
             'evap_losses')(
                 inputs_after_snow, fracro, precro, snow,
@@ -2713,6 +2727,9 @@ class foragetests(unittest.TestCase):
             inputs_after_surface,
             result_dict['inputs_after_surface'] - tolerance,
             result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            absevap, result_dict['absevap'] - tolerance,
+            result_dict['absevap'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
@@ -2751,6 +2768,10 @@ class foragetests(unittest.TestCase):
             'inputs_after_surface')(
                 inputs_after_snow, fracro, precro, snow,
                 alit, sd, fwloss_1, fwloss_2, pet_rem)
+        absevap = forage.subtract_surface_losses(
+            'absevap')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
         evap_losses = forage.subtract_surface_losses(
             'evap_losses')(
                 inputs_after_snow, fracro, precro, snow,
@@ -2760,6 +2781,9 @@ class foragetests(unittest.TestCase):
             inputs_after_surface,
             result_dict['inputs_after_surface'] - tolerance,
             result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            absevap, result_dict['absevap'] - tolerance,
+            result_dict['absevap'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
@@ -2772,6 +2796,10 @@ class foragetests(unittest.TestCase):
             'inputs_after_surface')(
                 inputs_after_snow, fracro, precro, snow,
                 alit, sd, fwloss_1, fwloss_2, pet_rem)
+        absevap = forage.subtract_surface_losses(
+            'absevap')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
         evap_losses = forage.subtract_surface_losses(
             'evap_losses')(
                 inputs_after_snow, fracro, precro, snow,
@@ -2781,6 +2809,9 @@ class foragetests(unittest.TestCase):
             inputs_after_surface,
             result_dict['inputs_after_surface'] - tolerance,
             result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            absevap, result_dict['absevap'] - tolerance,
+            result_dict['absevap'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
@@ -2819,6 +2850,10 @@ class foragetests(unittest.TestCase):
             'inputs_after_surface')(
                 inputs_after_snow, fracro, precro, snow,
                 alit, sd, fwloss_1, fwloss_2, pet_rem)
+        absevap = forage.subtract_surface_losses(
+            'absevap')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
         evap_losses = forage.subtract_surface_losses(
             'evap_losses')(
                 inputs_after_snow, fracro, precro, snow,
@@ -2828,6 +2863,9 @@ class foragetests(unittest.TestCase):
             inputs_after_surface,
             result_dict['inputs_after_surface'] - tolerance,
             result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            absevap, result_dict['absevap'] - tolerance,
+            result_dict['absevap'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
@@ -2840,6 +2878,10 @@ class foragetests(unittest.TestCase):
             'inputs_after_surface')(
                 inputs_after_snow, fracro, precro, snow,
                 alit, sd, fwloss_1, fwloss_2, pet_rem)
+        absevap = forage.subtract_surface_losses(
+            'absevap')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
         evap_losses = forage.subtract_surface_losses(
             'evap_losses')(
                 inputs_after_snow, fracro, precro, snow,
@@ -2849,6 +2891,9 @@ class foragetests(unittest.TestCase):
             inputs_after_surface,
             result_dict['inputs_after_surface'] - tolerance,
             result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            absevap, result_dict['absevap'] - tolerance,
+            result_dict['absevap'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
