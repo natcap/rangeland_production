@@ -2293,7 +2293,6 @@ class foragetests(unittest.TestCase):
 
             Returns:
                 dict of modified quantities: snow, snlq, pet, inputs_after_snow
-
             """
             tave = (max_temp + min_temp) / 2.
             inputs_after_snow = precip
@@ -2583,15 +2582,15 @@ class foragetests(unittest.TestCase):
             sd, known_sd - tolerance, known_sd + tolerance, _TARGET_NODATA)
 
     def test_subtract_surface_losses(self):
-        """Test `_subtract_surface_losses` against test function.
+        """Test `subtract_surface_losses` against test function.
 
-        Use the function `_subtract_surface_losses` to calculate moisture
+        Use the function `subtract_surface_losses` to calculate moisture
         losses to runoff, canopy interception, and evaporation.  Test that
         the function reproduces results calculated by a point-based function
         defined here.
 
         Raises:
-            AssertionError if `_subtract_surface_losses` does not match
+            AssertionError if `subtract_surface_losses` does not match
                 point-based results calculated by test function
 
         Returns:
@@ -2600,7 +2599,7 @@ class foragetests(unittest.TestCase):
         def surface_losses_point(
                 inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
                 fwloss_2, pet_rem):
-            """Point- based implementation of `_subtract_surface_losses`.
+            """Point- based implementation of `subtract_surface_losses`.
 
             This implementation reproduces Century's process for determining
             loss of moisture inputs to runoff, canopy interception, and surface
@@ -2624,8 +2623,9 @@ class foragetests(unittest.TestCase):
                     evaporation of snow
 
             Returns:
-                inputs_after_surface, surface water inputs to soil after runoff
-                    and surface evaporation are subtracted
+                dict of modified quantities: inputs_after_surface, surface
+                    water inputs to soil after runoff and surface evaporation
+                    are subtracted; and evap_losses, total surface evaporation
             """
             runoff = max(fracro * (inputs_after_snow - precro), 0.)
             inputs_after_runoff = inputs_after_snow - runoff
@@ -2633,12 +2633,17 @@ class foragetests(unittest.TestCase):
                 aint = (0.0003 * alit + 0.0006 * sd) * fwloss_1
                 absevap = (
                     0.5 * math.exp((-0.002 * alit) - (0.004 * sd)) * fwloss_2)
-                evl = min(
+                evap_losses = min(
                     ((absevap + aint) * inputs_after_runoff), 0.4 * pet_rem)
             else:
-                evl = 0
-            inputs_after_surface = inputs_after_runoff - evl
-            return inputs_after_surface
+                evap_losses = 0
+            inputs_after_surface = inputs_after_runoff - evap_losses
+
+            results_dict = {
+                'inputs_after_surface': inputs_after_surface,
+                'evap_losses': evap_losses,
+            }
+            return results_dict
 
         from natcap.invest import forage
 
@@ -2668,29 +2673,49 @@ class foragetests(unittest.TestCase):
         fwloss_2 = numpy.full(array_size, test_dict['fwloss_2'])
         pet_rem = numpy.full(array_size, test_dict['pet_rem'])
 
-        known_inputs_after_surface = surface_losses_point(
+        result_dict = surface_losses_point(
             test_dict['inputs_after_snow'], test_dict['fracro'],
             test_dict['precro'], test_dict['snow'], test_dict['alit'],
             test_dict['sd'], test_dict['fwloss_1'], test_dict['fwloss_2'],
             test_dict['pet_rem'])
         tolerance = 0.00001
-        inputs_after_surface = forage._subtract_surface_losses(
-            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-            fwloss_2, pet_rem)
+        inputs_after_surface = forage.subtract_surface_losses(
+            'inputs_after_surface')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+        evap_losses = forage.subtract_surface_losses(
+            'evap_losses')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+
         self.assert_all_values_in_array_within_range(
-            inputs_after_surface, known_inputs_after_surface - tolerance,
-            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+            inputs_after_surface,
+            result_dict['inputs_after_surface'] - tolerance,
+            result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            evap_losses, result_dict['evap_losses'] - tolerance,
+            result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
 
         insert_nodata_values_into_array(pet_rem, _TARGET_NODATA)
         insert_nodata_values_into_array(snow, _TARGET_NODATA)
         insert_nodata_values_into_array(fracro, _IC_NODATA)
 
-        inputs_after_surface = forage._subtract_surface_losses(
-            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-            fwloss_2, pet_rem)
+        inputs_after_surface = forage.subtract_surface_losses(
+            'inputs_after_surface')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+        evap_losses = forage.subtract_surface_losses(
+            'evap_losses')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+
         self.assert_all_values_in_array_within_range(
-            inputs_after_surface, known_inputs_after_surface - tolerance,
-            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+            inputs_after_surface,
+            result_dict['inputs_after_surface'] - tolerance,
+            result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            evap_losses, result_dict['evap_losses'] - tolerance,
+            result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
 
         # no snow cover, large surface biomass
         test_dict = {
@@ -2716,29 +2741,49 @@ class foragetests(unittest.TestCase):
         fwloss_2 = numpy.full(array_size, test_dict['fwloss_2'])
         pet_rem = numpy.full(array_size, test_dict['pet_rem'])
 
-        known_inputs_after_surface = surface_losses_point(
+        result_dict = surface_losses_point(
             test_dict['inputs_after_snow'], test_dict['fracro'],
             test_dict['precro'], test_dict['snow'], test_dict['alit'],
             test_dict['sd'], test_dict['fwloss_1'], test_dict['fwloss_2'],
             test_dict['pet_rem'])
         tolerance = 0.00001
-        inputs_after_surface = forage._subtract_surface_losses(
-            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-            fwloss_2, pet_rem)
+        inputs_after_surface = forage.subtract_surface_losses(
+            'inputs_after_surface')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+        evap_losses = forage.subtract_surface_losses(
+            'evap_losses')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+
         self.assert_all_values_in_array_within_range(
-            inputs_after_surface, known_inputs_after_surface - tolerance,
-            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+            inputs_after_surface,
+            result_dict['inputs_after_surface'] - tolerance,
+            result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            evap_losses, result_dict['evap_losses'] - tolerance,
+            result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
 
         insert_nodata_values_into_array(alit, _TARGET_NODATA)
         insert_nodata_values_into_array(precro, _IC_NODATA)
         insert_nodata_values_into_array(fwloss_2, _IC_NODATA)
 
-        inputs_after_surface = forage._subtract_surface_losses(
-            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-            fwloss_2, pet_rem)
+        inputs_after_surface = forage.subtract_surface_losses(
+            'inputs_after_surface')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+        evap_losses = forage.subtract_surface_losses(
+            'evap_losses')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+
         self.assert_all_values_in_array_within_range(
-            inputs_after_surface, known_inputs_after_surface - tolerance,
-            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+            inputs_after_surface,
+            result_dict['inputs_after_surface'] - tolerance,
+            result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            evap_losses, result_dict['evap_losses'] - tolerance,
+            result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
 
         # no snow cover, small surface biomass
         test_dict = {
@@ -2764,26 +2809,46 @@ class foragetests(unittest.TestCase):
         fwloss_2 = numpy.full(array_size, test_dict['fwloss_2'])
         pet_rem = numpy.full(array_size, test_dict['pet_rem'])
 
-        known_inputs_after_surface = surface_losses_point(
+        result_dict = surface_losses_point(
             test_dict['inputs_after_snow'], test_dict['fracro'],
             test_dict['precro'], test_dict['snow'], test_dict['alit'],
             test_dict['sd'], test_dict['fwloss_1'], test_dict['fwloss_2'],
             test_dict['pet_rem'])
         tolerance = 0.00001
-        inputs_after_surface = forage._subtract_surface_losses(
-            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-            fwloss_2, pet_rem)
+        inputs_after_surface = forage.subtract_surface_losses(
+            'inputs_after_surface')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+        evap_losses = forage.subtract_surface_losses(
+            'evap_losses')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+
         self.assert_all_values_in_array_within_range(
-            inputs_after_surface, known_inputs_after_surface - tolerance,
-            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+            inputs_after_surface,
+            result_dict['inputs_after_surface'] - tolerance,
+            result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            evap_losses, result_dict['evap_losses'] - tolerance,
+            result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
 
         insert_nodata_values_into_array(inputs_after_snow, _TARGET_NODATA)
         insert_nodata_values_into_array(fwloss_1, _IC_NODATA)
         insert_nodata_values_into_array(fwloss_2, _IC_NODATA)
 
-        inputs_after_surface = forage._subtract_surface_losses(
-            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-            fwloss_2, pet_rem)
+        inputs_after_surface = forage.subtract_surface_losses(
+            'inputs_after_surface')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+        evap_losses = forage.subtract_surface_losses(
+            'evap_losses')(
+                inputs_after_snow, fracro, precro, snow,
+                alit, sd, fwloss_1, fwloss_2, pet_rem)
+
         self.assert_all_values_in_array_within_range(
-            inputs_after_surface, known_inputs_after_surface - tolerance,
-            known_inputs_after_surface + tolerance, _TARGET_NODATA)
+            inputs_after_surface,
+            result_dict['inputs_after_surface'] - tolerance,
+            result_dict['inputs_after_surface'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            evap_losses, result_dict['evap_losses'] - tolerance,
+            result_dict['evap_losses'] + tolerance, _TARGET_NODATA)

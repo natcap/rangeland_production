@@ -3542,10 +3542,10 @@ def _snow(
                     the atmosphere
 
             Returns:
-                snow_revised if return_type is `snow`
-                snlq_revised if return_type is `snlq`
-                pet_revised if return_type is `pet`
-                inputs_after_snow if return_type is `inputs_after_snow`
+                snow_revised if return_type is 'snow'
+                snlq_revised if return_type is 'snlq'
+                pet_revised if return_type is 'pet'
+                inputs_after_snow if return_type is 'inputs_after_snow'
             """
             valid_mask = (
                 (tave != _IC_NODATA) &
@@ -3757,85 +3757,107 @@ def _calc_standing_biomass(aliv, sum_stdedc):
     return sd
 
 
-def _subtract_surface_losses(
-        inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
-        fwloss_2, pet_rem):
-    """Subtract moisture losses to runoff, interception, and evaporation.
+def subtract_surface_losses(return_type):
+    """Calculate surface losses to runoff and surface evaporation.
 
-    Of the surface water inputs from precipitation and snowmelt, some water
-    is lost to runoff (line 113, H2olos.f). After runoff, some water is
-    lost to canopy interception and bare soil evaporation, if there is no
-    snow cover. Loss to canopy interception and bare soil evaporation is
-    a function of live, standing dead, and surface litter biomass.  The
-    total loss of moisture to interception and bare soil evaporation is
-    bounded to be less than or equal to 40% of reference
-    evapotranspiration.
+    Calculate the loss of surface moisture to runoff, canopy interception,
+    and bare soil evaporation.
 
     Parameters:
-        inputs_after_snow (numpy.ndarray): derived, surface water inputs
-            from precipitation and snowmelt, prior to runoff
-        fracro (numpy.ndarray): parameter, fraction of surface water
-            above precro that is lost to runoff
-        precro (numpy.ndarray): parameter, amount of surface water that
-            must be available for runoff to occur
-        snow (numpy.ndarray): derived, current snowpack
-        alit (numpy.ndarray): derived, biomass in surface litter
-        sd (numpy.ndarray): derived, total standing biomass
-        fwloss_1 (numpy.ndarray): parameter, scaling factor for
-            interception and evaporation of precip by vegetation
-        fwloss_2 (numpy.ndarray): parameter, scaling factor for bare soil
-            evaporation of precip
-        pet_rem (numpy.ndarray): derived, potential evaporation remaining
-            after evaporation of snow
+        return_type (string): flag indicating whether soil moisture inputs
+            after surface losses or total surface evaporation should be
+            returned
 
     Returns:
-        inputs_after_surface, surface water inputs to soil after runoff
-            and surface evaporation are subtracted
+        the function `_subtract_surface_losses`
     """
-    valid_mask = (
-        (inputs_after_snow != _TARGET_NODATA) &
-        (fracro != _IC_NODATA) &
-        (precro != _IC_NODATA) &
-        (snow != _TARGET_NODATA) &
-        (alit != _TARGET_NODATA) &
-        (sd != _TARGET_NODATA) &
-        (fwloss_1 != _IC_NODATA) &
-        (fwloss_2 != _IC_NODATA) &
-        (pet_rem != _TARGET_NODATA))
+    def _subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem):
+        """Subtract moisture losses to runoff, interception, and evaporation.
 
-    runoff = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
-    runoff[:] = _TARGET_NODATA
-    runoff[valid_mask] = numpy.maximum(
-        fracro[valid_mask] *
-        (inputs_after_snow[valid_mask] - precro[valid_mask]), 0.)
-    inputs_after_runoff = numpy.empty(
-        inputs_after_snow.shape, dtype=numpy.float32)
-    inputs_after_runoff[:] = _TARGET_NODATA
-    inputs_after_runoff[valid_mask] = (
-        inputs_after_snow[valid_mask] - runoff[valid_mask])
+        Of the surface water inputs from precipitation and snowmelt, some water
+        is lost to runoff (line 113, H2olos.f). After runoff, some water is
+        lost to canopy interception and bare soil evaporation, if there is no
+        snow cover. Loss to canopy interception and bare soil evaporation is
+        a function of live, standing dead, and surface litter biomass.  The
+        total loss of moisture to interception and bare soil evaporation is
+        bounded to be less than or equal to 40% of reference
+        evapotranspiration.
 
-    evap_mask = (valid_mask & (snow <= 0))
-    # loss to interception
-    aint = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
-    aint[evap_mask] = (
-        (0.0003 * alit[evap_mask] + 0.0006 * sd[evap_mask]) *
-        fwloss_1[evap_mask])
-    # loss to bare soil evaporation
-    absev = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
-    absev[evap_mask] = (
-        0.5 *
-        numpy.exp((-0.002 * alit[evap_mask]) - (0.004 * sd[evap_mask])) *
-        fwloss_2[evap_mask])
-    # total losses to interception and evaporation
-    evl = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
-    evl[evap_mask] = (
-        numpy.minimum(((absev[evap_mask] + aint[evap_mask]) *
-        inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
-    # remaining inputs after evaporation
-    inputs_after_surface = inputs_after_runoff.copy()
-    inputs_after_surface[evap_mask] = (
-        inputs_after_runoff[evap_mask] - evl[evap_mask])
-    return inputs_after_surface
+        Parameters:
+            inputs_after_snow (numpy.ndarray): derived, surface water inputs
+                from precipitation and snowmelt, prior to runoff
+            fracro (numpy.ndarray): parameter, fraction of surface water
+                above precro that is lost to runoff
+            precro (numpy.ndarray): parameter, amount of surface water that
+                must be available for runoff to occur
+            snow (numpy.ndarray): derived, current snowpack
+            alit (numpy.ndarray): derived, biomass in surface litter
+            sd (numpy.ndarray): derived, total standing biomass
+            fwloss_1 (numpy.ndarray): parameter, scaling factor for
+                interception and evaporation of precip by vegetation
+            fwloss_2 (numpy.ndarray): parameter, scaling factor for bare soil
+                evaporation of precip
+            pet_rem (numpy.ndarray): derived, potential evaporation remaining
+                after evaporation of snow
+
+        Returns:
+            inputs_after_surface, surface water inputs to soil after runoff
+                and surface evaporation are subtracted, if return_type is
+                'inputs_after_surface'
+            evap_losses, total surface evaporation, if return_type is
+                'evap_losses'
+        """
+        valid_mask = (
+            (inputs_after_snow != _TARGET_NODATA) &
+            (fracro != _IC_NODATA) &
+            (precro != _IC_NODATA) &
+            (snow != _TARGET_NODATA) &
+            (alit != _TARGET_NODATA) &
+            (sd != _TARGET_NODATA) &
+            (fwloss_1 != _IC_NODATA) &
+            (fwloss_2 != _IC_NODATA) &
+            (pet_rem != _TARGET_NODATA))
+
+        runoff = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+        runoff[:] = _TARGET_NODATA
+        runoff[valid_mask] = numpy.maximum(
+            fracro[valid_mask] *
+            (inputs_after_snow[valid_mask] - precro[valid_mask]), 0.)
+        inputs_after_runoff = numpy.empty(
+            inputs_after_snow.shape, dtype=numpy.float32)
+        inputs_after_runoff[:] = _TARGET_NODATA
+        inputs_after_runoff[valid_mask] = (
+            inputs_after_snow[valid_mask] - runoff[valid_mask])
+
+        evap_mask = (valid_mask & (snow <= 0))
+        # loss to interception
+        aint = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
+        aint[evap_mask] = (
+            (0.0003 * alit[evap_mask] + 0.0006 * sd[evap_mask]) *
+            fwloss_1[evap_mask])
+        # loss to bare soil evaporation
+        absev = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
+        absev[evap_mask] = (
+            0.5 *
+            numpy.exp((-0.002 * alit[evap_mask]) - (0.004 * sd[evap_mask])) *
+            fwloss_2[evap_mask])
+        # total losses to interception and evaporation
+        evap_losses = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+        evap_losses[:] = _TARGET_NODATA
+        evap_losses[evap_mask] = (
+            numpy.minimum(((absev[evap_mask] + aint[evap_mask]) *
+            inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
+        # remaining inputs after evaporation
+        inputs_after_surface = inputs_after_runoff.copy()
+        inputs_after_surface[evap_mask] = (
+            inputs_after_runoff[evap_mask] - evap_losses[evap_mask])
+        if return_type == 'inputs_after_surface':
+            return inputs_after_surface
+        elif return_type == 'evap_losses':
+            return evap_losses
+    return _subtract_surface_losses
 
 
 def _soil_water(
@@ -3897,7 +3919,8 @@ def _soil_water(
     temp_val_dict = {}
     for val in [
             'current_moisture_inputs', 'modified_moisture_inputs', 'pet_rem',
-            'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod', 'aliv', 'sd']:
+            'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod', 'aliv', 'sd',
+            'evap_losses']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
@@ -3987,9 +4010,21 @@ def _soil_water(
             sv_reg['snow'], temp_val_dict['alit'],
             temp_val_dict['sd'], param_val_dict['fwloss_1'],
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
-        _subtract_surface_losses, temp_val_dict['modified_moisture_inputs'],
+        subtract_surface_losses('inputs_after_surface'),
+        temp_val_dict['modified_moisture_inputs'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
+    # calculate total losses to surface evaporation
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['current_moisture_inputs'],
+            param_val_dict['fracro'], param_val_dict['precro'],
+            sv_reg['snow'], temp_val_dict['alit'],
+            temp_val_dict['sd'], param_val_dict['fwloss_1'],
+            param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
+        subtract_surface_losses('evap_losses'),
+        temp_val_dict['evap_losses'],
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
