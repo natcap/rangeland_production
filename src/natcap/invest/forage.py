@@ -4150,11 +4150,14 @@ def _soil_water(
     for val in [
             'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
             'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
-            'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'pevp', 'tot']:
+            'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'pevp', 'tot',
+            'tot2']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-    for lyr in xrange(1, nlaypg_max + 1):
-        val = 'avw_{}'.format(lyr)
-        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for val in ['avw', 'awwt']:
+        for lyr in xrange(1, nlaypg_max + 1):
+            val_lyr = '{}_{}'.format(val, lyr)
+            temp_val_dict[val_lyr] = os.path.join(
+                temp_dir, '{}.tif'.format(val_lyr))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
         for val in ['tgprod_weighted']:
@@ -4171,16 +4174,17 @@ def _soil_water(
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
-    for lyr in xrange(1, nlaypg_max + 1):
-        val = 'adep_{}'.format(lyr)
-        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        param_val_dict[val] = target_path
-        site_to_val = dict(
-            [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
-        pygeoprocessing.reclassify_raster(
-            (site_index_path, 1), site_to_val, target_path,
-            gdal.GDT_Float32, _IC_NODATA)
+    for val in ['adep', 'awtl']:
+        for lyr in xrange(1, nlaypg_max + 1):
+            val_lyr = '{}_{}'.format(val, lyr)
+            target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
+            param_val_dict[val_lyr] = target_path
+            site_to_val = dict(
+                [(site_code, float(table[val_lyr])) for
+                    (site_code, table) in site_param_table.iteritems()])
+            pygeoprocessing.reclassify_raster(
+                (site_index_path, 1), site_to_val, target_path,
+                gdal.GDT_Float32, _IC_NODATA)
 
     # calculate canopy and litter cover that influence moisture inputs
     # calculate biomass in surface litter
@@ -4362,6 +4366,21 @@ def _soil_water(
         avw_list.append(temp_val_dict['avw_{}'.format(lyr)])
     # total water available for transpiration
     raster_sum(avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
+
+    # calculate water available for transpiration weighted by transpiration
+    # depth for that soil layer
+    awwt_list = []
+    for lyr in xrange(1, nlaypg_max + 1):
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                temp_val_dict['avw_{}'.format(lyr)],
+                param_val_dict['awtl_{}'.format(lyr)]],
+            multiply_positive_rasters, temp_val_dict['awwt_{}'.format(lyr)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        awwt_list.append(temp_val_dict['awwt_{}'.format(lyr)])
+    # total weighted available water for transpiration
+    raster_sum(
+        awwt_list, _TARGET_NODATA, temp_val_dict['tot2'], _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
