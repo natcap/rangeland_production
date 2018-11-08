@@ -3103,3 +3103,109 @@ class foragetests(unittest.TestCase):
             result_dict['modified_moisture_inputs'] - tolerance,
             result_dict['modified_moisture_inputs'] + tolerance,
             _TARGET_NODATA)
+
+    def test_get_nlaypg_max(self):
+        """Test `_get_nlaypg_max`.
+
+        Use the function `get_nlaypg_max` to retrieve the maximum value of
+        nlaypg across plant functional types.
+
+        Raises:
+            AssertionError if `get_nlaypg_max` does not match results
+            calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        veg_trait_table = {
+            1: {'nlaypg': 4},
+            2: {'nlaypg': 6},
+            3: {'nlaypg': 2},
+        }
+
+        known_nlaypg_max = 6
+        nlaypg_max = forage.get_nlaypg_max(veg_trait_table)
+        self.assertEqual(nlaypg_max, known_nlaypg_max)
+
+    def test_distribute_water_to_soil_layer(self):
+        """Test `distribute_water_to_soil_layer`.
+
+        Use the function `distribute_water_to_soil_layer` to revise moisture
+        content in one soil layer and calculate the moisture added to the next
+        adjacent soil layer.
+
+        Raises:
+            AssertionError if `distribute_water_to_soil_layer` does not match
+            value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_size = (10, 10)
+        tolerance = 0.00001
+
+        # high moisture inputs, overflow to next soil layer
+        adep = 13.68
+        afiel = 0.32
+        asmos = 3.1
+        current_moisture_inputs = 8.291
+
+        known_asmos_revised = 4.3776
+        known_modified_moisture_inputs = 11.391
+
+        adep_ar = numpy.full(array_size, adep)
+        afiel_ar = numpy.full(array_size, afiel)
+        asmos_ar = numpy.full(array_size, asmos)
+        current_moisture_inputs_ar = numpy.full(
+            array_size, current_moisture_inputs)
+
+        insert_nodata_values_into_array(adep_ar, _IC_NODATA)
+        insert_nodata_values_into_array(asmos_ar, _TARGET_NODATA)
+
+        asmos_revised = forage.distribute_water_to_soil_layer(
+            'asmos_revised')(
+            adep_ar, afiel_ar, asmos_ar, current_moisture_inputs_ar)
+        amov = forage.distribute_water_to_soil_layer(
+            'amov')(adep_ar, afiel_ar, asmos_ar, current_moisture_inputs_ar)
+
+        self.assert_all_values_in_array_within_range(
+            asmos_revised, known_asmos_revised - tolerance,
+            known_asmos_revised + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            amov, known_modified_moisture_inputs - tolerance,
+            known_modified_moisture_inputs + tolerance, _TARGET_NODATA)
+
+        # high field capacity, no overflow
+        adep = 17.
+        afiel = 0.482
+        asmos = 0.01
+        current_moisture_inputs = 4.2
+
+        known_asmos_revised = 4.21
+        known_modified_moisture_inputs = 0
+
+        adep_ar = numpy.full(array_size, adep)
+        afiel_ar = numpy.full(array_size, afiel)
+        asmos_ar = numpy.full(array_size, asmos)
+        current_moisture_inputs_ar = numpy.full(
+            array_size, current_moisture_inputs)
+
+        insert_nodata_values_into_array(afiel_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(
+            current_moisture_inputs_ar, _TARGET_NODATA)
+
+        asmos_revised = forage.distribute_water_to_soil_layer(
+            'asmos_revised')(
+            adep_ar, afiel_ar, asmos_ar, current_moisture_inputs_ar)
+        amov = forage.distribute_water_to_soil_layer(
+            'amov')(adep_ar, afiel_ar, asmos_ar, current_moisture_inputs_ar)
+
+        self.assert_all_values_in_array_within_range(
+            asmos_revised, known_asmos_revised - tolerance,
+            known_asmos_revised + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            amov, known_modified_moisture_inputs - tolerance,
+            known_modified_moisture_inputs + tolerance, _TARGET_NODATA)

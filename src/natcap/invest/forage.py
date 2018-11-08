@@ -168,6 +168,10 @@ _PFT_INTERMEDIATE_VALUES = [
     'cercrp_max_below_1', 'cercrp_max_below_2',
     'tgprod', 'rtsh']
 
+# intermediate site-level values that are shared between submodels,
+# but do not need to be saved as output
+_SITE_INTERMEDIATE_VALUES = ['amov_2']
+
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
 _TARGET_NODATA = -1.0
@@ -608,6 +612,8 @@ def execute(args):
             month_reg['{}_{}'.format(
                 val, pft_index)] = os.path.join(
                 month_temp_dir, '{}_{}.tif'.format(val, pft_index))
+    for val in _SITE_INTERMEDIATE_VALUES:
+        month_reg[val] = os.path.join(month_temp_dir, '{}.tif'.format(val))
 
     # Main simulation loop
     # for each step in the simulation
@@ -754,6 +760,25 @@ def weighted_state_variable_sum(
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+
+def get_nlaypg_max(veg_trait_table):
+        """Get the maximum of nlaypg across plant functional types.
+
+        The plant functional type (PFT)-level parameter nlaypg gives the number
+        of soil layers accessible by roots of the PFT. Any soil layers beyond
+        the maximum value of nlaypg across PFTs are not necessary to track.
+
+        Parameters:
+            veg_trait_table (dict): map of pft id to dictionaries containing
+                plant functional type parameters, including nlaypg, number of
+                soil layers access by plant roots
+
+        Returns:
+            nlaypg_max, maximum nlaypg across PFTs
+        """
+        return max(
+            veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys())
 
 
 def _calc_ompc(
@@ -3944,17 +3969,86 @@ def calc_potential_transpiration(return_type):
     return _calc_potential_transpiration
 
 
+def distribute_water_to_soil_layer(return_type):
+    """Distribute moisture inputs to one soil layer prior to transpiration.
+
+    Soil moisture inputs after runoff, evaporation, and initial
+    transpiration are distributed to soil layers sequentially according to the
+    field capacity of the layer.  If moisture inputs exceed the field capacity
+    of the layer, the remainder of moisture inputs move down to the next
+    adjacent soil layer.
+
+    Returns:
+        the function `_distribute_water`
+    """
+    def _distribute_water(adep, afiel, asmos, current_moisture_inputs):
+        """Revise soil moisture in this soil layer prior to transpiration.
+
+        Moisture inputs coming into this soil layer are compared to the field
+        capacity of the layer. If the field capacity is exceeded, the excess
+        moisture moves from this layer to the next adjacent layer.
+
+        Parameters:
+            adep (numpy.ndarray): parameter, depth of this soil layer in cm
+            afiel (numpy.ndarray): derived, field capacity of this layer
+            asmos (numpy.ndarray): derived, current soil moisture content of
+                this soil layer
+            current_moisture_inputs (numpy.ndarray): derived, moisture inputs
+                added to this soil layer
+
+        Returns:
+            asmos_revised, revised soil moisture in this layer, if return_type
+                is 'asmos_revised'
+            amov, moisture flowing from this layer into the next, if
+                return_type is 'amov'
+        """
+        valid_mask = (
+            (adep != _IC_NODATA) &
+            (afiel != _TARGET_NODATA) &
+            (asmos != _TARGET_NODATA) &
+            (current_moisture_inputs != _TARGET_NODATA))
+
+        afl = numpy.empty(adep.shape, dtype=numpy.float32)
+        afl[:] = _TARGET_NODATA
+        afl[valid_mask] = adep[valid_mask] * afiel[valid_mask]
+
+        asmos_interm = numpy.empty(adep.shape, dtype=numpy.float32)
+        asmos_interm[:] = _TARGET_NODATA
+        asmos_interm[valid_mask] = (
+            asmos[valid_mask] + current_moisture_inputs[valid_mask])
+
+        amov = numpy.empty(adep.shape, dtype=numpy.float32)
+        amov[:] = _TARGET_NODATA
+
+        exceeded_mask = (valid_mask & (asmos_interm > afl))
+        amov[exceeded_mask] = asmos_interm[exceeded_mask]
+
+        asmos_revised = asmos_interm.copy()
+        asmos_revised[exceeded_mask] = afl[exceeded_mask]
+
+        notexceeded_mask = (valid_mask & (asmos_interm <= afl))
+        amov[notexceeded_mask] = 0.
+
+        if return_type == 'asmos_revised':
+            return asmos_revised
+        elif return_type == 'amov':
+            return amov
+    return _distribute_water
+
+
 def _soil_water(
-        aligned_inputs, site_param_table, current_month, month_index,
-        prev_sv_reg, sv_reg, month_reg, pft_id_set):
+        aligned_inputs, site_param_table, veg_trait_table, current_month,
+        month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
     """Allocate precipitation to runoff, transpiration, and soil moisture.
 
     Simulate snowfall and account for evaporation and melting of the snow pack.
     Allocate the flow of precipitation through interception by plants,
     runoff and infiltration into the soil, percolation through the soil, and
-    transpiration by plants. Estimate avh2o_1 for each PFT (water available to
-    the PFT for growth), avh2o_3 (water in first two soil layers), and amov_2
-    (indicating whether movement of water occurs from the first soil layer).
+    transpiration by plants. Update soil moisture in each soil layer.
+    Estimate avh2o_1 for each PFT (water available to the PFT for growth),
+    avh2o_3 (water in first two soil layers), and amov_2 (indicating whether
+    movement of water occurs from the second soil layer, used in
+    decomposition).
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
@@ -3962,6 +4056,9 @@ def _soil_water(
             plant functional type composition, and site spatial index
         site_param_table (dict): map of site spatial indices to dictionaries
             containing site parameters
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters, including nlaypg, number of soil
+            layers access by plant roots
         current_month (int): month of the year, such that current_month=1
             indicates January
         month_index (int): month of the simulation, such that month_index=1
@@ -3970,6 +4067,8 @@ def _soil_water(
             variables for the previous month
         sv_reg (dict): map of key, path pairs giving paths to state variables
             for the current month
+        pp_reg (dict): map of key, path pairs giving persistent parameters
+            including field capacity of each soil layer
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
         pft_id_set (set): set of integers identifying plant functional types
@@ -3977,6 +4076,11 @@ def _soil_water(
     Modifies:
         the raster indicated by `sv_reg['snow_path']`, current snowpack
         the raster indicated by `sv_reg['snlq_path']`, current liquid in snow
+        the raster indicated by `sv_reg['asmos_<lyr>_path']`, soil moisture
+            content, for each soil layer in 1:nlaypg_max
+        the raster indicated by `month_reg['amov_2']`, movement of soil
+            moisture out of soil layer 2
+
         TODO what else is modified
 
     Returns:
@@ -4012,6 +4116,9 @@ def _soil_water(
     metabc_1_nodata = pygeoprocessing.get_raster_info(
         prev_sv_reg['metabc_1_path'])['nodata'][0]
 
+    # get max number of soil layers to track
+    nlaypg_max = get_nlaypg_max(veg_trait_table)
+
     # temporary intermediate rasters for soil water submodel
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
@@ -4028,6 +4135,16 @@ def _soil_water(
 
     param_val_dict = {}
     for val in ['fracro', 'precro', 'fwloss_1']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    for lyr in xrange(1, nlaypg_max + 1):
+        val = 'adep_{}'.format(lyr)
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
@@ -4172,6 +4289,36 @@ def _soil_water(
             temp_val_dict['current_moisture_inputs']]],
         calc_potential_transpiration('pevp'), temp_val_dict['pevp'],
         gdal.GDT_Float32, _TARGET_NODATA)
+
+    # distribute water to each layer
+    for lyr in xrange(1, nlaypg_max + 1):
+        shutil.copyfile(
+            temp_val_dict['modified_moisture_inputs'],
+            temp_val_dict['current_moisture_inputs'])
+        # revise moisture content of this soil layer
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['adep_{}'.format(lyr)],
+                pp_reg['afiel_{}_path'.format(lyr)],
+                prev_sv_reg['asmos_{}_path'.format(lyr)],
+                temp_val_dict['current_moisture_inputs']]],
+            distribute_water_to_soil_layer('asmos_revised'),
+            sv_reg['asmos_{}_path'.format(lyr)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        # calculate soil moisture moving to next layer
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['adep_{}'.format(lyr)],
+                pp_reg['afiel_{}_path'.format(lyr)],
+                prev_sv_reg['asmos_{}_path'.format(lyr)],
+                temp_val_dict['current_moisture_inputs']]],
+            distribute_water_to_soil_layer('amov'),
+            temp_val_dict['modified_moisture_inputs'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        if lyr == 2:
+            # moisture leaving soil layer 2 is needed in decomposition submodel
+            shutil.copyfile(
+                temp_val_dict['modified_moisture_inputs'], month_reg['amov_2'])
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
