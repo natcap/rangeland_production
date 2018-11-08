@@ -3453,9 +3453,10 @@ def _root_shoot_ratio(
 
 
 def _snow(
-        site_index_path, site_param_table, precip_path, max_temp_path,
-        min_temp_path, prev_snow_path, prev_snlq_path, current_month,
-        snow_path, snlq_path, inputs_after_snow_path, pet_rem_path):
+        site_index_path, site_param_table, precip_path, tave_path,
+        max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
+        current_month, snow_path, snlq_path, inputs_after_snow_path,
+        pet_rem_path):
     """Account for precipitation as snow and snowmelt from snowpack.
 
     Determine whether precipitation falls as snow. Track the fate of
@@ -3469,6 +3470,8 @@ def _snow(
             that contain site-level parameters
         precip_path (string): path to raster containing precipitation for the
             current month
+        tave_path (string): path to raster containing average temperature for
+            the current month
         max_temp_path (string): path to raster containing maximum temperature
             for the current month
         min_temp_path (string): path to raster containing minimum temperature
@@ -3494,16 +3497,6 @@ def _snow(
     Returns:
         None
     """
-    def calc_avg_temp(max_temp, min_temp):
-        """Calculate average temperature from maximum and minimum temp."""
-        valid_mask = (
-            (max_temp != max_temp_nodata) &
-            (min_temp != min_temp_nodata))
-        tave = numpy.empty(max_temp.shape, dtype=numpy.float32)
-        tave[:] = _IC_NODATA
-        tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
-        return tave
-
     def calc_snow_moisture(return_type):
         """Calculate change in snow, pet, snow liquid, and moisture inputs.
 
@@ -3516,7 +3509,7 @@ def _snow(
                 or soil moisture inputs after snow should be returned
 
         Returns:
-            the function `calc_inputs_after_snow`
+            the function `_calc_snow_moisture`
         """
         def _calc_snow_moisture(
                 tave, precip, snow, snlq, pet, tmelt_1, tmelt_2, shwave):
@@ -3618,8 +3611,7 @@ def _snow(
 
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
-    for val in [
-            'shwave', 'pet', 'tave']:
+    for val in ['shwave', 'pet']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     param_val_dict = {}
     for val in ['tmelt_1', 'tmelt_2', 'fwloss_4']:
@@ -3643,11 +3635,6 @@ def _snow(
     snlq_nodata = pygeoprocessing.get_raster_info(
         prev_snlq_path)['nodata'][0]
 
-    # average temperature
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in max_temp_path, min_temp_path],
-        calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
-
     # solar radiation outside the atmosphere
     _shortwave_radiation(precip_path, current_month, temp_val_dict['shwave'])
 
@@ -3659,7 +3646,7 @@ def _snow(
     # calculate change in snow
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            temp_val_dict['tave'], precip_path, prev_snow_path,
+            tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
             temp_val_dict['shwave']],
@@ -3669,7 +3656,7 @@ def _snow(
     # calculate change in liquid in snow
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            temp_val_dict['tave'], precip_path, prev_snow_path,
+            tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
             temp_val_dict['shwave']],
@@ -3679,7 +3666,7 @@ def _snow(
     # calculate change in potential evapotranspiration energy
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            temp_val_dict['tave'], precip_path, prev_snow_path,
+            tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
             temp_val_dict['shwave']],
@@ -3689,7 +3676,7 @@ def _snow(
     # calculate soil moisture inputs draining from snow after snowmelt
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in
-            temp_val_dict['tave'], precip_path, prev_snow_path,
+            tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
             temp_val_dict['shwave']],
@@ -3864,6 +3851,99 @@ def subtract_surface_losses(return_type):
     return _subtract_surface_losses
 
 
+def calc_potential_transpiration(return_type):
+    """Calculate potential transpiration and evaporation from soil layer 1.
+
+    Calculate potential transpiration (trap), potential evaporation from
+    soil layer 1 (pevp), and initial transpiration water loss (tran).
+    Remove the initial transpiration water loss from soil moisture inputs
+    at this step.
+
+    Parameters:
+        return_type (string): flag indicating whether potential transpiration,
+            potential evaporation from soil layer 1, or modified moisture
+            inputs should be returned
+
+    Returns:
+        the function `_calc_potential_transpiration`
+    """
+    def _calc_potential_transpiration(
+            pet_rem, evap_losses, tave, aliv, current_moisture_inputs):
+        """Calculate potential water losses to transpiration.
+
+        Calculate potential transpiration (trap), the total potential
+        transpiration from all soil layers by plants. Calculate potential
+        evaporation from soil layer 1 (pevp); this amount is calculated prior
+        to transpiration but actually removed after water loss to transpiration
+        from all soil layers has been accounted. Calculate actual transpiration
+        (tran). Remove actual transpiration water losses from moisture inputs
+        before distributing water to soil layers. This is necessary for a
+        monthly time step to give plants in wet climates adequate access to
+        water for transpiration.
+
+        Parameters:
+            pet_rem (numpy.ndarray): derived, potential evapotranspiration
+                remaining after evaporation of snow
+            evap_losses (numpy.ndarray): derived, total surface evaporation
+            tave (numpy.ndarray): derived, average temperature
+            aliv (numpy.ndarray): aboveground live biomass, calculated from
+                aglivc and tgprod across plant functional types
+            current_moisture_inputs (numpy.ndarray): derived, moisture inputs
+                after surface losses
+
+        Returns:
+            trap if return_type is 'trap'
+            pevp if return_type is 'pevp'
+            modified_moisture_inputs if return_type is
+                'modified_moisture_inputs'
+        """
+        valid_mask = (
+            (pet_rem != _TARGET_NODATA) &
+            (evap_losses != _TARGET_NODATA) &
+            (tave != _TARGET_NODATA) &
+            (aliv != _TARGET_NODATA) &
+            (current_moisture_inputs != _TARGET_NODATA))
+        trap = numpy.empty(pet_rem.shape, dtype=numpy.float32)
+        trap[:] = _TARGET_NODATA
+        trap[valid_mask] = pet_rem[valid_mask] - evap_losses[valid_mask]
+
+        no_transpiration_mask = (valid_mask & (tave < 2))
+        trap[no_transpiration_mask] = 0.
+
+        transpiration_mask = (valid_mask & (tave >= 2))
+        trap[transpiration_mask] = numpy.maximum(
+            numpy.minimum(
+                trap[transpiration_mask], pet_rem[transpiration_mask] *
+                0.65 * (1 - numpy.exp(-0.02 * aliv[transpiration_mask]))), 0.)
+
+        trap[valid_mask] = numpy.maximum(trap[valid_mask], 0.01)
+        pevp = numpy.empty(pet_rem.shape, dtype=numpy.float32)
+        pevp[:] = _TARGET_NODATA
+        pevp[valid_mask] = numpy.maximum(
+            pet_rem[valid_mask] - trap[valid_mask] - evap_losses[valid_mask],
+            0.)
+
+        tran = numpy.empty(pet_rem.shape, dtype=numpy.float32)
+        tran[:] = _TARGET_NODATA
+        tran[valid_mask] = numpy.minimum(
+            trap[valid_mask] - 0.01, current_moisture_inputs[valid_mask])
+        trap[valid_mask] = trap[valid_mask] - tran[valid_mask]
+
+        modified_moisture_inputs = numpy.empty(
+            pet_rem.shape, dtype=numpy.float32)
+        modified_moisture_inputs[:] = _TARGET_NODATA
+        modified_moisture_inputs[valid_mask] = (
+            current_moisture_inputs[valid_mask] - tran[valid_mask])
+
+        if return_type == 'trap':
+            return trap
+        elif return_type == 'pevp':
+            return pevp
+        elif return_type == 'modified_moisture_inputs':
+            return modified_moisture_inputs
+    return _calc_potential_transpiration
+
+
 def _soil_water(
         aligned_inputs, site_param_table, current_month, month_index,
         prev_sv_reg, sv_reg, month_reg, pft_id_set):
@@ -3902,6 +3982,16 @@ def _soil_water(
     Returns:
         None
     """
+    def calc_avg_temp(max_temp, min_temp):
+        """Calculate average temperature from maximum and minimum temp."""
+        valid_mask = (
+            (max_temp != max_temp_nodata) &
+            (min_temp != min_temp_nodata))
+        tave = numpy.empty(max_temp.shape, dtype=numpy.float32)
+        tave[:] = _IC_NODATA
+        tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
+        return tave
+
     def calc_surface_litter_biomass(strucc_1, metabc_1):
         """Calculate biomass in surface litter."""
         valid_mask = (
@@ -3913,6 +4003,10 @@ def _soil_water(
         alit = numpy.minimum(alit, 400)
         return alit
 
+    max_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
+    min_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
     strucc_1_nodata = pygeoprocessing.get_raster_info(
         prev_sv_reg['strucc_1_path'])['nodata'][0]
     metabc_1_nodata = pygeoprocessing.get_raster_info(
@@ -3922,9 +4016,9 @@ def _soil_water(
     temp_dir = tempfile.mkdtemp()
     temp_val_dict = {}
     for val in [
-            'current_moisture_inputs', 'modified_moisture_inputs', 'pet_rem',
-            'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod', 'aliv', 'sd',
-            'absevap', 'evap_losses']:
+            'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
+            'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
+            'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'pevp']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
@@ -3979,6 +4073,11 @@ def _soil_water(
             temp_val_dict['sum_aglivc'], temp_val_dict['sum_tgprod'],
             gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
 
+    # calculate average temperature
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in max_temp_path, min_temp_path],
+        calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
+
     # calculate aboveground live biomass
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
@@ -3997,6 +4096,7 @@ def _soil_water(
     _snow(
         aligned_inputs['site_index'], site_param_table,
         aligned_inputs['precip_{}'.format(month_index)],
+        temp_val_dict['tave'],
         aligned_inputs['max_temp_{}'.format(current_month)],
         aligned_inputs['min_temp_{}'.format(current_month)],
         prev_sv_reg['snow_path'], prev_sv_reg['snlq_path'],
@@ -4040,6 +4140,37 @@ def _soil_water(
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
         subtract_surface_losses('evap_losses'),
         temp_val_dict['evap_losses'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # remove losses due to initial transpiration from water inputs
+    shutil.copyfile(
+        temp_val_dict['modified_moisture_inputs'],
+        temp_val_dict['current_moisture_inputs'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['pet_rem'], temp_val_dict['evap_losses'],
+            temp_val_dict['tave'], temp_val_dict['aliv'],
+            temp_val_dict['current_moisture_inputs']]],
+        calc_potential_transpiration('modified_moisture_inputs'),
+        temp_val_dict['modified_moisture_inputs'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate potential transpiration
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['pet_rem'], temp_val_dict['evap_losses'],
+            temp_val_dict['tave'], temp_val_dict['aliv'],
+            temp_val_dict['current_moisture_inputs']]],
+        calc_potential_transpiration('trap'), temp_val_dict['trap'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate potential evaporation from top soil layer
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['pet_rem'], temp_val_dict['evap_losses'],
+            temp_val_dict['tave'], temp_val_dict['aliv'],
+            temp_val_dict['current_moisture_inputs']]],
+        calc_potential_transpiration('pevp'), temp_val_dict['pevp'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files

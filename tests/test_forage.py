@@ -2353,6 +2353,7 @@ class foragetests(unittest.TestCase):
             'tmelt_2': TMELT_2,
             'shwave': SHWAVE,
         }
+        test_dict['tave'] = (test_dict['max_temp'] + test_dict['min_temp']) / 2
 
         site_param_table = {
             1: {
@@ -2363,6 +2364,7 @@ class foragetests(unittest.TestCase):
         }
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         precip_path = os.path.join(self.workspace_dir, 'precip.tif')
+        tave_path = os.path.join(self.workspace_dir, 'tave.tif')
         max_temp_path = os.path.join(self.workspace_dir, 'max_temp.tif')
         min_temp_path = os.path.join(self.workspace_dir, 'min_temp.tif')
         prev_snow_path = os.path.join(self.workspace_dir, 'prev_snow.tif')
@@ -2376,6 +2378,8 @@ class foragetests(unittest.TestCase):
         create_random_raster(site_index_path, 1, 1)
         create_random_raster(
             precip_path, test_dict['precip'], test_dict['precip'])
+        create_random_raster(
+            tave_path, test_dict['tave'], test_dict['tave'])
         create_random_raster(
             max_temp_path, test_dict['max_temp'], test_dict['max_temp'])
         create_random_raster(
@@ -2391,9 +2395,10 @@ class foragetests(unittest.TestCase):
             test_dict['tmelt_1'], test_dict['tmelt_2'], SHWAVE)
 
         forage._snow(
-            site_index_path, site_param_table, precip_path, max_temp_path,
-            min_temp_path, prev_snow_path, prev_snlq_path, CURRENT_MONTH,
-            snow_path, snlq_path, inputs_after_snow_path, pet_rem_path)
+            site_index_path, site_param_table, precip_path, tave_path,
+            max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
+            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
+            pet_rem_path)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'], result_dict['snow'],
@@ -2424,10 +2429,13 @@ class foragetests(unittest.TestCase):
             'tmelt_2': TMELT_2,
             'shwave': SHWAVE,
         }
+        test_dict['tave'] = (test_dict['max_temp'] + test_dict['min_temp']) / 2
 
         create_random_raster(site_index_path, 1, 1)
         create_random_raster(
             precip_path, test_dict['precip'], test_dict['precip'])
+        create_random_raster(
+            tave_path, test_dict['tave'], test_dict['tave'])
         create_random_raster(
             max_temp_path, test_dict['max_temp'], test_dict['max_temp'])
         create_random_raster(
@@ -2443,9 +2451,10 @@ class foragetests(unittest.TestCase):
             test_dict['tmelt_1'], test_dict['tmelt_2'], SHWAVE)
 
         forage._snow(
-            site_index_path, site_param_table, precip_path, max_temp_path,
-            min_temp_path, prev_snow_path, prev_snlq_path, CURRENT_MONTH,
-            snow_path, snlq_path, inputs_after_snow_path, pet_rem_path)
+            site_index_path, site_param_table, precip_path, tave_path,
+            max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
+            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
+            pet_rem_path)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'] - 0.06, result_dict['snow'] + 0.06,
@@ -2476,10 +2485,13 @@ class foragetests(unittest.TestCase):
             'tmelt_2': TMELT_2,
             'shwave': SHWAVE,
         }
+        test_dict['tave'] = (test_dict['max_temp'] + test_dict['min_temp']) / 2
 
         create_random_raster(site_index_path, 1, 1)
         create_random_raster(
             precip_path, test_dict['precip'], test_dict['precip'])
+        create_random_raster(
+            tave_path, test_dict['tave'], test_dict['tave'])
         create_random_raster(
             max_temp_path, test_dict['max_temp'], test_dict['max_temp'])
         create_random_raster(
@@ -2495,9 +2507,10 @@ class foragetests(unittest.TestCase):
             test_dict['tmelt_1'], test_dict['tmelt_2'], SHWAVE)
 
         forage._snow(
-            site_index_path, site_param_table, precip_path, max_temp_path,
-            min_temp_path, prev_snow_path, prev_snlq_path, CURRENT_MONTH,
-            snow_path, snlq_path, inputs_after_snow_path, pet_rem_path)
+            site_index_path, site_param_table, precip_path, tave_path,
+            max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
+            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
+            pet_rem_path)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'] - 0.06, result_dict['snow'] + 0.06,
@@ -2649,7 +2662,6 @@ class foragetests(unittest.TestCase):
             return results_dict
 
         from natcap.invest import forage
-
         array_size = (10, 10)
 
         # snow cover, runoff losses only
@@ -2897,3 +2909,197 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
+
+    def test_calc_potential_transpiration(self):
+        """Test `calc_potential_transpiration`.
+
+        Use the function `calc_potential_transpiration` to calculate
+        potential transpiration from the soil by plants, potential  evaporation
+        of soil moisture from soil layer 1, initial transpiration water loss,
+        and modified water inputs. Test the function against a point-based
+        version defined here.
+
+        Raises:
+            AssertionError if point-based test version of
+                `subtract_surface_losses` does not match values calculated by
+                hand
+            AssertionError if `subtract_surface_losses` does not match results
+                calculated by point-based test version
+
+        Returns:
+            None
+        """
+        def potential_transpiration_point(
+                pet_rem, evap_losses, tave, aliv, current_moisture_inputs):
+            """Calculate trap, pevp, and modified moisture inputs.
+
+            Parameters:
+                pet_rem (float): potential evapotranspiration remaining after
+                    evaporation of snow
+                evap_losses (float): total surface evaporation
+                tave (float): average temperature
+                aliv (float): aboveground live biomass
+                current_moisture_inputs (float): moisture inputs after surface
+                    losses
+
+            Returns:
+                dict of moidified quantities: trap, potential transpiration;
+                    pevp, potential evaporation from surface soil layer;
+                    modified_moisture_inputs, water to be added to soil layers
+                    before transpiration losses are accounted
+            """
+            trap = pet_rem - evap_losses
+            if tave < 2:
+                pttr = 0
+            else:
+                pttr = pet_rem * 0.65 * (1 - math.exp(-0.02 * aliv))
+            if pttr <= trap:
+                trap = pttr
+            if trap <= 0:
+                trap = 0.01
+            pevp = max(pet_rem - trap - evap_losses, 0.)
+            tran = min(trap - 0.01, current_moisture_inputs)
+            trap = trap - tran
+            modified_moisture_inputs = current_moisture_inputs - tran
+
+            results_dict = {
+                'trap': trap,
+                'pevp': pevp,
+                'modified_moisture_inputs': modified_moisture_inputs,
+            }
+            return results_dict
+
+        from natcap.invest import forage
+        array_size = (10, 10)
+
+        # high transpiration limited by water inputs
+        test_dict = {
+            'pet_rem': 13.2,
+            'evap_losses': 5.28,
+            'tave': 22.3,
+            'aliv': 100.,
+            'current_moisture_inputs': 7.4,
+        }
+
+        pet_rem = numpy.full(array_size, test_dict['pet_rem'])
+        evap_losses = numpy.full(array_size, test_dict['evap_losses'])
+        tave = numpy.full(array_size, test_dict['tave'])
+        aliv = numpy.full(array_size, test_dict['aliv'])
+        current_moisture_inputs = numpy.full(
+            array_size, test_dict['current_moisture_inputs'])
+
+        result_dict = potential_transpiration_point(
+            test_dict['pet_rem'], test_dict['evap_losses'], test_dict['tave'],
+            test_dict['aliv'], test_dict['current_moisture_inputs'])
+
+        insert_nodata_values_into_array(aliv, _TARGET_NODATA)
+        insert_nodata_values_into_array(
+            current_moisture_inputs, _TARGET_NODATA)
+        insert_nodata_values_into_array(tave, _TARGET_NODATA)
+
+        trap = forage.calc_potential_transpiration(
+            'trap')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+        pevp = forage.calc_potential_transpiration(
+            'pevp')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+        modified_moisture_inputs = forage.calc_potential_transpiration(
+            'modified_moisture_inputs')(
+            pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+
+        # known values calculated by hand
+        known_trap = 0.018823
+        known_pevp = 0.50118
+        known_modified_moisture_inputs = 0
+        tolerance = 0.00001
+
+        self.assertAlmostEqual(
+            result_dict['trap'], known_trap, delta=tolerance,
+            msg=(
+                "trap calculated by point-based test version does not match" +
+                " value calculated by hand"))
+        self.assertAlmostEqual(
+            result_dict['pevp'], known_pevp, delta=tolerance,
+            msg=(
+                "pevp calculated by point-based test version does not match" +
+                " value calculated by hand"))
+        self.assertAlmostEqual(
+            result_dict['modified_moisture_inputs'],
+            known_modified_moisture_inputs,
+            delta=tolerance,
+            msg=(
+                "modified_moisture_inputs calculated by point-based test " +
+                "version does not match value calculated by hand"))
+        self.assert_all_values_in_array_within_range(
+            trap, result_dict['trap'] - tolerance,
+            result_dict['trap'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            pevp, result_dict['pevp'] - tolerance,
+            result_dict['pevp'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            modified_moisture_inputs,
+            result_dict['modified_moisture_inputs'] - tolerance,
+            result_dict['modified_moisture_inputs'] + tolerance,
+            _TARGET_NODATA)
+
+        # low temperature, no transpiration occurs
+        test_dict = {
+            'pet_rem': 3.24,
+            'evap_losses': 1.12,
+            'tave': 1.,
+            'aliv': 180.,
+            'current_moisture_inputs': 62.,
+        }
+
+        pet_rem = numpy.full(array_size, test_dict['pet_rem'])
+        evap_losses = numpy.full(array_size, test_dict['evap_losses'])
+        tave = numpy.full(array_size, test_dict['tave'])
+        aliv = numpy.full(array_size, test_dict['aliv'])
+        current_moisture_inputs = numpy.full(
+            array_size, test_dict['current_moisture_inputs'])
+
+        result_dict = potential_transpiration_point(
+            test_dict['pet_rem'], test_dict['evap_losses'], test_dict['tave'],
+            test_dict['aliv'], test_dict['current_moisture_inputs'])
+
+        trap = forage.calc_potential_transpiration(
+            'trap')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+        pevp = forage.calc_potential_transpiration(
+            'pevp')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+        modified_moisture_inputs = forage.calc_potential_transpiration(
+            'modified_moisture_inputs')(
+            pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+
+        self.assert_all_values_in_array_within_range(
+            trap, result_dict['trap'] - tolerance,
+            result_dict['trap'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            pevp, result_dict['pevp'] - tolerance,
+            result_dict['pevp'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            modified_moisture_inputs,
+            result_dict['modified_moisture_inputs'] - tolerance,
+            result_dict['modified_moisture_inputs'] + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(pet_rem, _TARGET_NODATA)
+        insert_nodata_values_into_array(evap_losses, _TARGET_NODATA)
+        insert_nodata_values_into_array(tave, _TARGET_NODATA)
+
+        trap = forage.calc_potential_transpiration(
+            'trap')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+        pevp = forage.calc_potential_transpiration(
+            'pevp')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+        modified_moisture_inputs = forage.calc_potential_transpiration(
+            'modified_moisture_inputs')(
+            pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
+
+        self.assert_all_values_in_array_within_range(
+            trap, result_dict['trap'] - tolerance,
+            result_dict['trap'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            pevp, result_dict['pevp'] - tolerance,
+            result_dict['pevp'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            modified_moisture_inputs,
+            result_dict['modified_moisture_inputs'] - tolerance,
+            result_dict['modified_moisture_inputs'] + tolerance,
+            _TARGET_NODATA)
