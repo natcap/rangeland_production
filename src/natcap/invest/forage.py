@@ -4036,6 +4036,31 @@ def distribute_water_to_soil_layer(return_type):
     return _distribute_water
 
 
+def calc_available_water_for_transpiration(asmos, awilt, adep):
+    """Calculate water available for transpiration in one soil layer.
+
+    The water available for transpiration is the amount of water in the soil
+    layer minus the wilting point of the soil layer.
+
+    Parameters:
+        asmos (numpy.ndarray): derived, current moisture in the soil layer
+        awilt (numpy.ndarray): derived, wilting point of the soil layer
+        adep (numpy.ndarray): parameter, depth of the soil layer in cm
+
+    Returns:
+        avw, available water for transpiration
+    """
+    valid_mask = (
+        (asmos != _TARGET_NODATA) &
+        (awilt != _TARGET_NODATA) &
+        (adep != _IC_NODATA))
+    avw = numpy.empty(asmos.shape, dtype=numpy.float32)
+    avw[:] = _TARGET_NODATA
+    avw[valid_mask] = numpy.maximum(
+        asmos[valid_mask] - awilt[valid_mask] * adep[valid_mask], 0.)
+    return avw
+
+
 def _soil_water(
         aligned_inputs, site_param_table, veg_trait_table, current_month,
         month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
@@ -4125,7 +4150,10 @@ def _soil_water(
     for val in [
             'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
             'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
-            'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'pevp']:
+            'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'pevp', 'tot']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for lyr in xrange(1, nlaypg_max + 1):
+        val = 'avw_{}'.format(lyr)
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
@@ -4319,6 +4347,21 @@ def _soil_water(
             # moisture leaving soil layer 2 is needed in decomposition submodel
             shutil.copyfile(
                 temp_val_dict['modified_moisture_inputs'], month_reg['amov_2'])
+
+    # calculate available water for transpiration
+    avw_list = []
+    for lyr in xrange(1, nlaypg_max + 1):
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                sv_reg['asmos_{}_path'.format(lyr)],
+                pp_reg['awilt_{}_path'.format(lyr)],
+                param_val_dict['adep_{}'.format(lyr)]],
+            calc_available_water_for_transpiration,
+            temp_val_dict['avw_{}'.format(lyr)], gdal.GDT_Float32,
+            _TARGET_NODATA)
+        avw_list.append(temp_val_dict['avw_{}'.format(lyr)])
+    # total water available for transpiration
+    raster_sum(avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)

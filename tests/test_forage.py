@@ -3209,3 +3209,48 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             amov, known_modified_moisture_inputs - tolerance,
             known_modified_moisture_inputs + tolerance, _TARGET_NODATA)
+
+    def test_calc_available_water_for_transpiration(self):
+        """Test `calc_available_water_for_transpiration`.
+
+        Use the function `calc_available_water_for_transpiration` to calculate
+        water available in one soil layer for transpiration.
+
+        Raises:
+            AssertionError if `calc_available_water_for_transpiration` does not
+            match values calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_size = (10, 10)
+        tolerance = 0.0000001
+
+        # low inputs, no water available for transpiration
+        asmos = 3.6
+        awilt = 0.52
+        adep = 15
+        known_avw = 0.
+
+        asmos_ar = numpy.full(array_size, asmos)
+        awilt_ar = numpy.full(array_size, awilt)
+        adep_ar = numpy.full(array_size, adep)
+        avw = forage.calc_available_water_for_transpiration(
+            asmos_ar, awilt_ar, adep_ar)
+        self.assert_all_values_in_array_within_range(
+            avw, known_avw - tolerance, known_avw + tolerance, _TARGET_NODATA)
+
+        # high moisture inputs, water available for transpiration
+        asmos = 6.21
+        awilt = 0.31
+        adep = 15
+        known_avw = 1.56
+
+        asmos_ar = numpy.full(array_size, asmos)
+        awilt_ar = numpy.full(array_size, awilt)
+        adep_ar = numpy.full(array_size, adep)
+        avw = forage.calc_available_water_for_transpiration(
+            asmos_ar, awilt_ar, adep_ar)
+        self.assert_all_values_in_array_within_range(
+            avw, known_avw - tolerance, known_avw + tolerance, _TARGET_NODATA)
