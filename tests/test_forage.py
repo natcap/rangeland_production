@@ -3254,3 +3254,108 @@ class foragetests(unittest.TestCase):
             asmos_ar, awilt_ar, adep_ar)
         self.assert_all_values_in_array_within_range(
             avw, known_avw - tolerance, known_avw + tolerance, _TARGET_NODATA)
+
+    def test_remove_transpiration(self):
+        """ Test `remove_transpiration`.
+
+        Use the function `remove_transpiration` to calculate asmos, revised
+        moisture content of one soil layer, and avinj, water available for plant
+        growth in the soil layer.
+
+        Raises:
+            AssertionError if `remove_transpiration` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_size = (10, 10)
+        tolerance = 0.00001
+
+        # transpiration limited by current available moisture
+        asmos = 4.15
+        awilt = 0.26
+        adep = 13.5
+        trap = 4.17
+        awwt = 1.428
+        tot2 = 5.883
+
+        known_asmos_revised = 3.51
+        known_avinj = 0
+
+        asmos_ar = numpy.full(array_size, asmos)
+        awilt_ar = numpy.full(array_size, awilt)
+        adep_ar = numpy.full(array_size, adep)
+        trap_ar = numpy.full(array_size, trap)
+        awwt_ar = numpy.full(array_size, awwt)
+        tot2_ar = numpy.full(array_size, tot2)
+
+        avinj = forage.remove_transpiration(
+            'avinj')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        asmos_revised = forage.remove_transpiration(
+            'asmos')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        self.assert_all_values_in_array_within_range(
+            avinj, known_avinj - tolerance, known_avinj + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            asmos_revised, known_asmos_revised - tolerance,
+            known_asmos_revised + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(asmos_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(awilt_ar, _TARGET_NODATA)
+
+        avinj = forage.remove_transpiration(
+            'avinj')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        asmos_revised = forage.remove_transpiration(
+            'asmos')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        self.assert_all_values_in_array_within_range(
+            avinj, known_avinj - tolerance, known_avinj + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            asmos_revised, known_asmos_revised - tolerance,
+            known_asmos_revised + tolerance, _TARGET_NODATA)
+
+        # transpiration limited by total potential transpiration
+        asmos = 3.15
+        awilt = 0.15
+        adep = 12.5
+        trap = 3.72
+        awwt = 0.428
+        tot2 = 4.883
+
+        known_asmos_revised = 2.823938
+        known_avinj = 0.948948
+
+        asmos_ar = numpy.full(array_size, asmos)
+        awilt_ar = numpy.full(array_size, awilt)
+        adep_ar = numpy.full(array_size, adep)
+        trap_ar = numpy.full(array_size, trap)
+        awwt_ar = numpy.full(array_size, awwt)
+        tot2_ar = numpy.full(array_size, tot2)
+
+        avinj = forage.remove_transpiration(
+            'avinj')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        asmos_revised = forage.remove_transpiration(
+            'asmos')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        self.assert_all_values_in_array_within_range(
+            avinj, known_avinj - tolerance, known_avinj + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            asmos_revised, known_asmos_revised - tolerance,
+            known_asmos_revised + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(trap_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(adep_ar, _IC_NODATA)
+        insert_nodata_values_into_array(tot2_ar, _TARGET_NODATA)
+
+        avinj = forage.remove_transpiration(
+            'avinj')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        asmos_revised = forage.remove_transpiration(
+            'asmos')(asmos_ar, awilt_ar, adep_ar, trap_ar, awwt_ar, tot2_ar)
+        self.assert_all_values_in_array_within_range(
+            avinj, known_avinj - tolerance, known_avinj + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            asmos_revised, known_asmos_revised - tolerance,
+            known_asmos_revised + tolerance, _TARGET_NODATA)
