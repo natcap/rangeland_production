@@ -3484,3 +3484,56 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             evlos, known_evlos - tolerance, known_evlos + tolerance,
             _TARGET_NODATA)
+
+    def test_raster_difference(self):
+        """Test `raster_difference`.
+
+        Use the function `raster_difference` to subtract one raster from
+        another, while allowing nodata values in one raster to propagate to
+        the result.  Then calculate the difference again, treating nodata
+        values in the two rasters as zero.
+
+        Raises:
+            AssertionError if `raster_difference` does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        raster1_val = 10
+        raster2_val = 3
+        known_result = 7
+        raster1_path = os.path.join(self.workspace_dir, 'raster1.tif')
+        raster2_path = os.path.join(self.workspace_dir, 'raster2.tif')
+        target_path = os.path.join(self.workspace_dir, 'target.tif')
+        create_random_raster(raster1_path, raster1_val, raster1_val)
+        create_random_raster(raster2_path, raster2_val, raster2_val)
+
+        raster1_nodata = -99
+        raster2_nodata = -999
+
+        forage.raster_difference(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=True)
+        self.assert_all_values_in_raster_within_range(
+            target_path, known_result, known_result, _TARGET_NODATA)
+
+        # rasters contain nodata, which should be propagated to result
+        insert_nodata_values_into_raster(raster1_path, raster1_nodata)
+        insert_nodata_values_into_raster(raster2_path, raster2_nodata)
+        forage.raster_difference(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=False)
+        self.assert_all_values_in_raster_within_range(
+            target_path, known_result, known_result, _TARGET_NODATA)
+
+        # full raster of nodata, which should be treated as zero
+        create_random_raster(raster1_path, raster1_val, raster1_val)
+        create_random_raster(raster2_path, raster2_nodata, raster2_nodata)
+        forage.raster_difference(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=True)
+        self.assert_all_values_in_raster_within_range(
+            target_path, raster1_val, raster1_val, _TARGET_NODATA)

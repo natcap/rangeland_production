@@ -711,6 +711,61 @@ def raster_sum(
             target_path, gdal.GDT_Float32, target_nodata)
 
 
+def raster_difference(
+        raster1, raster1_nodata, raster2, raster2_nodata, target_path,
+        target_nodata, nodata_remove):
+    """Subtract raster2 from raster1.
+
+    Subtract raster2 from raster1 element-wise, allowing nodata values in the
+    rasters to propagate to the result or treating nodata as zero.
+
+    Parameters:
+        raster1 (string): path to raster from which to subtract raster2
+        raster1_nodata (float or int): nodata value in raster1
+        raster2 (string): path to raster which should be subtracted from
+            raster1
+        raster2_nodata (float or int): nodata value in raster2
+        target_path (string): path to location to store the difference
+        target_nodata (float or int): nodata value for the result raster
+        nodata_remove (bool): if true, treat nodata values in input
+            rasters as zero. If false, the difference in a pixel where any
+            input raster is nodata is nodata.
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    def raster_difference_op(raster1, raster2):
+        """Subtract raster2 from raster1 without removing nodata values."""
+        valid_mask = (
+            (raster1 != raster1_nodata) &
+            (raster2 != raster2_nodata))
+        result = numpy.empty(raster1.shape, dtype=numpy.float32)
+        result[:] = target_nodata
+        result[valid_mask] = raster1[valid_mask] - raster2[valid_mask]
+        return result
+
+    def raster_difference_op_nodata_remove(raster1, raster2):
+        """Subtract raster2 from raster1, treating nodata as zero."""
+        numpy.place(raster1, raster1 == raster1_nodata, [0])
+        numpy.place(raster2, raster2 == raster2_nodata, [0])
+        result = raster1 - raster2
+        return result
+
+    if nodata_remove:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in raster1, raster2],
+            raster_difference_op_nodata_remove, target_path, gdal.GDT_Float32,
+            target_nodata)
+    else:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in raster1, raster2],
+            raster_difference_op, target_path, gdal.GDT_Float32,
+            target_nodata)
+
+
 def weighted_state_variable_sum(
         sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path):
     """Calculate weighted sum of state variable across plant functional types.
@@ -4320,7 +4375,7 @@ def _soil_water(
             'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
             'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
             'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'trap_revised',
-            'pevp', 'tot', 'tot2', 'rwcf_1', 'evlos']:
+            'pevp', 'tot', 'tot2', 'rwcf_1', 'evlos', 'avinj_interim_1']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in ['asmos_interim', 'avw', 'awwt', 'avinj']:
         for lyr in xrange(1, nlaypg_max + 1):
@@ -4595,6 +4650,20 @@ def _soil_water(
             pp_reg['awilt_1_path'], param_val_dict['adep_1']]],
         calc_evaporation_loss, temp_val_dict['evlos'],
         gdal.GDT_Float32, _TARGET_NODATA)
+
+    # remove evaporation from total moisture in soil layer 1
+    shutil.copyfile(sv_reg['asmos_1_path'], temp_val_dict['asmos_interim_1'])
+    raster_difference(
+        temp_val_dict['asmos_1_interm'], _TARGET_NODATA,
+        temp_val_dict['evlos'], _TARGET_NODATA, sv_reg['asmos_1_path'],
+        _TARGET_NODATA, nodata_remove=False)
+
+    # remove evaporation from moisture available to plants in soil layer 1
+    shutil.copyfile(temp_val_dict['avinj_1'], temp_val_dict['avinj_interim_1'])
+    raster_difference(
+        temp_val_dict['avinj_interim_1'], _TARGET_NODATA,
+        temp_val_dict['evlos'], _TARGET_NODATA, temp_val_dict['avinj_1'],
+        _TARGET_NODATA, nodata_remove=False)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
