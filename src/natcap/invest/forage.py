@@ -3864,7 +3864,10 @@ def subtract_surface_losses(return_type):
             numpy.minimum(((absevap[evap_mask] + aint[evap_mask]) *
             inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
         # remaining inputs after evaporation
-        inputs_after_surface = inputs_after_runoff.copy()
+        inputs_after_surface = numpy.empty(
+            inputs_after_snow.shape, dtype=numpy.float32)
+        inputs_after_surface[:] = _TARGET_NODATA
+        inputs_after_surface[valid_mask] = inputs_after_runoff[valid_mask]
         inputs_after_surface[evap_mask] = (
             inputs_after_runoff[evap_mask] - evap_losses[evap_mask])
         if return_type == 'inputs_after_surface':
@@ -4023,7 +4026,9 @@ def distribute_water_to_soil_layer(return_type):
         exceeded_mask = (valid_mask & (asmos_interm > afl))
         amov[exceeded_mask] = asmos_interm[exceeded_mask]
 
-        asmos_revised = asmos_interm.copy()
+        asmos_revised = numpy.empty(adep.shape, dtype=numpy.float32)
+        asmos_revised[:] = _TARGET_NODATA
+        asmos_revised[valid_mask] = asmos_interm[valid_mask]
         asmos_revised[exceeded_mask] = afl[exceeded_mask]
 
         notexceeded_mask = (valid_mask & (asmos_interm <= afl))
@@ -4080,7 +4085,8 @@ def revise_potential_transpiration(trap, tot):
     valid_mask = (
         (trap != _TARGET_NODATA) &
         (tot != _TARGET_NODATA))
-    trap_revised = trap.copy()
+    trap_revised = numpy.empty(trap.shape, dtype=numpy.float32)
+    trap_revised[:] = _TARGET_NODATA
     trap_revised[valid_mask] = numpy.minimum(trap[valid_mask], tot[valid_mask])
     return trap_revised
 
@@ -4182,6 +4188,48 @@ def calc_relative_water_content_lyr_1(asmos_1, adep_1, awilt_1, afiel_1):
     return rwcf_1
 
 
+def calc_evaporation_loss(rwcf_1, pevp, absevap, asmos_1, awilt_1, adep_1):
+    """Calculate evaporation from soil layer 1.
+
+    Some moisture is lost from soil layer 1 (i.e., the top soil layer) to
+    evaporation, separate from surface evaporation and transpiration by plants.
+    This amount is calculated from potential soil evaporation, which was
+    calculated from potential evapotranspiration prior to allocation of water
+    to soil layers. It is restricted to be less than or equal to water
+    available in this soil layer.
+
+    Parameters:
+        rwcf_1 (numpy.ndarray): derived, relative water content of soil layer 1
+        pevp (numpy.ndarray): derived, potential evaporation from soil layer 1
+        absevap (numpy.ndarray): derived, bare soil evaporation
+        asmos_1 (numpy.ndarray): derived, current moisture in soil layer 1
+        awilt_1 (numpy.ndarray): derived, wilting point of soil layer 1
+        adep_1 (numpy.ndarray): parameter, depth of soil layer 1 in cm
+
+    Returns:
+        evlos, moisture evaporated from soil layer 1
+    """
+    valid_mask = (
+        (rwcf_1 != _TARGET_NODATA) &
+        (pevp != _TARGET_NODATA) &
+        (absevap != _TARGET_NODATA) &
+        (asmos_1 != _TARGET_NODATA) &
+        (awilt_1 != _TARGET_NODATA) &
+        (adep_1 != _IC_NODATA))
+    evmt = numpy.empty(rwcf_1.shape, dtype=numpy.float32)
+    evmt[:] = _TARGET_NODATA
+    evmt[valid_mask] = numpy.maximum(
+        (rwcf_1[valid_mask] - 0.25) / (1 - 0.25), 0.01)
+    evlos = numpy.empty(rwcf_1.shape, dtype=numpy.float32)
+    evlos[:] = _TARGET_NODATA
+    evlos[valid_mask] = numpy.minimum(
+        evmt[valid_mask] * pevp[valid_mask] * absevap[valid_mask] * 0.1,
+        numpy.maximum(
+            asmos_1[valid_mask] - awilt_1[valid_mask] *
+            adep_1[valid_mask], 0.))
+    return evlos
+
+
 def _soil_water(
         aligned_inputs, site_param_table, veg_trait_table, current_month,
         month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
@@ -4272,7 +4320,7 @@ def _soil_water(
             'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
             'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
             'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'trap_revised',
-            'pevp', 'tot', 'tot2', 'rwcf_1']:
+            'pevp', 'tot', 'tot2', 'rwcf_1', 'evlos']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in ['asmos_interim', 'avw', 'awwt', 'avinj']:
         for lyr in xrange(1, nlaypg_max + 1):
@@ -4531,12 +4579,21 @@ def _soil_water(
             remove_transpiration('asmos'), sv_reg['asmos_{}_path'.format(lyr)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
-    # relative water content
+    # relative water content of soil layer 1
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             sv_reg['asmos_1_path'], param_val_dict['adep_1'],
             pp_reg['awilt_1_path'], pp_reg['afiel_1_path']]],
         calc_relative_water_content_lyr_1, temp_val_dict['rwcf_1'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # evaporation from soil layer 1
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['rwcf_1'], temp_val_dict['pevp'],
+            temp_val_dict['absevap'], sv_reg['asmos_1_path'],
+            pp_reg['awilt_1_path'], param_val_dict['adep_1']]],
+        calc_evaporation_loss, temp_val_dict['evlos'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files

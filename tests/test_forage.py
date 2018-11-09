@@ -3403,3 +3403,84 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             rwcf_1, known_rwcf_1 - tolerance, known_rwcf_1 + tolerance,
             _TARGET_NODATA)
+
+    def test_calc_evaporation_loss(self):
+        """Test `calc_evaporation_loss.
+
+        Use the function `calc_evaporation_loss` to calculate moisture
+        that evaporates from soil layer 1.
+
+        Raises:
+            AssertionError if `calc_evaporation_loss` does not match results
+            calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_size = (10, 10)
+        tolerance = 0.00001
+
+        # limited by potential evaporation
+        rwcf_1 = 0.99
+        pevp = 3.1
+        absevap = 2.1
+        asmos_1 = 4.62
+        awilt_1 = 0.153
+        adep_1 = 14.2
+
+        known_evlos = 0.64232
+
+        rwcf_1_ar = numpy.full(array_size, rwcf_1)
+        pevp_ar = numpy.full(array_size, pevp)
+        absevap_ar = numpy.full(array_size, absevap)
+        asmos_1_ar = numpy.full(array_size, asmos_1)
+        awilt_1_ar = numpy.full(array_size, awilt_1)
+        adep_1_ar = numpy.full(array_size, adep_1)
+
+        evlos = forage.calc_evaporation_loss(
+            rwcf_1_ar, pevp_ar, absevap_ar, asmos_1_ar, awilt_1_ar, adep_1_ar)
+        self.assert_all_values_in_array_within_range(
+            evlos, known_evlos - tolerance, known_evlos + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(rwcf_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(asmos_1_ar, _TARGET_NODATA)
+
+        evlos = forage.calc_evaporation_loss(
+            rwcf_1_ar, pevp_ar, absevap_ar, asmos_1_ar, awilt_1_ar, adep_1_ar)
+        self.assert_all_values_in_array_within_range(
+            evlos, known_evlos - tolerance, known_evlos + tolerance,
+            _TARGET_NODATA)
+
+        # limited by available moisture
+        rwcf_1 = 0.99
+        pevp = 8.2
+        absevap = 2.1
+        asmos_1 = 3.6
+        awilt_1 = 0.153
+        adep_1 = 14.2
+
+        known_evlos = 1.4274
+
+        rwcf_1_ar = numpy.full(array_size, rwcf_1)
+        pevp_ar = numpy.full(array_size, pevp)
+        absevap_ar = numpy.full(array_size, absevap)
+        asmos_1_ar = numpy.full(array_size, asmos_1)
+        awilt_1_ar = numpy.full(array_size, awilt_1)
+        adep_1_ar = numpy.full(array_size, adep_1)
+
+        evlos = forage.calc_evaporation_loss(
+            rwcf_1_ar, pevp_ar, absevap_ar, asmos_1_ar, awilt_1_ar, adep_1_ar)
+        self.assert_all_values_in_array_within_range(
+            evlos, known_evlos - tolerance, known_evlos + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(pevp_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(adep_1_ar, _IC_NODATA)
+
+        evlos = forage.calc_evaporation_loss(
+            rwcf_1_ar, pevp_ar, absevap_ar, asmos_1_ar, awilt_1_ar, adep_1_ar)
+        self.assert_all_values_in_array_within_range(
+            evlos, known_evlos - tolerance, known_evlos + tolerance,
+            _TARGET_NODATA)
