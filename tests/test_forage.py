@@ -3359,3 +3359,47 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             asmos_revised, known_asmos_revised - tolerance,
             known_asmos_revised + tolerance, _TARGET_NODATA)
+
+    def test_calc_relative_water_content_lyr_1(self):
+        """Test `calc_relative_water_content_lyr_1`.
+
+        Use the function `calc_relative_water_content_lyr_1` to calculate the
+        relative water content of soil layer 1 prior to evaporative losses.
+
+        Raises:
+            AssertionError if `calc_relative_water_content_lyr_1` does not
+                match values calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_size = (10, 10)
+        tolerance = 0.00001
+
+        asmos_1 = 2.52
+        adep_1 = 16.42
+        awilt_1 = 0.145
+        afiel_1 = 0.774
+
+        known_rwcf_1 = 0.013468
+
+        asmos_1_ar = numpy.full(array_size, asmos_1)
+        adep_1_ar = numpy.full(array_size, adep_1)
+        awilt_1_ar = numpy.full(array_size, awilt_1)
+        afiel_1_ar = numpy.full(array_size, afiel_1)
+
+        rwcf_1 = forage.calc_relative_water_content_lyr_1(
+            asmos_1_ar, adep_1_ar, awilt_1_ar, afiel_1_ar)
+        self.assert_all_values_in_array_within_range(
+            rwcf_1, known_rwcf_1 - tolerance, known_rwcf_1 + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(asmos_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(afiel_1_ar, _TARGET_NODATA)
+
+        rwcf_1 = forage.calc_relative_water_content_lyr_1(
+            asmos_1_ar, adep_1_ar, awilt_1_ar, afiel_1_ar)
+        self.assert_all_values_in_array_within_range(
+            rwcf_1, known_rwcf_1 - tolerance, known_rwcf_1 + tolerance,
+            _TARGET_NODATA)

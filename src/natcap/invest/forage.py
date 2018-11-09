@@ -4153,6 +4153,35 @@ def remove_transpiration(return_type):
     return _remove_transpiration
 
 
+def calc_relative_water_content_lyr_1(asmos_1, adep_1, awilt_1, afiel_1):
+    """Calculate the relative water content of soil layer 1.
+
+    The relative water content of soil layer 1, prior to any evaporation losses
+    from soil layer 1, is used to estimate water available for evaporation
+    from soil layer 1. Line 280, H2olos.f
+
+    Parameters:
+        asmos_1 (numpy.ndarray): derived, moisture in soil layer 1 after losses
+            to transpiration
+        adep_1 (numpy.ndarray): parameter, depth of soil layer 1 in cm
+        awilt_1 (numpy.ndarray): derived, wilting point of soil layer 1
+        afiel_1 (numpy.ndarray): derived, field capacity of soil layer 1
+
+    Returns:
+        rwcf_1, relative water content of soil layer 1
+    """
+    valid_mask = (
+        (asmos_1 != _TARGET_NODATA) &
+        (adep_1 != _IC_NODATA) &
+        (awilt_1 != _TARGET_NODATA) &
+        (afiel_1 != _TARGET_NODATA))
+    rwcf_1 = numpy.empty(asmos_1.shape, dtype=numpy.float32)
+    rwcf_1[valid_mask] = (
+        (asmos_1[valid_mask] / adep_1[valid_mask] - awilt_1[valid_mask]) /
+        (afiel_1[valid_mask] - awilt_1[valid_mask]))
+    return rwcf_1
+
+
 def _soil_water(
         aligned_inputs, site_param_table, veg_trait_table, current_month,
         month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
@@ -4243,7 +4272,7 @@ def _soil_water(
             'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
             'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
             'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'trap_revised',
-            'pevp', 'tot', 'tot2']:
+            'pevp', 'tot', 'tot2', 'rwcf_1']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in ['asmos_interim', 'avw', 'awwt', 'avinj']:
         for lyr in xrange(1, nlaypg_max + 1):
@@ -4501,6 +4530,14 @@ def _soil_water(
                 temp_val_dict['awwt_{}'.format(lyr)], temp_val_dict['tot2']]],
             remove_transpiration('asmos'), sv_reg['asmos_{}_path'.format(lyr)],
             gdal.GDT_Float32, _TARGET_NODATA)
+
+    # relative water content
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            sv_reg['asmos_1_path'], param_val_dict['adep_1'],
+            pp_reg['awilt_1_path'], pp_reg['afiel_1_path']]],
+        calc_relative_water_content_lyr_1, temp_val_dict['rwcf_1'],
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
