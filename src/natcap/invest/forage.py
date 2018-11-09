@@ -71,6 +71,7 @@ _SITE_STATE_VARIABLE_FILES = {
     'asmos_7_path': 'asmos_7.tif',
     'asmos_8_path': 'asmos_8.tif',
     'asmos_9_path': 'asmos_9.tif',
+    'avh2o_3_path': 'avh2o_3.tif',
     'minerl_1_1_path': 'minerl_1_1.tif',
     'minerl_2_1_path': 'minerl_2_1.tif',
     'minerl_3_1_path': 'minerl_3_1.tif',
@@ -4384,7 +4385,7 @@ def _soil_water(
                 temp_dir, '{}.tif'.format(val_lyr))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
-        for val in ['tgprod_weighted']:
+        for val in ['tgprod_weighted', 'sum_avinj']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
 
@@ -4654,7 +4655,7 @@ def _soil_water(
     # remove evaporation from total moisture in soil layer 1
     shutil.copyfile(sv_reg['asmos_1_path'], temp_val_dict['asmos_interim_1'])
     raster_difference(
-        temp_val_dict['asmos_1_interm'], _TARGET_NODATA,
+        temp_val_dict['asmos_interim_1'], _TARGET_NODATA,
         temp_val_dict['evlos'], _TARGET_NODATA, sv_reg['asmos_1_path'],
         _TARGET_NODATA, nodata_remove=False)
 
@@ -4663,6 +4664,29 @@ def _soil_water(
     raster_difference(
         temp_val_dict['avinj_interim_1'], _TARGET_NODATA,
         temp_val_dict['evlos'], _TARGET_NODATA, temp_val_dict['avinj_1'],
+        _TARGET_NODATA, nodata_remove=False)
+
+    # calculate avh2o_1, soil water available for growth, for each PFT
+    for pft_i in pft_id_set:
+        soil_layers_accessible = [
+            temp_val_dict['avinj_{}'.format(lyr)] for lyr in
+            xrange(1, veg_trait_table[pft_i]['nlaypg'] + 1)]
+        raster_sum(
+            soil_layers_accessible, _TARGET_NODATA,
+            temp_val_dict['sum_avinj_{}'.format(pft_i)],
+            _TARGET_NODATA, nodata_remove=True)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                temp_val_dict['sum_avinj_{}'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)]],
+            multiply_positive_rasters, sv_reg['avh2o_1_{}_path'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate avh2o_3, moisture in top two soil layers
+    soil_layers_to_sum = [
+        temp_val_dict['avinj_{}'.format(lyr)] for lyr in [1, 2]]
+    raster_sum(
+        soil_layers_to_sum, _TARGET_NODATA, sv_reg['avh2o_3_path'],
         _TARGET_NODATA, nodata_remove=False)
 
     # clean up temporary files
