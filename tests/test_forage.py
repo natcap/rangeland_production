@@ -295,7 +295,6 @@ class foragetests(unittest.TestCase):
         args = foragetests.generate_base_args(self.workspace_dir)
         forage.execute(args)
 
-    @unittest.skip("soil water tests only")
     def test_shortwave_radiation(self):
         """Test `_shortwave radiation`.
 
@@ -337,7 +336,6 @@ class foragetests(unittest.TestCase):
             test_result, 990.7401, delta=0.01,
             msg="Test result does not match expected value")
 
-    @unittest.skip("soil water tests only")
     def test_calc_ompc(self):
         """Test `_calc_ompc`.
 
@@ -387,7 +385,6 @@ class foragetests(unittest.TestCase):
             test_result, 0.913304, delta=0.0001,
             msg="Test result does not match expected value")
 
-    @unittest.skip("soil water tests only")
     def test_calc_afiel(self):
         """Test `_calc_afiel`.
 
@@ -436,7 +433,6 @@ class foragetests(unittest.TestCase):
             test_result, 0.30895, delta=0.0001,
             msg="Test result does not match expected value")
 
-    @unittest.skip("soil water tests only")
     def test_calc_awilt(self):
         """Test `_calc_awilt`.
 
@@ -485,7 +481,6 @@ class foragetests(unittest.TestCase):
             test_result, 0.201988, delta=0.0001,
             msg="Test result does not match expected value")
 
-    @unittest.skip("soil water tests only")
     def test_afiel_awilt(self):
         """Test `_afiel_awilt`.
 
@@ -608,7 +603,6 @@ class foragetests(unittest.TestCase):
             pp_reg['awilt_6_path'], known_awilt_6 - tolerance,
             known_awilt_6 + tolerance, nodata_value)
 
-    @unittest.skip("soil water tests only")
     def test_persistent_params(self):
         """Test `persistent_params`.
 
@@ -774,7 +768,6 @@ class foragetests(unittest.TestCase):
                 pp_reg[path], values['value'] - tolerance,
                 values['value'] + tolerance, values['nodata_value'])
 
-    @unittest.skip("soil water tests only")
     def test_aboveground_ratio(self):
         """Test `_aboveground_ratio`.
 
@@ -851,7 +844,6 @@ class foragetests(unittest.TestCase):
             agdrat, known_agdrat - tolerance, known_agdrat + tolerance,
             agdrat_nodata)
 
-    @unittest.skip("soil water tests only")
     def test_structural_ratios(self):
         """Test `_structural_ratios`.
 
@@ -961,7 +953,6 @@ class foragetests(unittest.TestCase):
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
 
-    @unittest.skip("soil water tests only")
     def test_yearly_tasks(self):
         """Test `_yearly_tasks`.
 
@@ -1065,7 +1056,6 @@ class foragetests(unittest.TestCase):
                 year_reg['baseNdep_path'], minimum_acceptable_Ndep,
                 maximum_acceptable_Ndep, Ndep_nodata)
 
-    @unittest.skip("soil water tests only")
     def test_reference_evapotranspiration(self):
         """Test `_reference_evapotranspiration`.
 
@@ -1140,7 +1130,6 @@ class foragetests(unittest.TestCase):
             pevap_path, known_ET - tolerance, known_ET + tolerance,
             ET_nodata)
 
-    @unittest.skip("soil water tests only")
     def test_potential_production(self):
         """Test `_potential_production`.
 
@@ -1293,7 +1282,6 @@ class foragetests(unittest.TestCase):
                 minimum_acceptable_potential_production,
                 maximum_acceptable_potential_production, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_favail_P(self):
         """Test `_calc_favail_P`.
 
@@ -1365,7 +1353,6 @@ class foragetests(unittest.TestCase):
             known_favail_2 - tolerance, known_favail_2 + tolerance,
             _IC_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_raster_sum(self):
         """Test `raster_sum`.
 
@@ -1454,7 +1441,6 @@ class foragetests(unittest.TestCase):
                 min_val, (num_rasters - 1),
                 msg="Raster appears to contain nodata values")
 
-    @unittest.skip("soil water tests only")
     def test_weighted_state_variable_sum(self):
         """Test `weighted_state_variable_sum`.
 
@@ -1534,7 +1520,6 @@ class foragetests(unittest.TestCase):
             weighted_sum_path, known_weighted_sum - tolerance,
             known_weighted_sum + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_available_nutrient(self):
         """Test `_calc_available_nutrient`.
 
@@ -1667,7 +1652,6 @@ class foragetests(unittest.TestCase):
             eavail_path, known_P_avail - tolerance,
             known_P_avail + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_nutrient_demand(self):
         """Test `_calc_nutrient_demand`.
 
@@ -1749,7 +1733,6 @@ class foragetests(unittest.TestCase):
             demand_path, known_demand - tolerance, known_demand + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_provisional_fracrc(self):
         """Test `calc_provisional_fracrc`.
 
@@ -1835,7 +1818,6 @@ class foragetests(unittest.TestCase):
             fracrc_p, known_fracrc_p_frtcindx_1 - tolerance,
             known_fracrc_p_frtcindx_1 + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_ce_ratios(self):
         """Test `calc_ce_ratios`.
 
@@ -1974,7 +1956,6 @@ class foragetests(unittest.TestCase):
                 month_reg[path], value - tolerance,
                 value + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_revised_fracrc(self):
         """Test `calc_revised_fracrc`.
 
@@ -2099,7 +2080,6 @@ class foragetests(unittest.TestCase):
             fracrc_r_path, known_fracrc_r_frtcindx_1 - tolerance,
             known_fracrc_r_frtcindx_1 + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_grazing_effect(self):
         """Test `grazing_effect_on_aboveground_production`.
 
@@ -2246,7 +2226,6 @@ class foragetests(unittest.TestCase):
             rtsh, rtsh_grzeff_2 - tolerance, rtsh_grzeff_2 + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_tgprod_final(self):
         """Test `calc_tgprod_final`.
 
@@ -2275,7 +2254,6 @@ class foragetests(unittest.TestCase):
             tgprod, known_tgprod - tolerance, known_tgprod + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_snow(self):
         """Test `_snow`.
 
@@ -2634,7 +2612,6 @@ class foragetests(unittest.TestCase):
             pet_rem_path, result_dict['pet'] - tolerance,
             result_dict['pet'] + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_aboveground_live_biomass(self):
         """Test `_calc_aboveground_live_biomass`.
 
@@ -2663,7 +2640,6 @@ class foragetests(unittest.TestCase):
             aliv, known_aliv - tolerance, known_aliv + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_standing_biomass(self):
         """Test `_calc_standing_biomass`.
 
@@ -2701,7 +2677,6 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             sd, known_sd - tolerance, known_sd + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_subtract_surface_losses(self):
         """Test `subtract_surface_losses`.
 
@@ -3018,7 +2993,6 @@ class foragetests(unittest.TestCase):
             evap_losses, result_dict['evap_losses'] - tolerance,
             result_dict['evap_losses'] + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_potential_transpiration(self):
         """Test `calc_potential_transpiration`.
 
@@ -3213,7 +3187,6 @@ class foragetests(unittest.TestCase):
             result_dict['modified_moisture_inputs'] + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_get_nlaypg_max(self):
         """Test `_get_nlaypg_max`.
 
@@ -3239,7 +3212,6 @@ class foragetests(unittest.TestCase):
         nlaypg_max = forage.get_nlaypg_max(veg_trait_table)
         self.assertEqual(nlaypg_max, known_nlaypg_max)
 
-    @unittest.skip("soil water tests only")
     def test_distribute_water_to_soil_layer(self):
         """Test `distribute_water_to_soil_layer`.
 
@@ -3321,7 +3293,6 @@ class foragetests(unittest.TestCase):
             amov, known_modified_moisture_inputs - tolerance,
             known_modified_moisture_inputs + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_available_water_for_transpiration(self):
         """Test `calc_available_water_for_transpiration`.
 
@@ -3367,7 +3338,6 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             avw, known_avw - tolerance, known_avw + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_remove_transpiration(self):
         """ Test `remove_transpiration`.
 
@@ -3473,7 +3443,6 @@ class foragetests(unittest.TestCase):
             asmos_revised, known_asmos_revised - tolerance,
             known_asmos_revised + tolerance, _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_relative_water_content_lyr_1(self):
         """Test `calc_relative_water_content_lyr_1`.
 
@@ -3518,7 +3487,6 @@ class foragetests(unittest.TestCase):
             rwcf_1, known_rwcf_1 - tolerance, known_rwcf_1 + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_calc_evaporation_loss(self):
         """Test `calc_evaporation_loss.
 
@@ -3600,7 +3568,6 @@ class foragetests(unittest.TestCase):
             evlos, known_evlos - tolerance, known_evlos + tolerance,
             _TARGET_NODATA)
 
-    @unittest.skip("soil water tests only")
     def test_raster_difference(self):
         """Test `raster_difference`.
 
@@ -3852,9 +3819,161 @@ class foragetests(unittest.TestCase):
                 'avh2o_1': avh2o_1_dict,
             }
             return results_dict
+
+        def generate_model_inputs_from_point_inputs(
+                precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
+                shwave, strucc_1, metabc_1, fracro, precro, fwloss_1, fwloss_2,
+                pft_dict, adep, afiel, awilt, awtl):
+            """Generate model inputs for `soil_water` from point inputs."""
+            nrows = 1
+            ncols = 1
+            # aligned inputs
+            aligned_inputs = {
+                'max_temp_{}'.format(current_month): os.path.join(
+                    self.workspace_dir,
+                    'max_temp_{}.tif'.format(current_month)),
+                'min_temp_{}'.format(current_month): os.path.join(
+                    self.workspace_dir,
+                    'min_temp_{}.tif'.format(current_month)),
+                'precip_{}'.format(month_index): os.path.join(
+                    self.workspace_dir, 'precip.tif'),
+                'site_index': os.path.join(
+                    self.workspace_dir, 'site_index.tif'),
+            }
+            create_random_raster(
+                aligned_inputs['max_temp_{}'.format(current_month)], max_temp,
+                max_temp, nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['min_temp_{}'.format(current_month)], min_temp,
+                min_temp, nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['precip_{}'.format(month_index)], precip,
+                precip, nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['site_index'], 1, 1, nrows=nrows, ncols=ncols)
+            for pft_i in pft_dict.iterkeys():
+                cover = pft_dict[pft_i]['cover']
+                aligned_inputs['pft_{}'.format(pft_i)] = os.path.join(
+                    self.workspace_dir, 'pft_{}.tif'.format(pft_i))
+                create_random_raster(
+                    aligned_inputs['pft_{}'.format(pft_i)], cover, cover,
+                    nrows=nrows, ncols=ncols)
+
+            # site param table
+            site_param_table = {
+                1: {
+                    'tmelt_1': tmelt_1,
+                    'tmelt_2': tmelt_2,
+                    'fwloss_4': fwloss_4,
+                    'fracro': fracro,
+                    'precro': precro,
+                    'fwloss_1': fwloss_1,
+                    'fwloss_2': fwloss_2,
+                }
+            }
+            for lyr in xrange(1, nlaypg_max + 1):
+                site_param_table[1]['adep_{}'.format(lyr)] = adep
+                site_param_table[1]['awtl_{}'.format(lyr)] = awtl
+            # veg trait table
+            pft_id_set = set([i for i in pft_dict.iterkeys()])
+            veg_trait_table = {}
+            for pft_i in pft_dict.iterkeys():
+                veg_trait_table[pft_i] = {
+                    'nlaypg': pft_dict[pft_i]['nlaypg'],
+                }
+            # previous state variables
+            prev_sv_reg = {
+                'strucc_1_path': os.path.join(
+                    self.workspace_dir, 'strucc_1_prev.tif'),
+                'metabc_1_path': os.path.join(
+                    self.workspace_dir, 'metabc_1_prev.tif'),
+                'snow_path': os.path.join(self.workspace_dir, 'snow_prev.tif'),
+                'snlq_path': os.path.join(self.workspace_dir, 'snlq_prev.tif'),
+            }
+            create_random_raster(
+                prev_sv_reg['strucc_1_path'], strucc_1, strucc_1, nrows=nrows,
+                ncols=ncols)
+            create_random_raster(
+                prev_sv_reg['metabc_1_path'], metabc_1, metabc_1, nrows=nrows,
+                ncols=ncols)
+            create_random_raster(
+                prev_sv_reg['snow_path'], snow, snow, nrows=nrows,
+                ncols=ncols)
+            create_random_raster(
+                prev_sv_reg['snlq_path'], snlq, snlq, nrows=nrows,
+                ncols=ncols)
+            for lyr in xrange(1, nlaypg_max + 1):
+                prev_sv_reg['asmos_{}_path'.format(lyr)] = os.path.join(
+                    self.workspace_dir, 'asmos_{}_prev.tif'.format(lyr))
+                create_random_raster(
+                    prev_sv_reg['asmos_{}_path'.format(lyr)], asmos, asmos,
+                    nrows=nrows, ncols=ncols)
+            for pft_i in pft_dict.iterkeys():
+                prev_sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
+                    self.workspace_dir, 'aglivc_{}_prev.tif'.format(pft_i))
+                prev_sv_reg['stdedc_{}_path'.format(pft_i)] = os.path.join(
+                    self.workspace_dir, 'stdedc_{}_prev.tif'.format(pft_i))
+                create_random_raster(
+                    prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+                    pft_dict[pft_i]['aglivc'], pft_dict[pft_i]['aglivc'],
+                    nrows=nrows, ncols=ncols)
+                create_random_raster(
+                    prev_sv_reg['stdedc_{}_path'.format(pft_i)],
+                    pft_dict[pft_i]['stdedc'], pft_dict[pft_i]['stdedc'],
+                    nrows=nrows, ncols=ncols)
+            # current state variables
+            sv_reg = {
+                'snow_path': os.path.join(self.workspace_dir, 'snow.tif'),
+                'snlq_path': os.path.join(self.workspace_dir, 'snlq.tif'),
+                'avh2o_3_path': os.path.join(
+                    self.workspace_dir, 'avh2o_3.tif'),
+            }
+            for lyr in xrange(1, nlaypg_max + 1):
+                sv_reg['asmos_{}_path'.format(lyr)] = os.path.join(
+                    self.workspace_dir, 'asmos_{}_path'.format(lyr))
+            for pft_i in pft_dict.iterkeys():
+                sv_reg['avh2o_1_{}_path'.format(pft_i)] = os.path.join(
+                    self.workspace_dir, 'avh2o_1_{}.tif'.format(pft_i))
+            # persistent parameters
+            pp_reg = {}
+            for lyr in xrange(1, nlaypg_max + 1):
+                pp_reg['afiel_{}_path'.format(lyr)] = os.path.join(
+                    self.workspace_dir, 'afiel_{}.tif'.format(lyr))
+                pp_reg['awilt_{}_path'.format(lyr)] = os.path.join(
+                    self.workspace_dir, 'awilt_{}.tif'.format(lyr))
+                create_random_raster(
+                    pp_reg['afiel_{}_path'.format(lyr)], afiel, afiel,
+                    nrows=nrows, ncols=ncols)
+                create_random_raster(
+                    pp_reg['awilt_{}_path'.format(lyr)], awilt, awilt,
+                    nrows=nrows, ncols=ncols)
+            # monthly shared quantities
+            month_reg = {
+                'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+            }
+            for pft_i in pft_dict.iterkeys():
+                month_reg['tgprod_{}'.format(pft_i)] = os.path.join(
+                    self.workspace_dir, 'tgprod_{}.tif'.format(pft_i))
+                create_random_raster(
+                    month_reg['tgprod_{}'.format(pft_i)],
+                    pft_dict[pft_i]['tgprod'], pft_dict[pft_i]['tgprod'],
+                    nrows=nrows, ncols=ncols)
+            input_dict = {
+                'aligned_inputs': aligned_inputs,
+                'site_param_table': site_param_table,
+                'veg_trait_table': veg_trait_table,
+                'current_month': current_month,
+                'month_index': month_index,
+                'prev_sv_reg': prev_sv_reg,
+                'sv_reg': sv_reg,
+                'pp_reg': pp_reg,
+                'month_reg': month_reg,
+                'pft_id_set': pft_id_set,
+            }
+            return input_dict
         from natcap.invest import forage
 
-        # inputs needed for point-based function only
+        # no snow, no snowfall
         pet = 4.9680004
         shwave = 457.95056
 
@@ -3913,165 +4032,150 @@ class foragetests(unittest.TestCase):
         afiel = 0.67
         awilt = 0.168
 
-        # raster inputs
-        nrows = 1
-        ncols = 1
-        # aligned inputs
-        aligned_inputs = {
-            'max_temp_{}'.format(current_month): os.path.join(
-                self.workspace_dir, 'max_temp_{}.tif'.format(current_month)),
-            'min_temp_{}'.format(current_month): os.path.join(
-                self.workspace_dir, 'min_temp_{}.tif'.format(current_month)),
-            'precip_{}'.format(month_index): os.path.join(
-                self.workspace_dir, 'precip.tif'),
-            'site_index': os.path.join(self.workspace_dir, 'site_index.tif'),
-        }
-        create_random_raster(
-            aligned_inputs['max_temp_{}'.format(current_month)], max_temp,
-            max_temp, nrows=nrows, ncols=ncols)
-        create_random_raster(
-            aligned_inputs['min_temp_{}'.format(current_month)], min_temp,
-            min_temp, nrows=nrows, ncols=ncols)
-        create_random_raster(
-            aligned_inputs['precip_{}'.format(month_index)], precip, precip,
-            nrows=nrows, ncols=ncols)
-        create_random_raster(
-            aligned_inputs['site_index'], 1, 1, nrows=nrows, ncols=ncols)
-        for pft_i in pft_dict.iterkeys():
-            cover = pft_dict[pft_i]['cover']
-            aligned_inputs['pft_{}'.format(pft_i)] = os.path.join(
-                self.workspace_dir, 'pft_{}.tif'.format(pft_i))
-            create_random_raster(
-                aligned_inputs['pft_{}'.format(pft_i)], cover, cover,
-                nrows=nrows, ncols=ncols)
-
-        # site param table
-        site_param_table = {
-            1: {
-                'tmelt_1': tmelt_1,
-                'tmelt_2': tmelt_2,
-                'fwloss_4': fwloss_4,
-                'fracro': fracro,
-                'precro': precro,
-                'fwloss_1': fwloss_1,
-                'fwloss_2': fwloss_2,
-            }
-        }
-        for lyr in xrange(1, nlaypg_max + 1):
-            site_param_table[1]['adep_{}'.format(lyr)] = adep
-            site_param_table[1]['awtl_{}'.format(lyr)] = awtl
-        # veg trait table
-        pft_id_set = set([i for i in pft_dict.iterkeys()])
-        veg_trait_table = {}
-        for pft_i in pft_dict.iterkeys():
-            veg_trait_table[pft_i] = {
-                'nlaypg': pft_dict[pft_i]['nlaypg'],
-            }
-        # previous state variables
-        prev_sv_reg = {
-            'strucc_1_path': os.path.join(
-                self.workspace_dir, 'strucc_1_prev.tif'),
-            'metabc_1_path': os.path.join(
-                self.workspace_dir, 'metabc_1_prev.tif'),
-            'snow_path': os.path.join(self.workspace_dir, 'snow_prev.tif'),
-            'snlq_path': os.path.join(self.workspace_dir, 'snlq_prev.tif'),
-        }
-        create_random_raster(
-            prev_sv_reg['strucc_1_path'], strucc_1, strucc_1, nrows=nrows,
-            ncols=ncols)
-        create_random_raster(
-            prev_sv_reg['metabc_1_path'], metabc_1, metabc_1, nrows=nrows,
-            ncols=ncols)
-        create_random_raster(
-            prev_sv_reg['snow_path'], snow, snow, nrows=nrows,
-            ncols=ncols)
-        create_random_raster(
-            prev_sv_reg['snlq_path'], snlq, snlq, nrows=nrows,
-            ncols=ncols)
-        for lyr in xrange(1, nlaypg_max + 1):
-            prev_sv_reg['asmos_{}_path'.format(lyr)] = os.path.join(
-                self.workspace_dir, 'asmos_{}_prev.tif'.format(lyr))
-            create_random_raster(
-                prev_sv_reg['asmos_{}_path'.format(lyr)], asmos, asmos,
-                nrows=nrows, ncols=ncols)
-        for pft_i in pft_dict.iterkeys():
-            prev_sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
-                self.workspace_dir, 'aglivc_{}_prev.tif'.format(pft_i))
-            prev_sv_reg['stdedc_{}_path'.format(pft_i)] = os.path.join(
-                self.workspace_dir, 'stdedc_{}_prev.tif'.format(pft_i))
-            create_random_raster(
-                prev_sv_reg['aglivc_{}_path'.format(pft_i)],
-                pft_dict[pft_i]['aglivc'], pft_dict[pft_i]['aglivc'],
-                nrows=nrows, ncols=ncols)
-            create_random_raster(
-                prev_sv_reg['stdedc_{}_path'.format(pft_i)],
-                pft_dict[pft_i]['stdedc'], pft_dict[pft_i]['stdedc'],
-                nrows=nrows, ncols=ncols)
-        # current state variables
-        sv_reg = {
-            'snow_path': os.path.join(self.workspace_dir, 'snow.tif'),
-            'snlq_path': os.path.join(self.workspace_dir, 'snlq.tif'),
-            'avh2o_3_path': os.path.join(self.workspace_dir, 'avh2o_3.tif'),
-        }
-        for lyr in xrange(1, nlaypg_max + 1):
-            sv_reg['asmos_{}_path'.format(lyr)] = os.path.join(
-                self.workspace_dir, 'asmos_{}_path'.format(lyr))
-        for pft_i in pft_dict.iterkeys():
-            sv_reg['avh2o_1_{}_path'.format(pft_i)] = os.path.join(
-                self.workspace_dir, 'avh2o_1_{}.tif'.format(pft_i))
-        # persistent parameters
-        pp_reg = {}
-        for lyr in xrange(1, nlaypg_max + 1):
-            pp_reg['afiel_{}_path'.format(lyr)] = os.path.join(
-                self.workspace_dir, 'afiel_{}.tif'.format(lyr))
-            pp_reg['awilt_{}_path'.format(lyr)] = os.path.join(
-                self.workspace_dir, 'awilt_{}.tif'.format(lyr))
-            create_random_raster(
-                pp_reg['afiel_{}_path'.format(lyr)], afiel, afiel,
-                nrows=nrows, ncols=ncols)
-            create_random_raster(
-                pp_reg['awilt_{}_path'.format(lyr)], awilt, awilt,
-                nrows=nrows, ncols=ncols)
-        # monthly shared quantities
-        month_reg = {
-            'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
-        }
-        for pft_i in pft_dict.iterkeys():
-            month_reg['tgprod_{}'.format(pft_i)] = os.path.join(
-                self.workspace_dir, 'tgprod_{}.tif'.format(pft_i))
-            create_random_raster(
-                month_reg['tgprod_{}'.format(pft_i)],
-                pft_dict[pft_i]['tgprod'], pft_dict[pft_i]['tgprod'],
-                nrows=nrows, ncols=ncols)
         tolerance = 0.000001
         results_dict = soil_water_point(
             precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
             shwave, strucc_1, metabc_1, fracro, precro, fwloss_1, fwloss_2,
             pft_dict, adep, afiel, awilt, awtl)
 
+        input_dict = generate_model_inputs_from_point_inputs(
+            precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
+            shwave, strucc_1, metabc_1, fracro, precro, fwloss_1, fwloss_2,
+            pft_dict, adep, afiel, awilt, awtl)
         forage._soil_water(
-            aligned_inputs, site_param_table, veg_trait_table, current_month,
-            month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
+            input_dict['aligned_inputs'], input_dict['site_param_table'],
+            input_dict['veg_trait_table'], input_dict['current_month'],
+            input_dict['month_index'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'],
+            input_dict['month_reg'], input_dict['pft_id_set'])
 
         self.assert_all_values_in_raster_within_range(
-            sv_reg['snow_path'], results_dict['snow'] - tolerance,
+            input_dict['sv_reg']['snow_path'],
+            results_dict['snow'] - tolerance,
             results_dict['snow'] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            sv_reg['snlq_path'], results_dict['snlq'] - tolerance,
+            input_dict['sv_reg']['snlq_path'],
+            results_dict['snlq'] - tolerance,
             results_dict['snlq'] + tolerance, _TARGET_NODATA)
         for lyr in xrange(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
-                sv_reg['asmos_{}_path'.format(lyr)],
+                input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
                 results_dict['asmos'][lyr] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            month_reg['amov_2'], results_dict['amov_2'] - tolerance,
+            input_dict['month_reg']['amov_2'],
+            results_dict['amov_2'] - tolerance,
             results_dict['amov_2'] + tolerance, _TARGET_NODATA)
-        for pft_i in pft_id_set:
+        for pft_i in input_dict['pft_id_set']:
             self.assert_all_values_in_raster_within_range(
-                sv_reg['avh2o_1_{}_path'.format(pft_i)],
+                input_dict['sv_reg']['avh2o_1_{}_path'.format(pft_i)],
                 results_dict['avh2o_1'][pft_i] - tolerance,
                 results_dict['avh2o_1'][pft_i] + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            sv_reg['avh2o_3_path'], results_dict['avh2o_3'] - tolerance,
+            input_dict['sv_reg']['avh2o_3_path'],
+            results_dict['avh2o_3'] - tolerance,
+            results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
+
+        # large snowmelt, large precip
+        pet = 4.9680004
+        shwave = 457.95056
+
+        # point inputs
+        current_month = 10
+        month_index = 9
+        max_temp = 23.
+        min_temp = -2.
+        precip = 30.117
+
+        # site parameters
+        tmelt_1 = 0.
+        tmelt_2 = 0.002
+        fwloss_4 = 0.6
+        fracro = 0.15
+        precro = 8
+        fwloss_1 = 0.8
+        fwloss_2 = 0.779
+        adep = 15
+        awtl = 0.5
+
+        # previous state variables
+        strucc_1 = 46.1
+        metabc_1 = 33.1
+        snow = 7.2
+        snlq = snow / 2.
+        asmos = 0.882
+
+        pft_dict = {
+            1: {
+                'cover': 0.4,
+                'aglivc': 85.9,
+                'stdedc': 49.874,
+                'nlaypg': 5,
+                'tgprod': 371.,
+            },
+            2: {
+                'cover': 0.2,
+                'aglivc': 12.1,
+                'stdedc': 31.4,
+                'nlaypg': 3,
+                'tgprod': 300.2,
+            },
+            3: {
+                'cover': 0.3,
+                'aglivc': 27.77,
+                'stdedc': 17.03,
+                'nlaypg': 6,
+                'tgprod': 200.8,
+            },
+        }
+        nlaypg_max = max(
+            pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict.iterkeys())
+
+        # persistent parameters
+        afiel = 0.67
+        awilt = 0.168
+
+        tolerance = 0.00001
+        amov_tolerance = 0.011
+        results_dict = soil_water_point(
+            precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
+            shwave, strucc_1, metabc_1, fracro, precro, fwloss_1, fwloss_2,
+            pft_dict, adep, afiel, awilt, awtl)
+
+        input_dict = generate_model_inputs_from_point_inputs(
+            precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
+            shwave, strucc_1, metabc_1, fracro, precro, fwloss_1, fwloss_2,
+            pft_dict, adep, afiel, awilt, awtl)
+        forage._soil_water(
+            input_dict['aligned_inputs'], input_dict['site_param_table'],
+            input_dict['veg_trait_table'], input_dict['current_month'],
+            input_dict['month_index'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'],
+            input_dict['month_reg'], input_dict['pft_id_set'])
+
+        self.assert_all_values_in_raster_within_range(
+            input_dict['sv_reg']['snow_path'],
+            results_dict['snow'] - tolerance,
+            results_dict['snow'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            input_dict['sv_reg']['snlq_path'],
+            results_dict['snlq'] - tolerance,
+            results_dict['snlq'] + tolerance, _TARGET_NODATA)
+        for lyr in xrange(1, nlaypg_max + 1):
+            self.assert_all_values_in_raster_within_range(
+                input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
+                results_dict['asmos'][lyr] - tolerance,
+                results_dict['asmos'][lyr] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            input_dict['month_reg']['amov_2'],
+            results_dict['amov_2'] - amov_tolerance,
+            results_dict['amov_2'] + amov_tolerance, _TARGET_NODATA)
+        for pft_i in input_dict['pft_id_set']:
+            self.assert_all_values_in_raster_within_range(
+                input_dict['sv_reg']['avh2o_1_{}_path'.format(pft_i)],
+                results_dict['avh2o_1'][pft_i] - tolerance,
+                results_dict['avh2o_1'][pft_i] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            input_dict['sv_reg']['avh2o_3_path'],
+            results_dict['avh2o_3'] - tolerance,
             results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
