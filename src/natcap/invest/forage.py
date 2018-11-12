@@ -459,10 +459,10 @@ def execute(args):
 
     # track separate state variable files for each PFT
     pft_sv_dict = {}
-    for pft_index in pft_id_set:
+    for pft_i in pft_id_set:
         for sv in _PFT_STATE_VARIABLES:
             pft_sv_dict['{}_{}_path'.format(
-                sv, pft_index)] = '{}_{}.tif'.format(sv, pft_index)
+                sv, pft_i)] = '{}_{}.tif'.format(sv, pft_i)
 
     # make sure animal traits exist for each feature in animal management
     # layer
@@ -527,12 +527,12 @@ def execute(args):
             resample_initial_path_map[sv] = sv_path
             if not os.path.exists(sv_path):
                 missing_initial_values.append(sv_path)
-        for pft_index in pft_id_set:
+        for pft_i in pft_id_set:
             for sv in _PFT_STATE_VARIABLES:
-                sv_key = '{}_{}_path'.format(sv, pft_index)
+                sv_key = '{}_{}_path'.format(sv, pft_i)
                 sv_path = os.path.join(
                     args['initial_conditions_dir'],
-                    '{}_{}.tif'.format(sv, pft_index))
+                    '{}_{}.tif'.format(sv, pft_i))
                 resample_initial_path_map[sv_key] = sv_path
                 if not os.path.exists(sv_path):
                     missing_initial_values.append(sv_path)
@@ -608,11 +608,11 @@ def execute(args):
     # shared between submodels, but do not need to be saved as output
     month_temp_dir = tempfile.mkdtemp()
     month_reg = {}
-    for pft_index in pft_id_set:
+    for pft_i in pft_id_set:
         for val in _PFT_INTERMEDIATE_VALUES:
             month_reg['{}_{}'.format(
-                val, pft_index)] = os.path.join(
-                month_temp_dir, '{}_{}.tif'.format(val, pft_index))
+                val, pft_i)] = os.path.join(
+                month_temp_dir, '{}_{}.tif'.format(val, pft_i))
     for val in _SITE_INTERMEDIATE_VALUES:
         month_reg[val] = os.path.join(month_temp_dir, '{}.tif'.format(val))
 
@@ -652,7 +652,9 @@ def execute(args):
             aligned_inputs, site_param_table, current_month, pft_id_set,
             veg_trait_table, prev_sv_reg, year_reg, month_reg)
 
-        _soil_water()  # TODO complete call
+        _soil_water(
+            aligned_inputs, site_param_table, veg_trait_table, current_month,
+            month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
 
 
 def multiply_positive_rasters(raster1, raster2):
@@ -801,12 +803,12 @@ def weighted_state_variable_sum(
             temp_dir, '{}_{}.tif'.format(val, pft_i))
 
     weighted_path_list = []
-    for pft_index in pft_id_set:
-        target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
+    for pft_i in pft_id_set:
+        target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_i)]
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in
-                sv_reg['{}_{}_path'.format(sv, pft_index)],
-                aligned_inputs['pft_{}'.format(pft_index)]],
+                sv_reg['{}_{}_path'.format(sv, pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)]],
             multiply_positive_rasters, target_path,
             gdal.GDT_Float32, _TARGET_NODATA)
         weighted_path_list.append(target_path)
@@ -1974,9 +1976,9 @@ def _potential_production(
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
     do_PFT = []
-    for pft_index in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
-            do_PFT.append(pft_index)
+    for pft_i in pft_id_set:
+        if str(current_month) in veg_trait_table[pft_i]['growth_months']:
+            do_PFT.append(pft_i)
     if not do_PFT:
         return
 
@@ -3387,12 +3389,12 @@ def _root_shoot_ratio(
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
     do_PFT = []
-    for pft_index in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
-            do_PFT.append(pft_index)
+    for pft_i in pft_id_set:
+        if str(current_month) in veg_trait_table[pft_i]['growth_months']:
+            do_PFT.append(pft_i)
         else:
-            month_reg['tgprod_{}'.format(pft_index)] = None
-            month_reg['rtsh_{}'.format(pft_index)] = None
+            month_reg['tgprod_{}'.format(pft_i)] = None
+            month_reg['rtsh_{}'.format(pft_i)] = None
     if not do_PFT:
         return
 
@@ -3647,22 +3649,29 @@ def _snow(
             inputs_after_snow[rain_on_snow_mask] = 0.
 
             snowtot = numpy.zeros(snow.shape, dtype=numpy.float32)
-            snowtot[valid_mask] = (snow[valid_mask] + snlq[valid_mask])
+            snowtot[valid_mask] = numpy.maximum(
+                snow[valid_mask] + snlq[valid_mask], 0)
+
+            evap_mask = (valid_mask & (snowtot > 0.))
             evsnow = numpy.zeros(snow.shape, dtype=numpy.float32)
-            evsnow[valid_mask] = numpy.minimum(
-                snowtot[valid_mask], pet[valid_mask] * 0.87)
-            snow_revised = numpy.zeros(snow.shape, dtype=numpy.float32)
-            snow_revised[valid_mask] = numpy.maximum(
-                snow[valid_mask] - evsnow[valid_mask] *
-                (snow[valid_mask] / snowtot[valid_mask]), 0.)
+            evsnow[evap_mask] = numpy.minimum(
+                snowtot[evap_mask], pet[evap_mask] * 0.87)
+            snow_revised = numpy.empty(snow.shape, dtype=numpy.float32)
+            snow_revised[:] = _TARGET_NODATA
+            snow_revised[valid_mask] = snow[valid_mask]
+            snow_revised[evap_mask] = numpy.maximum(
+                snow[evap_mask] - evsnow[evap_mask] *
+                (snow[evap_mask] / snowtot[evap_mask]), 0.)
             snlq_revised = numpy.zeros(snow.shape, dtype=numpy.float32)
-            snlq_revised[valid_mask] = numpy.maximum(
-                snlq[valid_mask] - evsnow[valid_mask] *
-                (snlq[valid_mask] / snowtot[valid_mask]), 0.)
+            snlq_revised[valid_mask] = snlq[valid_mask]
+            snlq_revised[evap_mask] = numpy.maximum(
+                snlq[evap_mask] - evsnow[evap_mask] *
+                (snlq[evap_mask] / snowtot[evap_mask]), 0.)
             pet_revised = numpy.empty(snow.shape, dtype=numpy.float32)
             pet_revised[:] = _TARGET_NODATA
-            pet_revised[valid_mask] = numpy.maximum(
-                (pet[valid_mask] - evsnow[valid_mask] / 0.87), 0.)
+            pet_revised[valid_mask] = pet[valid_mask]
+            pet_revised[evap_mask] = numpy.maximum(
+                (pet[evap_mask] - evsnow[evap_mask] / 0.87), 0.)
 
             melt_mask = (valid_mask & (tave >= tmelt_1))
             snowmelt = numpy.zeros(snow.shape, dtype=numpy.float32)
@@ -3926,6 +3935,7 @@ def subtract_surface_losses(return_type):
         inputs_after_surface[valid_mask] = inputs_after_runoff[valid_mask]
         inputs_after_surface[evap_mask] = (
             inputs_after_runoff[evap_mask] - evap_losses[evap_mask])
+
         if return_type == 'inputs_after_surface':
             return inputs_after_surface
         elif return_type == 'absevap':
@@ -4327,11 +4337,14 @@ def _soil_water(
         the raster indicated by `sv_reg['snow_path']`, current snowpack
         the raster indicated by `sv_reg['snlq_path']`, current liquid in snow
         the raster indicated by `sv_reg['asmos_<lyr>_path']`, soil moisture
-            content, for each soil layer in 1:nlaypg_max
+            content, for each soil layer accessible by roots of any plant
+            functional type
         the raster indicated by `month_reg['amov_2']`, movement of soil
             moisture out of soil layer 2
-
-        TODO what else is modified
+        the raster indicated by `sv_reg['avh2o_1_<PFT>_path']`, soil moisture
+            available for growth, for each plant functional type (PFT)
+        the raster indicated by `sv_reg['avh2o_3_path']`, available water in
+            the top two soil layers
 
     Returns:
         None
@@ -4349,7 +4362,7 @@ def _soil_water(
     def calc_surface_litter_biomass(strucc_1, metabc_1):
         """Calculate biomass in surface litter."""
         valid_mask = (
-            (strucc_1 != strucc1_nodata) &
+            (strucc_1 != strucc_1_nodata) &
             (metabc_1 != metabc_1_nodata))
         alit = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         alit[:] = _TARGET_NODATA
@@ -4390,14 +4403,14 @@ def _soil_water(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
 
     param_val_dict = {}
-    for val in ['fracro', 'precro', 'fwloss_1']:
+    for val in ['fracro', 'precro', 'fwloss_1', 'fwloss_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
                 (site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
-            (site_index_path, 1), site_to_val, target_path,
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
     for val in ['adep', 'awtl']:
         for lyr in xrange(1, nlaypg_max + 1):
@@ -4408,7 +4421,7 @@ def _soil_water(
                 [(site_code, float(table[val_lyr])) for
                     (site_code, table) in site_param_table.iteritems()])
             pygeoprocessing.reclassify_raster(
-                (site_index_path, 1), site_to_val, target_path,
+                (aligned_inputs['site_index'], 1), site_to_val, target_path,
                 gdal.GDT_Float32, _IC_NODATA)
 
     # calculate canopy and litter cover that influence moisture inputs
@@ -4428,13 +4441,13 @@ def _soil_water(
 
     # calculate the weighted sum of tgprod, potential production, across PFTs
     weighted_path_list = []
-    for pft_index in pft_id_set:
-        target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_index)]
+    for pft_i in pft_id_set:
+        target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
         if month_reg['tgprod_{}'.format(pft_i)]:
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in
                     month_reg['tgprod_{}'.format(pft_i)],
-                    aligned_inputs['pft_{}'.format(pft_index)]],
+                    aligned_inputs['pft_{}'.format(pft_i)]],
                 multiply_positive_rasters, target_path,
                 gdal.GDT_Float32, _TARGET_NODATA)
             weighted_path_list.append(target_path)
@@ -4449,7 +4462,9 @@ def _soil_water(
 
     # calculate average temperature
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in max_temp_path, min_temp_path],
+        [(path, 1) for path in
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            aligned_inputs['min_temp_{}'.format(current_month)]],
         calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
 
     # calculate aboveground live biomass
@@ -4485,7 +4500,7 @@ def _soil_water(
         [(path, 1) for path in [
             temp_val_dict['current_moisture_inputs'],
             param_val_dict['fracro'], param_val_dict['precro'],
-            sv_reg['snow'], temp_val_dict['alit'],
+            sv_reg['snow_path'], temp_val_dict['alit'],
             temp_val_dict['sd'], param_val_dict['fwloss_1'],
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
         subtract_surface_losses('inputs_after_surface'),
@@ -4497,7 +4512,7 @@ def _soil_water(
         [(path, 1) for path in [
             temp_val_dict['current_moisture_inputs'],
             param_val_dict['fracro'], param_val_dict['precro'],
-            sv_reg['snow'], temp_val_dict['alit'],
+            sv_reg['snow_path'], temp_val_dict['alit'],
             temp_val_dict['sd'], param_val_dict['fwloss_1'],
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
         subtract_surface_losses('absevap'),
@@ -4509,7 +4524,7 @@ def _soil_water(
         [(path, 1) for path in [
             temp_val_dict['current_moisture_inputs'],
             param_val_dict['fracro'], param_val_dict['precro'],
-            sv_reg['snow'], temp_val_dict['alit'],
+            sv_reg['snow_path'], temp_val_dict['alit'],
             temp_val_dict['sd'], param_val_dict['fwloss_1'],
             param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
         subtract_surface_losses('evap_losses'),
@@ -4592,7 +4607,7 @@ def _soil_water(
     # total water available for transpiration
     raster_sum(avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
 
-    # calculate water available for transpiration weighted by transpiration
+    # calculate water available forn transpiration weighted by transpiration
     # depth for that soil layer
     awwt_list = []
     for lyr in xrange(1, nlaypg_max + 1):
@@ -4608,10 +4623,10 @@ def _soil_water(
         awwt_list, _TARGET_NODATA, temp_val_dict['tot2'], _TARGET_NODATA)
 
     # revise total potential transpiration
-    pygeoprocessing.raster_calculator[
+    pygeoprocessing.raster_calculator(
         [(path, 1) for path in temp_val_dict['trap'], temp_val_dict['tot']],
         revise_potential_transpiration, temp_val_dict['trap_revised'],
-        gdal.GDT_Float32, _TARGET_NODATA]
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # remove water via transpiration
     for lyr in xrange(1, nlaypg_max + 1):
