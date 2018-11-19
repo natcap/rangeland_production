@@ -15,6 +15,7 @@ import pygeoprocessing
 
 SAMPLE_DATA = "C:/Users/ginge/Documents/NatCap/sample_inputs"
 REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
+PROCESSING_DIR = None
 
 _TARGET_NODATA = -1.0
 _IC_NODATA = numpy.finfo('float32').min
@@ -167,6 +168,8 @@ class foragetests(unittest.TestCase):
     def setUp(self):
         """Create temporary workspace directory."""
         self.workspace_dir = tempfile.mkdtemp()
+        self.PROCESSING_DIR = os.path.join(
+            self.workspace_dir, "temporary_files")
 
     def tearDown(self):
         """Clean up remaining files."""

@@ -21,6 +21,9 @@ LOGGER = logging.getLogger('natcap.invest.forage')
 # we only have these types of soils
 SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
 
+# temporary directory to store intermediate files
+PROCESSING_DIR = None
+
 # state variables and parameters take their names from Century
 # _SITE_STATE_VARIABLE_FILES contains state variables that are a
 # property of the site, including:
@@ -490,6 +493,9 @@ def execute(args):
     LOGGER.info(
         "smallest pixel size of all raster inputs: %s", target_pixel_size)
 
+    # temporary directory for intermediate files
+    PROCESSING_DIR = os.path.join(args['workspace_dir'], "temporary_files")
+
     # set up a dictionary that uses the same keys as
     # 'base_align_raster_path_id_map' to point to the clipped/resampled
     # rasters to be used in raster calculations for the model.
@@ -599,14 +605,14 @@ def execute(args):
         aligned_inputs['site_index'], site_param_table, sv_reg, pp_reg)
 
     # make yearly directory for values that are updated every twelve months
-    year_dir = tempfile.mkdtemp()
+    year_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     year_reg = dict(
         [(key, os.path.join(year_dir, path)) for key, path in
             _YEARLY_FILES.iteritems()])
 
     # make monthly directory for monthly intermediate parameters that are
     # shared between submodels, but do not need to be saved as output
-    month_temp_dir = tempfile.mkdtemp()
+    month_temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     month_reg = {}
     for pft_i in pft_id_set:
         for val in _PFT_INTERMEDIATE_VALUES:
@@ -691,7 +697,7 @@ def raster_sum(
     def raster_sum_op(*raster_list):
         """Add the rasters in raster_list without removing nodata values."""
         invalid_mask = numpy.any(
-            numpy.array(raster_list) == input_nodata, axis=0)
+            numpy.isclose(numpy.array(raster_list), input_nodata), axis=0)
         sum_of_rasters = numpy.sum(raster_list, axis=0)
         sum_of_rasters[invalid_mask] = target_nodata
         return sum_of_rasters
@@ -699,7 +705,7 @@ def raster_sum(
     def raster_sum_op_nodata_remove(*raster_list):
         """Add the rasters in raster_list, treating nodata as zero."""
         for r in raster_list:
-            numpy.place(r, r == input_nodata, [0])
+            numpy.place(r, numpy.isclose(r, input_nodata), [0])
         sum_of_rasters = numpy.sum(raster_list, axis=0)
         return sum_of_rasters
 
@@ -752,19 +758,19 @@ def raster_difference(
 
     def raster_difference_op_nodata_remove(raster1, raster2):
         """Subtract raster2 from raster1, treating nodata as zero."""
-        numpy.place(raster1, raster1 == raster1_nodata, [0])
-        numpy.place(raster2, raster2 == raster2_nodata, [0])
+        numpy.place(raster1, numpy.isclose(raster1, raster1_nodata), [0])
+        numpy.place(raster2, numpy.isclose(raster2, raster2_nodata), [0])
         result = raster1 - raster2
         return result
 
     if nodata_remove:
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in raster1, raster2],
+            [(path, 1) for path in [raster1, raster2]],
             raster_difference_op_nodata_remove, target_path, gdal.GDT_Float32,
             target_nodata)
     else:
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in raster1, raster2],
+            [(path, 1) for path in [raster1, raster2]],
             raster_difference_op, target_path, gdal.GDT_Float32,
             target_nodata)
 
@@ -795,7 +801,7 @@ def weighted_state_variable_sum(
     Returns:
         None
     """
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for pft_i in pft_id_set:
         val = '{}_weighted'.format(sv)
@@ -1106,7 +1112,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
     # temporary intermediate rasters for calculating field capacity and
     # wilting point
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     edepth_path = os.path.join(temp_dir, 'edepth.tif')
     ompc_path = os.path.join(temp_dir, 'ompc.tif')
 
@@ -1174,7 +1180,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
 
     # temporary intermediate rasters for persistent parameters calculation
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
     for val in[
             'peftxa', 'peftxb', 'p1co2a_2', 'p1co2b_2', 'ps1s3_1',
@@ -1432,7 +1438,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             sv_reg['strucc_1_path'])['nodata'][0]
 
     # temporary parameter rasters for structural ratios calculations
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
     for iel in [1, 2]:
         for val in[
@@ -1670,7 +1676,7 @@ def _yearly_tasks(
 
     # calculate base N deposition
     # intermediate parameter rasters for this operation
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
     for val in['epnfa_1', 'epnfa_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -1786,7 +1792,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
     # TODO if we allow projected inputs in the future, must reproject the
     # template raster here to ensure we collect geographic coordinates
     # calculate an intermediate input, latitude at each pixel center
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     latitude_raster_path = os.path.join(temp_dir, 'latitude.tif')
     pygeoprocessing.new_raster_from_base(
         template_raster, latitude_raster_path, gdal.GDT_Float32,
@@ -2241,7 +2247,7 @@ def _potential_production(
         return tgprod_pot_prod
 
     # temporary intermediate rasters for calculating total potential production
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     # site-level temporary calculated values
     for val in ['sum_aglivc', 'sum_stdedc', 'ctemp', 'shwave', 'pevap']:
@@ -2325,47 +2331,47 @@ def _potential_production(
             prev_sv_reg['avh2o_1_{}_path'.format(pft_i)])['nodata'][0]
         # potprd, the limiting effect of temperature
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['ctemp'],
                 param_val_dict['ppdf_1_{}'.format(pft_i)],
                 param_val_dict['ppdf_2_{}'.format(pft_i)],
                 param_val_dict['ppdf_3_{}'.format(pft_i)],
-                param_val_dict['ppdf_4_{}'.format(pft_i)]],
+                param_val_dict['ppdf_4_{}'.format(pft_i)]]],
             calc_potprd, temp_val_dict['potprd_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # h2ogef_1, the limiting effect of soil water availability
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['pevap'],
                 prev_sv_reg['avh2o_1_{}_path'.format(pft_i)],
                 aligned_inputs['precip_{}'.format(month_index)],
                 pp_reg['wc_path'],
                 param_val_dict['pprpts_1'],
                 param_val_dict['pprpts_2'],
-                param_val_dict['pprpts_3']],
+                param_val_dict['pprpts_3']]],
             calc_h2ogef_1, month_reg['h2ogef_1_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # biof, the limiting effect of obstruction
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['sum_stdedc'],
                 temp_val_dict['sum_aglivc'],
                 prev_sv_reg['strucc_1_path'],
                 param_val_dict['pmxbio'],
-                param_val_dict['biok5_{}'.format(pft_i)]],
+                param_val_dict['biok5_{}'.format(pft_i)]]],
             calc_biof, temp_val_dict['biof_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # total potential production
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 param_val_dict['prdx_1_{}'.format(pft_i)],
                 temp_val_dict['shwave'],
                 temp_val_dict['potprd_{}'.format(pft_i)],
                 month_reg['h2ogef_1_{}'.format(pft_i)],
-                temp_val_dict['biof_{}'.format(pft_i)]],
+                temp_val_dict['biof_{}'.format(pft_i)]]],
             calc_tgprod_pot_prod,
             month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -2440,11 +2446,11 @@ def _calc_favail_P(sv_reg, param_val_dict):
     minerl_1_1_nodata = pygeoprocessing.get_raster_info(
         sv_reg['minerl_1_1_path'])['nodata'][0]
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             sv_reg['minerl_1_1_path'],
             param_val_dict['favail_4'],
             param_val_dict['favail_5'],
-            param_val_dict['favail_6']],
+            param_val_dict['favail_6']]],
         favail_P_op, param_val_dict['favail_2'],
         gdal.GDT_Float32, _IC_NODATA)
 
@@ -2566,7 +2572,7 @@ def _calc_available_nutrient(
         sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)])['nodata'][0]
 
     # temporary intermediate rasters for calculating available nutrient
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in ['availm']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -2603,6 +2609,7 @@ def _calc_available_nutrient(
         raise ValueError(
             "Mineral rasters for element {} contain >1 nodata value".format(
                 iel))
+    mineral_nodata = mineral_nodata.pop()
     raster_sum(
         mineral_raster_list, mineral_nodata, temp_val_dict['availm'],
         _TARGET_NODATA, nodata_remove=True)
@@ -2704,9 +2711,9 @@ def _calc_nutrient_demand(
         return demand_e
 
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             biomass_production_path, fraction_allocated_to_roots_path,
-            cercrp_min_above_path, cercrp_min_below_path],
+            cercrp_min_above_path, cercrp_min_below_path]],
         nutrient_demand_op, demand_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -3101,7 +3108,7 @@ def calc_revised_fracrc(
         return fracrc_r
 
     # temporary intermediate rasters for calculating revised fracrc
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in ['a2drat_1', 'a2drat_2', 'fracrc_perennial']:
         temp_val_dict[val] = os.path.join(
@@ -3325,25 +3332,25 @@ def calc_final_tgprod_rtsh(
         None
     """
     # temporary intermediate rasters for grazing effect
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     agprod_path = os.path.join(temp_dir, 'agprod.tif')
 
     # grazing effect on aboveground production
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             tgprod_pot_prod_path, fracrc_path, flgrem_path,
-            grzeff_path],
+            grzeff_path]],
         grazing_effect_on_aboveground_production,
         agprod_path, gdal.GDT_Float32, _TARGET_NODATA)
     # grazing effect on final root:shoot ratio
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
-            fracrc_path, flgrem_path, grzeff_path, gremb_path],
+        [(path, 1) for path in [
+            fracrc_path, flgrem_path, grzeff_path, gremb_path]],
         grazing_effect_on_root_shoot, rtsh_path,
         gdal.GDT_Float32, _TARGET_NODATA)
     # final total potential production
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in rtsh_path, agprod_path],
+        [(path, 1) for path in [rtsh_path, agprod_path]],
         calc_tgprod_final, tgprod_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -3399,7 +3406,7 @@ def _root_shoot_ratio(
         return
 
     # temporary intermediate rasters for root:shoot submodel
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for pft_i in do_PFT:
         for val in ['fracrc_p', 'fracrc']:
@@ -3458,7 +3465,7 @@ def _root_shoot_ratio(
     for pft_i in pft_id_set:
         # fracrc_p, provisional fraction of C allocated to roots
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 year_reg['annual_precip_path'],
                 param_val_dict['frtcindx_{}'.format(pft_i)],
                 param_val_dict['bgppa'],
@@ -3468,7 +3475,7 @@ def _root_shoot_ratio(
                 param_val_dict['cfrtcw_1_{}'.format(pft_i)],
                 param_val_dict['cfrtcw_2_{}'.format(pft_i)],
                 param_val_dict['cfrtcn_1_{}'.format(pft_i)],
-                param_val_dict['cfrtcn_2_{}'.format(pft_i)]],
+                param_val_dict['cfrtcn_2_{}'.format(pft_i)]]],
             calc_provisional_fracrc,
             temp_val_dict['fracrc_p_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -3699,7 +3706,7 @@ def _snow(
                 return inputs_after_snow
         return _calc_snow_moisture
 
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in ['shwave', 'pet']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -3735,41 +3742,41 @@ def _snow(
 
     # calculate change in snow
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
-            temp_val_dict['shwave']],
+            temp_val_dict['shwave']]],
         calc_snow_moisture("snow"), snow_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate change in liquid in snow
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
-            temp_val_dict['shwave']],
+            temp_val_dict['shwave']]],
         calc_snow_moisture("snlq"), snlq_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate change in potential evapotranspiration energy
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
-            temp_val_dict['shwave']],
+            temp_val_dict['shwave']]],
         calc_snow_moisture("pet"), pet_rem_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate soil moisture inputs draining from snow after snowmelt
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             tave_path, precip_path, prev_snow_path,
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
-            temp_val_dict['shwave']],
+            temp_val_dict['shwave']]],
         calc_snow_moisture("inputs_after_snow"), inputs_after_snow_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -4207,10 +4214,12 @@ def remove_transpiration(return_type):
         avinj[valid_mask] = numpy.maximum(
             asmos[valid_mask] - awilt[valid_mask] * adep[valid_mask], 0.)
 
+        transpire_mask = (valid_mask & (tot2 > 0))
         transpiration_loss = numpy.zeros(asmos.shape, dtype=numpy.float32)
-        transpiration_loss[valid_mask] = numpy.minimum(
-            (trap[valid_mask] * awwt[valid_mask]) / tot2[valid_mask],
-            avinj[valid_mask])
+        transpiration_loss[transpire_mask] = numpy.minimum(
+            (trap[transpire_mask] *
+                awwt[transpire_mask]) / tot2[transpire_mask],
+            avinj[transpire_mask])
         avinj[valid_mask] = avinj[valid_mask] - transpiration_loss[valid_mask]
 
         asmos_revised = numpy.empty(asmos.shape, dtype=numpy.float32)
@@ -4383,7 +4392,7 @@ def _soil_water(
     nlaypg_max = get_nlaypg_max(veg_trait_table)
 
     # temporary intermediate rasters for soil water submodel
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in [
             'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
@@ -4445,9 +4454,9 @@ def _soil_water(
         target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
         if month_reg['tgprod_{}'.format(pft_i)]:
             pygeoprocessing.raster_calculator(
-                [(path, 1) for path in
+                [(path, 1) for path in [
                     month_reg['tgprod_{}'.format(pft_i)],
-                    aligned_inputs['pft_{}'.format(pft_i)]],
+                    aligned_inputs['pft_{}'.format(pft_i)]]],
                 multiply_positive_rasters, target_path,
                 gdal.GDT_Float32, _TARGET_NODATA)
             weighted_path_list.append(target_path)
@@ -4462,9 +4471,9 @@ def _soil_water(
 
     # calculate average temperature
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             aligned_inputs['max_temp_{}'.format(current_month)],
-            aligned_inputs['min_temp_{}'.format(current_month)]],
+            aligned_inputs['min_temp_{}'.format(current_month)]]],
         calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
 
     # calculate aboveground live biomass
@@ -4596,10 +4605,10 @@ def _soil_water(
     avw_list = []
     for lyr in xrange(1, nlaypg_max + 1):
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['asmos_interim_{}'.format(lyr)],
                 pp_reg['awilt_{}_path'.format(lyr)],
-                param_val_dict['adep_{}'.format(lyr)]],
+                param_val_dict['adep_{}'.format(lyr)]]],
             calc_available_water_for_transpiration,
             temp_val_dict['avw_{}'.format(lyr)], gdal.GDT_Float32,
             _TARGET_NODATA)
@@ -4607,14 +4616,14 @@ def _soil_water(
     # total water available for transpiration
     raster_sum(avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
 
-    # calculate water available forn transpiration weighted by transpiration
+    # calculate water available for transpiration weighted by transpiration
     # depth for that soil layer
     awwt_list = []
     for lyr in xrange(1, nlaypg_max + 1):
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['avw_{}'.format(lyr)],
-                param_val_dict['awtl_{}'.format(lyr)]],
+                param_val_dict['awtl_{}'.format(lyr)]]],
             multiply_positive_rasters, temp_val_dict['awwt_{}'.format(lyr)],
             gdal.GDT_Float32, _TARGET_NODATA)
         awwt_list.append(temp_val_dict['awwt_{}'.format(lyr)])
@@ -4624,7 +4633,7 @@ def _soil_water(
 
     # revise total potential transpiration
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in temp_val_dict['trap'], temp_val_dict['tot']],
+        [(path, 1) for path in [temp_val_dict['trap'], temp_val_dict['tot']]],
         revise_potential_transpiration, temp_val_dict['trap_revised'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -4691,9 +4700,9 @@ def _soil_water(
             temp_val_dict['sum_avinj_{}'.format(pft_i)],
             _TARGET_NODATA, nodata_remove=True)
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['sum_avinj_{}'.format(pft_i)],
-                aligned_inputs['pft_{}'.format(pft_i)]],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
             multiply_positive_rasters, sv_reg['avh2o_1_{}_path'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
