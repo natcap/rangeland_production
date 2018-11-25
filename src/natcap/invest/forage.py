@@ -21,6 +21,9 @@ LOGGER = logging.getLogger('natcap.invest.forage')
 # we only have these types of soils
 SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
 
+# temporary directory to store intermediate files
+PROCESSING_DIR = None
+
 # state variables and parameters take their names from Century
 # _SITE_STATE_VARIABLE_FILES contains state variables that are a
 # property of the site, including:
@@ -71,6 +74,7 @@ _SITE_STATE_VARIABLE_FILES = {
     'asmos_7_path': 'asmos_7.tif',
     'asmos_8_path': 'asmos_8.tif',
     'asmos_9_path': 'asmos_9.tif',
+    'avh2o_3_path': 'avh2o_3.tif',
     'minerl_1_1_path': 'minerl_1_1.tif',
     'minerl_2_1_path': 'minerl_2_1.tif',
     'minerl_3_1_path': 'minerl_3_1.tif',
@@ -91,6 +95,8 @@ _SITE_STATE_VARIABLE_FILES = {
     'minerl_8_2_path': 'minerl_8_2.tif',
     'minerl_9_2_path': 'minerl_9_2.tif',
     'minerl_10_2_path': 'minerl_10_2.tif',
+    'snow_path': 'snow.tif',
+    'snlq_path': 'snlq.tif',
     }
 
 # _PFT_STATE_VARIABLES contains state variables that are a
@@ -165,6 +171,10 @@ _PFT_INTERMEDIATE_VALUES = [
     'cercrp_min_below_1', 'cercrp_min_below_2',
     'cercrp_max_below_1', 'cercrp_max_below_2',
     'tgprod', 'rtsh']
+
+# intermediate site-level values that are shared between submodels,
+# but do not need to be saved as output
+_SITE_INTERMEDIATE_VALUES = ['amov_2']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -452,10 +462,10 @@ def execute(args):
 
     # track separate state variable files for each PFT
     pft_sv_dict = {}
-    for pft_index in pft_id_set:
+    for pft_i in pft_id_set:
         for sv in _PFT_STATE_VARIABLES:
             pft_sv_dict['{}_{}_path'.format(
-                sv, pft_index)] = '{}_{}.tif'.format(sv, pft_index)
+                sv, pft_i)] = '{}_{}.tif'.format(sv, pft_i)
 
     # make sure animal traits exist for each feature in animal management
     # layer
@@ -482,6 +492,9 @@ def execute(args):
         key=lambda x: (abs(x[0]), abs(x[1])))
     LOGGER.info(
         "smallest pixel size of all raster inputs: %s", target_pixel_size)
+
+    # temporary directory for intermediate files
+    PROCESSING_DIR = os.path.join(args['workspace_dir'], "temporary_files")
 
     # set up a dictionary that uses the same keys as
     # 'base_align_raster_path_id_map' to point to the clipped/resampled
@@ -520,12 +533,12 @@ def execute(args):
             resample_initial_path_map[sv] = sv_path
             if not os.path.exists(sv_path):
                 missing_initial_values.append(sv_path)
-        for pft_index in pft_id_set:
+        for pft_i in pft_id_set:
             for sv in _PFT_STATE_VARIABLES:
-                sv_key = '{}_{}_path'.format(sv, pft_index)
+                sv_key = '{}_{}_path'.format(sv, pft_i)
                 sv_path = os.path.join(
                     args['initial_conditions_dir'],
-                    '{}_{}.tif'.format(sv, pft_index))
+                    '{}_{}.tif'.format(sv, pft_i))
                 resample_initial_path_map[sv_key] = sv_path
                 if not os.path.exists(sv_path):
                     missing_initial_values.append(sv_path)
@@ -592,20 +605,22 @@ def execute(args):
         aligned_inputs['site_index'], site_param_table, sv_reg, pp_reg)
 
     # make yearly directory for values that are updated every twelve months
-    year_dir = tempfile.mkdtemp()
+    year_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     year_reg = dict(
         [(key, os.path.join(year_dir, path)) for key, path in
             _YEARLY_FILES.iteritems()])
 
     # make monthly directory for monthly intermediate parameters that are
     # shared between submodels, but do not need to be saved as output
-    month_temp_dir = tempfile.mkdtemp()
+    month_temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     month_reg = {}
-    for pft_index in pft_id_set:
+    for pft_i in pft_id_set:
         for val in _PFT_INTERMEDIATE_VALUES:
             month_reg['{}_{}'.format(
-                val, pft_index)] = os.path.join(
-                month_temp_dir, '{}_{}.tif'.format(val, pft_index))
+                val, pft_i)] = os.path.join(
+                month_temp_dir, '{}_{}.tif'.format(val, pft_i))
+    for val in _SITE_INTERMEDIATE_VALUES:
+        month_reg[val] = os.path.join(month_temp_dir, '{}.tif'.format(val))
 
     # Main simulation loop
     # for each step in the simulation
@@ -637,11 +652,23 @@ def execute(args):
 
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
-            pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
+            pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg)
 
         _root_shoot_ratio(
             aligned_inputs, site_param_table, current_month, pft_id_set,
-            veg_trait_table, sv_reg, year_reg, month_reg)
+            veg_trait_table, prev_sv_reg, year_reg, month_reg)
+
+        _soil_water(
+            aligned_inputs, site_param_table, veg_trait_table, current_month,
+            month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
+
+
+def multiply_positive_rasters(raster1, raster2):
+        """Multiply positive values in two rasters."""
+        valid_mask = (raster1 > 0.) & (raster2 > 0.)
+        result = numpy.zeros(raster1.shape)
+        result[valid_mask] = raster1[valid_mask] * raster2[valid_mask]
+        return result
 
 
 def raster_sum(
@@ -670,7 +697,7 @@ def raster_sum(
     def raster_sum_op(*raster_list):
         """Add the rasters in raster_list without removing nodata values."""
         invalid_mask = numpy.any(
-            numpy.array(raster_list) == input_nodata, axis=0)
+            numpy.isclose(numpy.array(raster_list), input_nodata), axis=0)
         sum_of_rasters = numpy.sum(raster_list, axis=0)
         sum_of_rasters[invalid_mask] = target_nodata
         return sum_of_rasters
@@ -678,7 +705,7 @@ def raster_sum(
     def raster_sum_op_nodata_remove(*raster_list):
         """Add the rasters in raster_list, treating nodata as zero."""
         for r in raster_list:
-            numpy.place(r, r == input_nodata, [0])
+            numpy.place(r, numpy.isclose(r, input_nodata), [0])
         sum_of_rasters = numpy.sum(raster_list, axis=0)
         return sum_of_rasters
 
@@ -691,6 +718,131 @@ def raster_sum(
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in raster_list], raster_sum_op,
             target_path, gdal.GDT_Float32, target_nodata)
+
+
+def raster_difference(
+        raster1, raster1_nodata, raster2, raster2_nodata, target_path,
+        target_nodata, nodata_remove):
+    """Subtract raster2 from raster1.
+
+    Subtract raster2 from raster1 element-wise, allowing nodata values in the
+    rasters to propagate to the result or treating nodata as zero.
+
+    Parameters:
+        raster1 (string): path to raster from which to subtract raster2
+        raster1_nodata (float or int): nodata value in raster1
+        raster2 (string): path to raster which should be subtracted from
+            raster1
+        raster2_nodata (float or int): nodata value in raster2
+        target_path (string): path to location to store the difference
+        target_nodata (float or int): nodata value for the result raster
+        nodata_remove (bool): if true, treat nodata values in input
+            rasters as zero. If false, the difference in a pixel where any
+            input raster is nodata is nodata.
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    def raster_difference_op(raster1, raster2):
+        """Subtract raster2 from raster1 without removing nodata values."""
+        valid_mask = (
+            (~numpy.isclose(raster1, raster1_nodata)) &
+            (~numpy.isclose(raster2, raster2_nodata)))
+        result = numpy.empty(raster1.shape, dtype=numpy.float32)
+        result[:] = target_nodata
+        result[valid_mask] = raster1[valid_mask] - raster2[valid_mask]
+        return result
+
+    def raster_difference_op_nodata_remove(raster1, raster2):
+        """Subtract raster2 from raster1, treating nodata as zero."""
+        numpy.place(raster1, numpy.isclose(raster1, raster1_nodata), [0])
+        numpy.place(raster2, numpy.isclose(raster2, raster2_nodata), [0])
+        result = raster1 - raster2
+        return result
+
+    if nodata_remove:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [raster1, raster2]],
+            raster_difference_op_nodata_remove, target_path, gdal.GDT_Float32,
+            target_nodata)
+    else:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [raster1, raster2]],
+            raster_difference_op, target_path, gdal.GDT_Float32,
+            target_nodata)
+
+
+def weighted_state_variable_sum(
+        sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path):
+    """Calculate weighted sum of state variable across plant functional types.
+
+    To sum a state variable across PFTs within a grid cell, the state variable
+    must be weighted by the percent cover of each PFT inside the grid cell.
+    First multiply the state variable by its percent cover, and then add up the
+    weighted products.
+
+    Parameters:
+        sv (string): state variable to be summed across plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state variables,
+            including sv, the state variable to be summed
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including percent cover of each plant
+            functional type
+        pft_id_set (set): set of integers identifying plant functional types
+        weighted_sum_path (string): path to raster that should contain the
+            weighted sum across PFTs
+
+    Modifies:
+        the raster indicated by `weighted_sum_path`
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for pft_i in pft_id_set:
+        val = '{}_weighted'.format(sv)
+        temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+            temp_dir, '{}_{}.tif'.format(val, pft_i))
+
+    weighted_path_list = []
+    for pft_i in pft_id_set:
+        target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_i)]
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in
+                sv_reg['{}_{}_path'.format(sv, pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)]],
+            multiply_positive_rasters, target_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        weighted_path_list.append(target_path)
+    raster_sum(
+        weighted_path_list, _TARGET_NODATA, weighted_sum_path, _TARGET_NODATA,
+        nodata_remove=True)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def get_nlaypg_max(veg_trait_table):
+        """Get the maximum of nlaypg across plant functional types.
+
+        The plant functional type (PFT)-level parameter nlaypg gives the number
+        of soil layers accessible by roots of the PFT. Any soil layers beyond
+        the maximum value of nlaypg across PFTs are not necessary to track.
+
+        Parameters:
+            veg_trait_table (dict): map of pft id to dictionaries containing
+                plant functional type parameters, including nlaypg, number of
+                soil layers access by plant roots
+
+        Returns:
+            nlaypg_max, maximum nlaypg across PFTs
+        """
+        return max(
+            veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys())
 
 
 def _calc_ompc(
@@ -738,10 +890,10 @@ def _calc_ompc(
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
-            (som1c_2 != som1c_2_nodata) &
-            (som2c_2 != som2c_2_nodata) &
-            (som3c != som3c_nodata) &
-            (bulkd != bulkd_nodata) &
+            (~numpy.isclose(som1c_2, som1c_2_nodata)) &
+            (~numpy.isclose(som2c_2, som2c_2_nodata)) &
+            (~numpy.isclose(som3c, som3c_nodata)) &
+            (~numpy.isclose(bulkd, bulkd_nodata)) &
             (edepth != _IC_NODATA))
         ompc[valid_mask] = (
             (som1c_2[valid_mask] + som2c_2[valid_mask] +
@@ -802,11 +954,11 @@ def _calc_afiel(
         afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
         valid_mask = (
-            (sand != sand_nodata) &
-            (silt != silt_nodata) &
-            (clay != clay_nodata) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (~numpy.isclose(silt, silt_nodata)) &
+            (~numpy.isclose(clay, clay_nodata)) &
             (ompc != _TARGET_NODATA) &
-            (bulkd != bulkd_nodata))
+            (~numpy.isclose(bulkd, bulkd_nodata)))
         afiel[valid_mask] = (
             0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask] +
             0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask] +
@@ -871,11 +1023,11 @@ def _calc_awilt(
         awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
         valid_mask = (
-            (sand != sand_nodata) &
-            (silt != silt_nodata) &
-            (clay != clay_nodata) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (~numpy.isclose(silt, silt_nodata)) &
+            (~numpy.isclose(clay, clay_nodata)) &
             (ompc != _TARGET_NODATA) &
-            (bulkd != bulkd_nodata))
+            (~numpy.isclose(bulkd, bulkd_nodata)))
         awilt[valid_mask] = (
             -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask] +
             0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask] +
@@ -960,7 +1112,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
     # temporary intermediate rasters for calculating field capacity and
     # wilting point
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     edepth_path = os.path.join(temp_dir, 'edepth.tif')
     ompc_path = os.path.join(temp_dir, 'ompc.tif')
 
@@ -1028,7 +1180,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
 
     # temporary intermediate rasters for persistent parameters calculation
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
     for val in[
             'peftxa', 'peftxb', 'p1co2a_2', 'p1co2b_2', 'ps1s3_1',
@@ -1070,7 +1222,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (peftxa != _IC_NODATA) &
             (peftxb != _IC_NODATA) &
-            (sand != sand_nodata))
+            (~numpy.isclose(sand, sand_nodata)))
         eftext[valid_mask] = (
             peftxa[valid_mask] + (peftxb[valid_mask] * sand[valid_mask]))
         return eftext
@@ -1103,7 +1255,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (p1co2a_2 != _IC_NODATA) &
             (p1co2b_2 != _IC_NODATA) &
-            (sand != sand_nodata))
+            (~numpy.isclose(sand, sand_nodata)))
         p1co2_2[valid_mask] = (
             p1co2a_2[valid_mask] + (p1co2b_2[valid_mask] * sand[valid_mask]))
         return p1co2_2
@@ -1135,7 +1287,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (ps1s3_1 != _IC_NODATA) &
             (ps1s3_2 != _IC_NODATA) &
-            (clay != clay_nodata))
+            (~numpy.isclose(clay, clay_nodata)))
         fps1s3[valid_mask] = (
             ps1s3_1[valid_mask] + (ps1s3_2[valid_mask] * clay[valid_mask]))
         return fps1s3
@@ -1166,7 +1318,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (ps2s3_1 != _IC_NODATA) &
             (ps2s3_2 != _IC_NODATA) &
-            (clay != clay_nodata))
+            (~numpy.isclose(clay, clay_nodata)))
         fps2s3[valid_mask] = (
             ps2s3_1[valid_mask] + (ps2s3_2[valid_mask] * clay[valid_mask]))
         return fps2s3
@@ -1197,7 +1349,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (omlech_1 != _IC_NODATA) &
             (omlech_2 != _IC_NODATA) &
-            (sand != sand_nodata))
+            (~numpy.isclose(sand, sand_nodata)))
         orglch[valid_mask] = (
             omlech_1[valid_mask] + (omlech_2[valid_mask] * sand[valid_mask]))
         return orglch
@@ -1286,7 +1438,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             sv_reg['strucc_1_path'])['nodata'][0]
 
     # temporary parameter rasters for structural ratios calculations
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
     for iel in [1, 2]:
         for val in[
@@ -1332,8 +1484,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (pcemic1_2 != _IC_NODATA) &
             (pcemic1_1 != _IC_NODATA) &
             (pcemic1_3 != _IC_NODATA) &
-            (struce_1 != struce_1_nodata) &
-            (strucc_1 != strucc_1_nodata))
+            (~numpy.isclose(struce_1, struce_1_nodata)) &
+            (~numpy.isclose(strucc_1, strucc_1_nodata)))
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
@@ -1387,8 +1539,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (pcemic2_2 != _IC_NODATA) &
             (pcemic2_1 != _IC_NODATA) &
             (pcemic2_3 != _IC_NODATA) &
-            (struce_1 != struce_1_nodata) &
-            (strucc_1 != strucc_1_nodata) &
+            (~numpy.isclose(struce_1, struce_1_nodata)) &
+            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
             (rad1p_1 != _IC_NODATA) &
             (rad1p_2 != _IC_NODATA) &
             (rad1p_3 != _IC_NODATA) &
@@ -1524,7 +1676,7 @@ def _yearly_tasks(
 
     # calculate base N deposition
     # intermediate parameter rasters for this operation
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
     for val in['epnfa_1', 'epnfa_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -1640,7 +1792,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
     # TODO if we allow projected inputs in the future, must reproject the
     # template raster here to ensure we collect geographic coordinates
     # calculate an intermediate input, latitude at each pixel center
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     latitude_raster_path = os.path.join(temp_dir, 'latitude.tif')
     pygeoprocessing.new_raster_from_base(
         template_raster, latitude_raster_path, gdal.GDT_Float32,
@@ -1741,8 +1893,8 @@ def _reference_evapotranspiration(
         langleys2watts = 54.0
 
         valid_mask = (
-            (max_temp != maxtmp_nodata) &
-            (min_temp != mintmp_nodata) &
+            (~numpy.isclose(max_temp, maxtmp_nodata)) &
+            (~numpy.isclose(min_temp, mintmp_nodata)) &
             (shwave != _TARGET_NODATA) &
             (fwloss_4 != _IC_NODATA))
         trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
@@ -1785,7 +1937,7 @@ def _reference_evapotranspiration(
 
 def _potential_production(
         aligned_inputs, site_param_table, current_month, month_index,
-        pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg):
+        pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg):
     """Calculate above- and belowground potential production.
 
     Potential production of each plant functional type is calculated
@@ -1808,8 +1960,8 @@ def _potential_production(
         pft_id_set (set): set of integers identifying plant functional types
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
         pp_reg (dict): map of key, path pairs giving paths to persistent
             intermediate parameters that do not change over the course of
             the simulation
@@ -1830,18 +1982,11 @@ def _potential_production(
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
     do_PFT = []
-    for pft_index in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
-            do_PFT.append(pft_index)
+    for pft_i in pft_id_set:
+        if str(current_month) in veg_trait_table[pft_i]['growth_months']:
+            do_PFT.append(pft_i)
     if not do_PFT:
         return
-
-    def multiply_positive_rasters(raster1, raster2):
-        """Multiply positive values in two rasters."""
-        valid_mask = (raster1 > 0.) & (raster2 > 0.)
-        result = numpy.zeros(raster1.shape)
-        result[valid_mask] = raster1[valid_mask] * raster2[valid_mask]
-        return result
 
     def calc_ctemp(aglivc, pmxbio, maxtmp, pmxtmp, mintmp, pmntmp):
         """Calculate soil temperature relative to its effect on growth.
@@ -1871,9 +2016,9 @@ def _potential_production(
         valid_mask = (
             (aglivc >= 0.) &
             (pmxbio != _IC_NODATA) &
-            (maxtmp != maxtmp_nodata) &
+            (~numpy.isclose(maxtmp, maxtmp_nodata)) &
             (pmxtmp != _IC_NODATA) &
-            (mintmp != mintmp_nodata) &
+            (~numpy.isclose(mintmp, mintmp_nodata)) &
             (pmntmp != _IC_NODATA))
         bio[valid_mask] = aglivc[valid_mask] * 2.5
         bio[bio > pmxbio] = pmxbio[bio > pmxbio]
@@ -1974,8 +2119,8 @@ def _potential_production(
         """
         valid_mask = (
             (pevap != _TARGET_NODATA) &
-            (avh2o_1 != avh2o_1_nodata) &
-            (precip != precip_nodata) &
+            (~numpy.isclose(avh2o_1, avh2o_1_nodata)) &
+            (~numpy.isclose(precip, precip_nodata)) &
             (wc != _TARGET_NODATA) &
             (pprpts_1 != _IC_NODATA) &
             (pprpts_2 != _IC_NODATA) &
@@ -2024,7 +2169,7 @@ def _potential_production(
                 by obstruction
         """
         valid_mask = (
-            (strucc_1 != strucc_1_nodata) &
+            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
             (pmxbio != _IC_NODATA) &
             (biok5 != _IC_NODATA))
 
@@ -2102,7 +2247,7 @@ def _potential_production(
         return tgprod_pot_prod
 
     # temporary intermediate rasters for calculating total potential production
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     # site-level temporary calculated values
     for val in ['sum_aglivc', 'sum_stdedc', 'ctemp', 'shwave', 'pevap']:
@@ -2140,9 +2285,6 @@ def _potential_production(
                 aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
                 [_IC_NODATA], fill_value_list=[fill_val])
 
-    # calculate intermediate quantities that do not differ between PFTs:
-    # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
-    # across PFTs, weighted by % cover of each PFT
     maxtmp_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
     mintmp_nodata = pygeoprocessing.get_raster_info(
@@ -2150,23 +2292,15 @@ def _potential_production(
     precip_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['precip_{}'.format(month_index)])['nodata'][0]
     strucc_1_nodata = pygeoprocessing.get_raster_info(
-        sv_reg['strucc_1_path'])['nodata'][0]
-    for sv in ['aglivc', 'stdedc']:
-        weighted_path_list = []
-        for pft_index in pft_id_set:
-            target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_index)]
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in
-                    sv_reg['{}_{}_path'.format(sv, pft_index)],
-                    aligned_inputs['pft_{}'.format(pft_index)]],
-                multiply_positive_rasters, target_path,
-                gdal.GDT_Float32, _TARGET_NODATA)
-            weighted_path_list.append(target_path)
+        prev_sv_reg['strucc_1_path'])['nodata'][0]
 
-        raster_sum(
-            weighted_path_list, _TARGET_NODATA,
-            temp_val_dict['sum_{}'.format(sv)], _TARGET_NODATA,
-            nodata_remove=True)
+    # calculate intermediate quantities that do not differ between PFTs:
+    # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
+    # across PFTs, weighted by % cover of each PFT
+    for sv in ['aglivc', 'stdedc']:
+        weighted_sum_path = temp_val_dict['sum_{}'.format(sv)]
+        weighted_state_variable_sum(
+            sv, prev_sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
 
     # ctemp, soil temperature relative to impacts on growth
     pygeoprocessing.raster_calculator(
@@ -2194,50 +2328,50 @@ def _potential_production(
     # calculate quantities that differ between PFTs
     for pft_i in do_PFT:
         avh2o_1_nodata = pygeoprocessing.get_raster_info(
-            sv_reg['avh2o_1_{}_path'.format(pft_i)])['nodata'][0]
+            prev_sv_reg['avh2o_1_{}_path'.format(pft_i)])['nodata'][0]
         # potprd, the limiting effect of temperature
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['ctemp'],
                 param_val_dict['ppdf_1_{}'.format(pft_i)],
                 param_val_dict['ppdf_2_{}'.format(pft_i)],
                 param_val_dict['ppdf_3_{}'.format(pft_i)],
-                param_val_dict['ppdf_4_{}'.format(pft_i)]],
+                param_val_dict['ppdf_4_{}'.format(pft_i)]]],
             calc_potprd, temp_val_dict['potprd_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # h2ogef_1, the limiting effect of soil water availability
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['pevap'],
-                sv_reg['avh2o_1_{}_path'.format(pft_i)],
+                prev_sv_reg['avh2o_1_{}_path'.format(pft_i)],
                 aligned_inputs['precip_{}'.format(month_index)],
                 pp_reg['wc_path'],
                 param_val_dict['pprpts_1'],
                 param_val_dict['pprpts_2'],
-                param_val_dict['pprpts_3']],
+                param_val_dict['pprpts_3']]],
             calc_h2ogef_1, month_reg['h2ogef_1_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # biof, the limiting effect of obstruction
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 temp_val_dict['sum_stdedc'],
                 temp_val_dict['sum_aglivc'],
-                sv_reg['strucc_1_path'],
+                prev_sv_reg['strucc_1_path'],
                 param_val_dict['pmxbio'],
-                param_val_dict['biok5_{}'.format(pft_i)]],
+                param_val_dict['biok5_{}'.format(pft_i)]]],
             calc_biof, temp_val_dict['biof_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
         # total potential production
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 param_val_dict['prdx_1_{}'.format(pft_i)],
                 temp_val_dict['shwave'],
                 temp_val_dict['potprd_{}'.format(pft_i)],
                 month_reg['h2ogef_1_{}'.format(pft_i)],
-                temp_val_dict['biof_{}'.format(pft_i)]],
+                temp_val_dict['biof_{}'.format(pft_i)]]],
             calc_tgprod_pot_prod,
             month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -2288,7 +2422,7 @@ def _calc_favail_P(sv_reg, param_val_dict):
             favail_P, fraction of mineral P available to plants
         """
         valid_mask = (
-            (minerl_1_1 != minerl_1_1_nodata) &
+            (~numpy.isclose(minerl_1_1, minerl_1_1_nodata)) &
             (favail_4 != _IC_NODATA) &
             (favail_5 != _IC_NODATA) &
             (favail_6 != _IC_NODATA))
@@ -2312,11 +2446,11 @@ def _calc_favail_P(sv_reg, param_val_dict):
     minerl_1_1_nodata = pygeoprocessing.get_raster_info(
         sv_reg['minerl_1_1_path'])['nodata'][0]
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             sv_reg['minerl_1_1_path'],
             param_val_dict['favail_4'],
             param_val_dict['favail_5'],
-            param_val_dict['favail_6']],
+            param_val_dict['favail_6']]],
         favail_P_op, param_val_dict['favail_2'],
         gdal.GDT_Float32, _IC_NODATA)
 
@@ -2380,10 +2514,10 @@ def _calc_available_nutrient(
         """
         valid_mask = (
             (rictrl != _IC_NODATA) &
-            (bglivc != bglivc_nodata) &
+            (~numpy.isclose(bglivc, bglivc_nodata)) &
             (riint != _IC_NODATA) &
             (favail != _IC_NODATA) &
-            (crpstg != crpstg_nodata))
+            (~numpy.isclose(crpstg, crpstg_nodata)))
 
         rimpct = numpy.empty(rictrl.shape, dtype=numpy.float32)
         rimpct[:] = _TARGET_NODATA
@@ -2438,7 +2572,7 @@ def _calc_available_nutrient(
         sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)])['nodata'][0]
 
     # temporary intermediate rasters for calculating available nutrient
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in ['availm']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -2475,6 +2609,7 @@ def _calc_available_nutrient(
         raise ValueError(
             "Mineral rasters for element {} contain >1 nodata value".format(
                 iel))
+    mineral_nodata = mineral_nodata.pop()
     raster_sum(
         mineral_raster_list, mineral_nodata, temp_val_dict['availm'],
         _TARGET_NODATA, nodata_remove=True)
@@ -2576,9 +2711,9 @@ def _calc_nutrient_demand(
         return demand_e
 
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             biomass_production_path, fraction_allocated_to_roots_path,
-            cercrp_min_above_path, cercrp_min_below_path],
+            cercrp_min_above_path, cercrp_min_below_path]],
         nutrient_demand_op, demand_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -2724,7 +2859,7 @@ def calc_ce_ratios(
         valid_mask = (
             (pra_1 != _IC_NODATA) &
             (pra_2 != _IC_NODATA) &
-            (aglivc != aglivc_nodata) &
+            (~numpy.isclose(aglivc, aglivc_nodata)) &
             (biomax != _IC_NODATA))
 
         cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
@@ -2754,7 +2889,7 @@ def calc_ce_ratios(
         valid_mask = (
             (prb_1 != _IC_NODATA) &
             (prb_2 != _IC_NODATA) &
-            (annual_precip != annual_precip_nodata))
+            (~numpy.isclose(annual_precip, annual_precip_nodata)))
 
         cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
         cercrp_below[:] = _TARGET_NODATA
@@ -2973,7 +3108,7 @@ def calc_revised_fracrc(
         return fracrc_r
 
     # temporary intermediate rasters for calculating revised fracrc
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in ['a2drat_1', 'a2drat_2', 'fracrc_perennial']:
         temp_val_dict[val] = os.path.join(
@@ -3197,25 +3332,25 @@ def calc_final_tgprod_rtsh(
         None
     """
     # temporary intermediate rasters for grazing effect
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     agprod_path = os.path.join(temp_dir, 'agprod.tif')
 
     # grazing effect on aboveground production
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
+        [(path, 1) for path in [
             tgprod_pot_prod_path, fracrc_path, flgrem_path,
-            grzeff_path],
+            grzeff_path]],
         grazing_effect_on_aboveground_production,
         agprod_path, gdal.GDT_Float32, _TARGET_NODATA)
     # grazing effect on final root:shoot ratio
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in
-            fracrc_path, flgrem_path, grzeff_path, gremb_path],
+        [(path, 1) for path in [
+            fracrc_path, flgrem_path, grzeff_path, gremb_path]],
         grazing_effect_on_root_shoot, rtsh_path,
         gdal.GDT_Float32, _TARGET_NODATA)
     # final total potential production
     pygeoprocessing.raster_calculator(
-        [(path, 1) for path in rtsh_path, agprod_path],
+        [(path, 1) for path in [rtsh_path, agprod_path]],
         calc_tgprod_final, tgprod_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -3225,7 +3360,7 @@ def calc_final_tgprod_rtsh(
 
 def _root_shoot_ratio(
         aligned_inputs, site_param_table, current_month, pft_id_set,
-        veg_trait_table, sv_reg, year_reg, month_reg):
+        veg_trait_table, prev_sv_reg, year_reg, month_reg):
     """Calculate final potential production and root:shoot ratio.
 
     Final potential production and root:shoot ratio is calculated according
@@ -3242,8 +3377,8 @@ def _root_shoot_ratio(
         pft_id_set (set): set of integers identifying plant functional types
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
         year_reg (dict): map of key, path pairs giving paths to rasters that
             are modified once per year, including annual precipitation
         month_reg (dict): map of key, path pairs giving paths to intermediate
@@ -3261,17 +3396,17 @@ def _root_shoot_ratio(
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
     do_PFT = []
-    for pft_index in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_index]['growth_months']:
-            do_PFT.append(pft_index)
+    for pft_i in pft_id_set:
+        if str(current_month) in veg_trait_table[pft_i]['growth_months']:
+            do_PFT.append(pft_i)
         else:
-            month_reg['tgprod_{}_path'.format(pft_index)] = None
-            month_reg['rtsh_{}_path'.format(pft_index)] = None
+            month_reg['tgprod_{}'.format(pft_i)] = None
+            month_reg['rtsh_{}'.format(pft_i)] = None
     if not do_PFT:
         return
 
     # temporary intermediate rasters for root:shoot submodel
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for pft_i in do_PFT:
         for val in ['fracrc_p', 'fracrc']:
@@ -3326,11 +3461,11 @@ def _root_shoot_ratio(
     # the parameter favail_2 must be calculated from current mineral N in
     # surface layer
     param_val_dict['favail_2'] = os.path.join(temp_dir, 'favail_2.tif')
-    _calc_favail_P(sv_reg, param_val_dict)
+    _calc_favail_P(prev_sv_reg, param_val_dict)
     for pft_i in pft_id_set:
         # fracrc_p, provisional fraction of C allocated to roots
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 year_reg['annual_precip_path'],
                 param_val_dict['frtcindx_{}'.format(pft_i)],
                 param_val_dict['bgppa'],
@@ -3340,7 +3475,7 @@ def _root_shoot_ratio(
                 param_val_dict['cfrtcw_1_{}'.format(pft_i)],
                 param_val_dict['cfrtcw_2_{}'.format(pft_i)],
                 param_val_dict['cfrtcn_1_{}'.format(pft_i)],
-                param_val_dict['cfrtcn_2_{}'.format(pft_i)]],
+                param_val_dict['cfrtcn_2_{}'.format(pft_i)]]],
             calc_provisional_fracrc,
             temp_val_dict['fracrc_p_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -3349,7 +3484,7 @@ def _root_shoot_ratio(
             calc_ce_ratios(
                 param_val_dict['pramn_1_{}_{}'.format(pft_i, iel)],
                 param_val_dict['pramn_2_{}_{}'.format(pft_i, iel)],
-                sv_reg['aglivc_{}_path'.format(pft_i)],
+                prev_sv_reg['aglivc_{}_path'.format(pft_i)],
                 param_val_dict['biomax_{}'.format(pft_i)],
                 param_val_dict['pramx_1_{}_{}'.format(pft_i, iel)],
                 param_val_dict['pramx_2_{}_{}'.format(pft_i, iel)],
@@ -3361,8 +3496,8 @@ def _root_shoot_ratio(
                 pft_i, iel)
             # eavail_iel, available nutrient
             _calc_available_nutrient(
-                pft_i, iel, veg_trait_table[pft_i], sv_reg, site_param_table,
-                aligned_inputs['site_index'],
+                pft_i, iel, veg_trait_table[pft_i], prev_sv_reg,
+                site_param_table, aligned_inputs['site_index'],
                 param_val_dict['favail_{}'.format(iel)],
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
@@ -3402,6 +3537,1181 @@ def _root_shoot_ratio(
             param_val_dict['gremb_{}'.format(pft_i)],
             month_reg['tgprod_{}'.format(pft_i)],
             month_reg['rtsh_{}'.format(pft_i)])
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def _snow(
+        site_index_path, site_param_table, precip_path, tave_path,
+        max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
+        current_month, snow_path, snlq_path, inputs_after_snow_path,
+        pet_rem_path):
+    """Account for precipitation as snow and snowmelt from snowpack.
+
+    Determine whether precipitation falls as snow. Track the fate of
+    new and existing snowpack including evaporation and melting. Track the
+    the remaining snowpack and liquid in snow and potential
+    evapotranspiration remaining after evaporation of snow.  Snowcent.f
+
+    Parameters:
+        site_index_path (string): path to site spatial index raster
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        precip_path (string): path to raster containing precipitation for the
+            current month
+        tave_path (string): path to raster containing average temperature for
+            the current month
+        max_temp_path (string): path to raster containing maximum temperature
+            for the current month
+        min_temp_path (string): path to raster containing minimum temperature
+            for the current month
+        prev_snow_path (string): path to raster containing current snowpack
+        prev_snlq_path (string): path to raster containing current liquid in
+            snow
+        current_month (int): current month of the year, such that month=0
+            indicates January
+        snow_path (string): path to raster to contain modified snowpack
+        snlq_path (string): path to raster to contain modified liquid in snow
+        inputs_after_snow_path (string): path to raster containing water inputs
+            to the system after accounting for snow
+        pet_rem_path (string): path to raster containing potential
+            evapotranspiration remaining after any evaporation of snow
+
+    Modifies:
+        the raster indicated by `snow_path`
+        the raster indicated by `snlq_path`
+        the raster indicated by `inputs_after_snow_path`
+        the raster indicated by `pet_rem_path`
+
+    Returns:
+        None
+    """
+    def calc_snow_moisture(return_type):
+        """Calculate change in snow, pet, snow liquid, and moisture inputs.
+
+        Record changes in snowpack, liquid in snow, potential
+        evapotranspiration energy, and liquid draining into soil from snow.
+
+        Parameters:
+            return_type (string): flag indicating whether modified snowpack,
+                modified liquid in snow, modified potential evapotranspiration,
+                or soil moisture inputs after snow should be returned
+
+        Returns:
+            the function `_calc_snow_moisture`
+        """
+        def _calc_snow_moisture(
+                tave, precip, snow, snlq, pet, tmelt_1, tmelt_2, shwave):
+            """Calculate the fate of moisture from snow.
+
+            Calculate new snowfall or rain on snow. Calculate direct
+            evaporation of snow and consumption of potential
+            evapotranspiration energy. Calculate snowmelt and liquid draining
+            from snow into the soil.
+
+            Parameters:
+                tave (numpy.ndarray): derived, average temperature
+                precip (numpy.ndarray): input, precipitation for this month
+                snow (numpy.ndarray): derived, existing snowpack prior to new
+                    snowfall
+                snlq (numpy.ndarray): derived, existing liquid in snowpack
+                pet (numpy.ndarray): derived, potential evapotranspiration
+                tmelt_1 (numpy.ndarray): parameter, minimum temperature above
+                    which snow will melt
+                tmelt_2 (numpy.ndarray): parameter, ratio between degrees above
+                    the minimum temperature and cm of snow that will melt
+                shwave (numpy.ndarray): derived, shortwave radiation outside
+                    the atmosphere
+
+            Returns:
+                snow_revised if return_type is 'snow'
+                snlq_revised if return_type is 'snlq'
+                pet_revised if return_type is 'pet'
+                inputs_after_snow if return_type is 'inputs_after_snow'
+            """
+            valid_mask = (
+                (tave != _IC_NODATA) &
+                (~numpy.isclose(precip, precip_nodata)) &
+                (~numpy.isclose(snow, snow_nodata)) &
+                (~numpy.isclose(snlq, snlq_nodata)) &
+                (pet != _TARGET_NODATA) &
+                (tmelt_1 != _IC_NODATA) &
+                (tmelt_2 != _IC_NODATA) &
+                (shwave != _TARGET_NODATA))
+            inputs_after_snow = numpy.empty(precip.shape, dtype=numpy.float32)
+            inputs_after_snow[:] = _TARGET_NODATA
+            inputs_after_snow[valid_mask] = precip[valid_mask]
+
+            snowfall_mask = (valid_mask & (tave <= 0))
+            snow[snowfall_mask] = (snow[snowfall_mask] + precip[snowfall_mask])
+            inputs_after_snow[snowfall_mask] = 0.
+
+            rain_on_snow_mask = (
+                (valid_mask) &
+                (tave > 0) &
+                (snow > 0))
+            snlq[rain_on_snow_mask] = (
+                snlq[rain_on_snow_mask] + precip[rain_on_snow_mask])
+            inputs_after_snow[rain_on_snow_mask] = 0.
+
+            snowtot = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snowtot[valid_mask] = numpy.maximum(
+                snow[valid_mask] + snlq[valid_mask], 0)
+
+            evap_mask = (valid_mask & (snowtot > 0.))
+            evsnow = numpy.zeros(snow.shape, dtype=numpy.float32)
+            evsnow[evap_mask] = numpy.minimum(
+                snowtot[evap_mask], pet[evap_mask] * 0.87)
+            snow_revised = numpy.empty(snow.shape, dtype=numpy.float32)
+            snow_revised[:] = _TARGET_NODATA
+            snow_revised[valid_mask] = snow[valid_mask]
+            snow_revised[evap_mask] = numpy.maximum(
+                snow[evap_mask] - evsnow[evap_mask] *
+                (snow[evap_mask] / snowtot[evap_mask]), 0.)
+            snlq_revised = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snlq_revised[valid_mask] = snlq[valid_mask]
+            snlq_revised[evap_mask] = numpy.maximum(
+                snlq[evap_mask] - evsnow[evap_mask] *
+                (snlq[evap_mask] / snowtot[evap_mask]), 0.)
+            pet_revised = numpy.empty(snow.shape, dtype=numpy.float32)
+            pet_revised[:] = _TARGET_NODATA
+            pet_revised[valid_mask] = pet[valid_mask]
+            pet_revised[evap_mask] = numpy.maximum(
+                (pet[evap_mask] - evsnow[evap_mask] / 0.87), 0.)
+
+            melt_mask = (valid_mask & (tave >= tmelt_1))
+            snowmelt = numpy.zeros(snow.shape, dtype=numpy.float32)
+            snowmelt[melt_mask] = numpy.clip(
+                tmelt_2[melt_mask] * (tave[melt_mask] - tmelt_1[melt_mask]) *
+                shwave[melt_mask], 0., snow_revised[melt_mask])
+            snow_revised[melt_mask] = (
+                snow_revised[melt_mask] - snowmelt[melt_mask])
+            snlq_revised[melt_mask] = (
+                snlq_revised[melt_mask] + snowmelt[melt_mask])
+
+            drain_mask = (melt_mask & (snlq_revised > 0.5 * snow_revised))
+            inputs_after_snow[drain_mask] = (
+                snlq_revised[drain_mask] - 0.5 * snow_revised[drain_mask])
+            snlq_revised[drain_mask] = (
+                snlq_revised[drain_mask] - inputs_after_snow[drain_mask])
+
+            if return_type == 'snow':
+                return snow_revised
+            elif return_type == 'snlq':
+                return snlq_revised
+            elif return_type == 'pet':
+                return pet_revised
+            else:
+                return inputs_after_snow
+        return _calc_snow_moisture
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['shwave', 'pet']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict = {}
+    for val in ['tmelt_1', 'tmelt_2', 'fwloss_4']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for (
+                site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
+            _IC_NODATA)
+
+    max_temp_nodata = pygeoprocessing.get_raster_info(
+        max_temp_path)['nodata'][0]
+    min_temp_nodata = pygeoprocessing.get_raster_info(
+        min_temp_path)['nodata'][0]
+    precip_nodata = pygeoprocessing.get_raster_info(
+        precip_path)['nodata'][0]
+    snow_nodata = pygeoprocessing.get_raster_info(
+        prev_snow_path)['nodata'][0]
+    snlq_nodata = pygeoprocessing.get_raster_info(
+        prev_snlq_path)['nodata'][0]
+
+    # solar radiation outside the atmosphere
+    _shortwave_radiation(precip_path, current_month, temp_val_dict['shwave'])
+
+    # pet, reference evapotranspiration modified by fwloss parameter
+    _reference_evapotranspiration(
+        max_temp_path, min_temp_path, temp_val_dict['shwave'],
+        param_val_dict['fwloss_4'], temp_val_dict['pet'])
+
+    # calculate change in snow
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            tave_path, precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']]],
+        calc_snow_moisture("snow"), snow_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate change in liquid in snow
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            tave_path, precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']]],
+        calc_snow_moisture("snlq"), snlq_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate change in potential evapotranspiration energy
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            tave_path, precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']]],
+        calc_snow_moisture("pet"), pet_rem_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate soil moisture inputs draining from snow after snowmelt
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            tave_path, precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']]],
+        calc_snow_moisture("inputs_after_snow"), inputs_after_snow_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def _calc_aboveground_live_biomass(sum_aglivc, sum_tgprod):
+    """Calculate aboveground live biomass for purposes of soil water.
+
+    Live biomass impacts loss of moisture inputs through canopy
+    interception and evapotranspiration. Because soil moisture is computed
+    after potential production, but before actual growth of plants, some of
+    the predicted growth in biomass (i.e., tgprod) is added here to
+    existing standing live biomass (i.e., aglivc * 2.5; line 80,
+    potprod.f, in Century).
+
+    Parameters:
+        sum_aglivc (numpy.ndarray): the sum of aglivc across plant
+            functional types (pft), weighted by % cover of the pft
+        sum_tgprod (numpy.ndarray): sum of tgprod, potential production
+            limited by soil water, nutrient availability, and grazing,
+            across pfts weighted by % cover of the pft
+
+    Returns:
+        aliv, aboveground live biomass for soil water submodel
+    """
+    valid_mask = (
+        (sum_aglivc != _TARGET_NODATA) &
+        (sum_tgprod != _TARGET_NODATA))
+    aliv = numpy.empty(sum_aglivc.shape, dtype=numpy.float32)
+    aliv[:] = _TARGET_NODATA
+    aliv[valid_mask] = (
+        sum_aglivc[valid_mask] * 2.5 + (0.25 * sum_tgprod[valid_mask]))
+    return aliv
+
+
+def _calc_standing_biomass(aliv, sum_stdedc):
+    """Calculate total aboveground standing biomass for soil water.
+
+    Total standing biomass impacts loss of moisture inputs by increasing
+    total canopy interception and decreasing bare soil evaporation. It is
+    the sum of live and dead standing biomass across plant functional
+    types, bounded to be <= 800 g/m2.
+
+    Parameters:
+        aliv (numpy.ndarray): aboveground live biomass, calculated from
+            aglivc and tgprod across plant functional types
+        sum_stdedc (numpy.ndarray): aboveground standing dead C summed
+            across plant functional types
+
+    Returns:
+        sd, total aboveground standing biomass for soil water.
+    """
+    valid_mask = (
+        (aliv != _TARGET_NODATA) &
+        (sum_stdedc != _TARGET_NODATA))
+    sd = numpy.empty(aliv.shape, dtype=numpy.float32)
+    sd[:] = _TARGET_NODATA
+    sd[valid_mask] = numpy.minimum(
+        aliv[valid_mask] + (sum_stdedc[valid_mask] * 2.5), 800.)
+    return sd
+
+
+def subtract_surface_losses(return_type):
+    """Calculate surface losses to runoff and surface evaporation.
+
+    Calculate the loss of surface moisture to runoff, canopy interception,
+    and bare soil evaporation.
+
+    Parameters:
+        return_type (string): flag indicating whether soil moisture inputs
+            after surface losses or total surface evaporation should be
+            returned
+
+    Returns:
+        the function `_subtract_surface_losses`
+    """
+    def _subtract_surface_losses(
+            inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
+            fwloss_2, pet_rem):
+        """Subtract moisture losses to runoff, interception, and evaporation.
+
+        Of the surface water inputs from precipitation and snowmelt, some water
+        is lost to runoff (line 113, H2olos.f). After runoff, some water is
+        lost to canopy interception and bare soil evaporation, if there is no
+        snow cover. Loss to canopy interception and bare soil evaporation is
+        a function of live, standing dead, and surface litter biomass.  The
+        total loss of moisture to interception and bare soil evaporation is
+        bounded to be less than or equal to 40% of reference
+        evapotranspiration.
+
+        Parameters:
+            inputs_after_snow (numpy.ndarray): derived, surface water inputs
+                from precipitation and snowmelt, prior to runoff
+            fracro (numpy.ndarray): parameter, fraction of surface water
+                above precro that is lost to runoff
+            precro (numpy.ndarray): parameter, amount of surface water that
+                must be available for runoff to occur
+            snow (numpy.ndarray): derived, current snowpack
+            alit (numpy.ndarray): derived, biomass in surface litter
+            sd (numpy.ndarray): derived, total standing biomass
+            fwloss_1 (numpy.ndarray): parameter, scaling factor for
+                interception and evaporation of precip by vegetation
+            fwloss_2 (numpy.ndarray): parameter, scaling factor for bare soil
+                evaporation of precip
+            pet_rem (numpy.ndarray): derived, potential evaporation remaining
+                after evaporation of snow
+
+        Returns:
+            inputs_after_surface, surface water inputs to soil after runoff
+                and surface evaporation are subtracted, if return_type is
+                'inputs_after_surface'
+            absevap, bare soil evaporation, if return_type is 'absevap'
+            evap_losses, total surface evaporation, if return_type is
+                'evap_losses'
+        """
+        valid_mask = (
+            (inputs_after_snow != _TARGET_NODATA) &
+            (fracro != _IC_NODATA) &
+            (precro != _IC_NODATA) &
+            (snow != _TARGET_NODATA) &
+            (alit != _TARGET_NODATA) &
+            (sd != _TARGET_NODATA) &
+            (fwloss_1 != _IC_NODATA) &
+            (fwloss_2 != _IC_NODATA) &
+            (pet_rem != _TARGET_NODATA))
+
+        runoff = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+        runoff[:] = _TARGET_NODATA
+        runoff[valid_mask] = numpy.maximum(
+            fracro[valid_mask] *
+            (inputs_after_snow[valid_mask] - precro[valid_mask]), 0.)
+        inputs_after_runoff = numpy.empty(
+            inputs_after_snow.shape, dtype=numpy.float32)
+        inputs_after_runoff[:] = _TARGET_NODATA
+        inputs_after_runoff[valid_mask] = (
+            inputs_after_snow[valid_mask] - runoff[valid_mask])
+
+        evap_mask = (valid_mask & (snow <= 0))
+        # loss to interception
+        aint = numpy.zeros(inputs_after_snow.shape, dtype=numpy.float32)
+        aint[evap_mask] = (
+            (0.0003 * alit[evap_mask] + 0.0006 * sd[evap_mask]) *
+            fwloss_1[evap_mask])
+        # loss to bare soil evaporation
+        absevap = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+        absevap[:] = _TARGET_NODATA
+        absevap[evap_mask] = (
+            0.5 *
+            numpy.exp((-0.002 * alit[evap_mask]) - (0.004 * sd[evap_mask])) *
+            fwloss_2[evap_mask])
+        # total losses to interception and evaporation
+        evap_losses = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
+        evap_losses[:] = _TARGET_NODATA
+        evap_losses[evap_mask] = (
+            numpy.minimum(((absevap[evap_mask] + aint[evap_mask]) *
+            inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
+        # remaining inputs after evaporation
+        inputs_after_surface = numpy.empty(
+            inputs_after_snow.shape, dtype=numpy.float32)
+        inputs_after_surface[:] = _TARGET_NODATA
+        inputs_after_surface[valid_mask] = inputs_after_runoff[valid_mask]
+        inputs_after_surface[evap_mask] = (
+            inputs_after_runoff[evap_mask] - evap_losses[evap_mask])
+
+        if return_type == 'inputs_after_surface':
+            return inputs_after_surface
+        elif return_type == 'absevap':
+            return absevap
+        elif return_type == 'evap_losses':
+            return evap_losses
+    return _subtract_surface_losses
+
+
+def calc_potential_transpiration(return_type):
+    """Calculate potential transpiration and evaporation from soil layer 1.
+
+    Calculate potential transpiration (trap), potential evaporation from
+    soil layer 1 (pevp), and initial transpiration water loss (tran).
+    Remove the initial transpiration water loss from soil moisture inputs
+    at this step.
+
+    Parameters:
+        return_type (string): flag indicating whether potential transpiration,
+            potential evaporation from soil layer 1, or modified moisture
+            inputs should be returned
+
+    Returns:
+        the function `_calc_potential_transpiration`
+    """
+    def _calc_potential_transpiration(
+            pet_rem, evap_losses, tave, aliv, current_moisture_inputs):
+        """Calculate potential water losses to transpiration.
+
+        Calculate potential transpiration (trap), the total potential
+        transpiration from all soil layers by plants. Calculate potential
+        evaporation from soil layer 1 (pevp); this amount is calculated prior
+        to transpiration but actually removed after water loss to transpiration
+        from all soil layers has been accounted. Calculate actual transpiration
+        (tran). Remove actual transpiration water losses from moisture inputs
+        before distributing water to soil layers. This is necessary for a
+        monthly time step to give plants in wet climates adequate access to
+        water for transpiration.
+
+        Parameters:
+            pet_rem (numpy.ndarray): derived, potential evapotranspiration
+                remaining after evaporation of snow
+            evap_losses (numpy.ndarray): derived, total surface evaporation
+            tave (numpy.ndarray): derived, average temperature
+            aliv (numpy.ndarray): aboveground live biomass, calculated from
+                aglivc and tgprod across plant functional types
+            current_moisture_inputs (numpy.ndarray): derived, moisture inputs
+                after surface losses
+
+        Returns:
+            trap if return_type is 'trap'
+            pevp if return_type is 'pevp'
+            modified_moisture_inputs if return_type is
+                'modified_moisture_inputs'
+        """
+        valid_mask = (
+            (pet_rem != _TARGET_NODATA) &
+            (evap_losses != _TARGET_NODATA) &
+            (tave != _TARGET_NODATA) &
+            (aliv != _TARGET_NODATA) &
+            (current_moisture_inputs != _TARGET_NODATA))
+        trap = numpy.empty(pet_rem.shape, dtype=numpy.float32)
+        trap[:] = _TARGET_NODATA
+        trap[valid_mask] = pet_rem[valid_mask] - evap_losses[valid_mask]
+
+        no_transpiration_mask = (valid_mask & (tave < 2))
+        trap[no_transpiration_mask] = 0.
+
+        transpiration_mask = (valid_mask & (tave >= 2))
+        trap[transpiration_mask] = numpy.maximum(
+            numpy.minimum(
+                trap[transpiration_mask], pet_rem[transpiration_mask] *
+                0.65 * (1 - numpy.exp(-0.02 * aliv[transpiration_mask]))), 0.)
+
+        trap[valid_mask] = numpy.maximum(trap[valid_mask], 0.01)
+        pevp = numpy.empty(pet_rem.shape, dtype=numpy.float32)
+        pevp[:] = _TARGET_NODATA
+        pevp[valid_mask] = numpy.maximum(
+            pet_rem[valid_mask] - trap[valid_mask] - evap_losses[valid_mask],
+            0.)
+
+        tran = numpy.empty(pet_rem.shape, dtype=numpy.float32)
+        tran[:] = _TARGET_NODATA
+        tran[valid_mask] = numpy.minimum(
+            trap[valid_mask] - 0.01, current_moisture_inputs[valid_mask])
+        trap[valid_mask] = trap[valid_mask] - tran[valid_mask]
+
+        modified_moisture_inputs = numpy.empty(
+            pet_rem.shape, dtype=numpy.float32)
+        modified_moisture_inputs[:] = _TARGET_NODATA
+        modified_moisture_inputs[valid_mask] = (
+            current_moisture_inputs[valid_mask] - tran[valid_mask])
+
+        if return_type == 'trap':
+            return trap
+        elif return_type == 'pevp':
+            return pevp
+        elif return_type == 'modified_moisture_inputs':
+            return modified_moisture_inputs
+    return _calc_potential_transpiration
+
+
+def distribute_water_to_soil_layer(return_type):
+    """Distribute moisture inputs to one soil layer prior to transpiration.
+
+    Soil moisture inputs after runoff, evaporation, and initial
+    transpiration are distributed to soil layers sequentially according to the
+    field capacity of the layer.  If moisture inputs exceed the field capacity
+    of the layer, the remainder of moisture inputs move down to the next
+    adjacent soil layer.
+
+    Returns:
+        the function `_distribute_water`
+    """
+    def _distribute_water(adep, afiel, asmos, current_moisture_inputs):
+        """Revise soil moisture in this soil layer prior to transpiration.
+
+        Moisture inputs coming into this soil layer are compared to the field
+        capacity of the layer. If the field capacity is exceeded, the excess
+        moisture moves from this layer to the next adjacent layer.
+
+        Parameters:
+            adep (numpy.ndarray): parameter, depth of this soil layer in cm
+            afiel (numpy.ndarray): derived, field capacity of this layer
+            asmos (numpy.ndarray): derived, current soil moisture content of
+                this soil layer
+            current_moisture_inputs (numpy.ndarray): derived, moisture inputs
+                added to this soil layer
+
+        Returns:
+            asmos_revised, revised soil moisture in this layer, if return_type
+                is 'asmos_revised'
+            amov, moisture flowing from this layer into the next, if
+                return_type is 'amov'
+        """
+        valid_mask = (
+            (adep != _IC_NODATA) &
+            (afiel != _TARGET_NODATA) &
+            (asmos != _TARGET_NODATA) &
+            (current_moisture_inputs != _TARGET_NODATA))
+
+        afl = numpy.empty(adep.shape, dtype=numpy.float32)
+        afl[:] = _TARGET_NODATA
+        afl[valid_mask] = adep[valid_mask] * afiel[valid_mask]
+
+        asmos_interm = numpy.empty(adep.shape, dtype=numpy.float32)
+        asmos_interm[:] = _TARGET_NODATA
+        asmos_interm[valid_mask] = (
+            asmos[valid_mask] + current_moisture_inputs[valid_mask])
+
+        amov = numpy.empty(adep.shape, dtype=numpy.float32)
+        amov[:] = _TARGET_NODATA
+
+        exceeded_mask = (valid_mask & (asmos_interm > afl))
+        amov[exceeded_mask] = asmos_interm[exceeded_mask]
+
+        asmos_revised = numpy.empty(adep.shape, dtype=numpy.float32)
+        asmos_revised[:] = _TARGET_NODATA
+        asmos_revised[valid_mask] = asmos_interm[valid_mask]
+        asmos_revised[exceeded_mask] = afl[exceeded_mask]
+
+        notexceeded_mask = (valid_mask & (asmos_interm <= afl))
+        amov[notexceeded_mask] = 0.
+
+        if return_type == 'asmos_revised':
+            return asmos_revised
+        elif return_type == 'amov':
+            return amov
+    return _distribute_water
+
+
+def calc_available_water_for_transpiration(asmos, awilt, adep):
+    """Calculate water available for transpiration in one soil layer.
+
+    The water available for transpiration is the amount of water in the soil
+    layer minus the wilting point of the soil layer.
+
+    Parameters:
+        asmos (numpy.ndarray): derived, current moisture in the soil layer
+        awilt (numpy.ndarray): derived, wilting point of the soil layer
+        adep (numpy.ndarray): parameter, depth of the soil layer in cm
+
+    Returns:
+        avw, available water for transpiration
+    """
+    valid_mask = (
+        (asmos != _TARGET_NODATA) &
+        (awilt != _TARGET_NODATA) &
+        (adep != _IC_NODATA))
+    avw = numpy.empty(asmos.shape, dtype=numpy.float32)
+    avw[:] = _TARGET_NODATA
+    avw[valid_mask] = numpy.maximum(
+        asmos[valid_mask] - awilt[valid_mask] * adep[valid_mask], 0.)
+    return avw
+
+
+def revise_potential_transpiration(trap, tot):
+    """Revise potential transpiration according to water available.
+
+    Total potential transpiration, trap, is revised to be less than or equal
+    to total water available for transpiration, tot. Total water available
+    for transpiration is the sum of available water per soil layer.
+    Line 241, H2olos.f
+
+    Parameters:
+        trap (numpy.ndarray): derived, potential transpiration water losses
+        tot (numpy.ndarray): derived, total soil water available for
+            transpiration
+
+    Returns:
+        trap_revised, revised total potential transpiration
+    """
+    valid_mask = (
+        (trap != _TARGET_NODATA) &
+        (tot != _TARGET_NODATA))
+    trap_revised = numpy.empty(trap.shape, dtype=numpy.float32)
+    trap_revised[:] = _TARGET_NODATA
+    trap_revised[valid_mask] = numpy.minimum(trap[valid_mask], tot[valid_mask])
+    return trap_revised
+
+
+def remove_transpiration(return_type):
+    """Remove water from a soil layer via transpiration by plants.
+
+    Transpiration from one soil layer is apportioned from total potential
+    transpiration, trap, according to the available water for transpiration in
+    this soil layer. Lines 218-294, H2olos.f
+
+    Parameters:
+        return_type (string): flag indicating whether avinj (water in this soil
+            layer available to plants for growth) or asmos (total water in this
+            soil layer) should be returned
+
+    Returns:
+        the function `_remove_transpiration`
+    """
+    def _remove_transpiration(asmos, awilt, adep, trap, awwt, tot2):
+        """Remove water from a soil layer via transpiration by plants.
+
+        Parameters:
+            asmos (numpy.ndarray): derived, moisture in this soil layer after
+                additions from current month precipitation
+            awilt (numpy.ndarray): derived, wilting point of this soil layer
+            adep (numpy.ndarray): parameter, depth of this soil layer in cm
+            trap (numpy.ndarray): derived, total potential transpiration
+                across all soil layers accessible by plant roots
+            awwt (numpy.ndarray): derived, water available for transpiration
+                in this soil layer weighted by transpiration depth distribution
+                parameter
+            tot2 (numpy.ndarray): derived, the sum of weighted water available
+                for transpiration across soil layers
+
+        Returns:
+            avinj, water available to plants for growth in this layer after
+                losses to transpiration, if return type is 'avinj'
+            asmos_revised, total water in this layer after losses to
+                transpiration, if return type is 'asmos'
+        """
+        valid_mask = (
+            (asmos != _TARGET_NODATA) &
+            (awilt != _TARGET_NODATA) &
+            (adep != _IC_NODATA) &
+            (trap != _TARGET_NODATA) &
+            (awwt != _TARGET_NODATA) &
+            (tot2 != _TARGET_NODATA))
+
+        avinj = numpy.empty(asmos.shape, dtype=numpy.float32)
+        avinj[:] = _TARGET_NODATA
+        avinj[valid_mask] = numpy.maximum(
+            asmos[valid_mask] - awilt[valid_mask] * adep[valid_mask], 0.)
+
+        transpire_mask = (valid_mask & (tot2 > 0))
+        transpiration_loss = numpy.zeros(asmos.shape, dtype=numpy.float32)
+        transpiration_loss[transpire_mask] = numpy.minimum(
+            (trap[transpire_mask] *
+                awwt[transpire_mask]) / tot2[transpire_mask],
+            avinj[transpire_mask])
+        avinj[valid_mask] = avinj[valid_mask] - transpiration_loss[valid_mask]
+
+        asmos_revised = numpy.empty(asmos.shape, dtype=numpy.float32)
+        asmos_revised[:] = _TARGET_NODATA
+        asmos_revised[valid_mask] = (
+            asmos[valid_mask] - transpiration_loss[valid_mask])
+
+        if return_type == 'avinj':
+            return avinj
+        elif return_type == 'asmos':
+            return asmos_revised
+    return _remove_transpiration
+
+
+def calc_relative_water_content_lyr_1(asmos_1, adep_1, awilt_1, afiel_1):
+    """Calculate the relative water content of soil layer 1.
+
+    The relative water content of soil layer 1, prior to any evaporation losses
+    from soil layer 1, is used to estimate water available for evaporation
+    from soil layer 1. Line 280, H2olos.f
+
+    Parameters:
+        asmos_1 (numpy.ndarray): derived, moisture in soil layer 1 after losses
+            to transpiration
+        adep_1 (numpy.ndarray): parameter, depth of soil layer 1 in cm
+        awilt_1 (numpy.ndarray): derived, wilting point of soil layer 1
+        afiel_1 (numpy.ndarray): derived, field capacity of soil layer 1
+
+    Returns:
+        rwcf_1, relative water content of soil layer 1
+    """
+    valid_mask = (
+        (asmos_1 != _TARGET_NODATA) &
+        (adep_1 != _IC_NODATA) &
+        (awilt_1 != _TARGET_NODATA) &
+        (afiel_1 != _TARGET_NODATA))
+    rwcf_1 = numpy.empty(asmos_1.shape, dtype=numpy.float32)
+    rwcf_1[valid_mask] = (
+        (asmos_1[valid_mask] / adep_1[valid_mask] - awilt_1[valid_mask]) /
+        (afiel_1[valid_mask] - awilt_1[valid_mask]))
+    return rwcf_1
+
+
+def calc_evaporation_loss(rwcf_1, pevp, absevap, asmos_1, awilt_1, adep_1):
+    """Calculate evaporation from soil layer 1.
+
+    Some moisture is lost from soil layer 1 (i.e., the top soil layer) to
+    evaporation, separate from surface evaporation and transpiration by plants.
+    This amount is calculated from potential soil evaporation, which was
+    calculated from potential evapotranspiration prior to allocation of water
+    to soil layers. It is restricted to be less than or equal to water
+    available in this soil layer.
+
+    Parameters:
+        rwcf_1 (numpy.ndarray): derived, relative water content of soil layer 1
+        pevp (numpy.ndarray): derived, potential evaporation from soil layer 1
+        absevap (numpy.ndarray): derived, bare soil evaporation
+        asmos_1 (numpy.ndarray): derived, current moisture in soil layer 1
+        awilt_1 (numpy.ndarray): derived, wilting point of soil layer 1
+        adep_1 (numpy.ndarray): parameter, depth of soil layer 1 in cm
+
+    Returns:
+        evlos, moisture evaporated from soil layer 1
+    """
+    valid_mask = (
+        (rwcf_1 != _TARGET_NODATA) &
+        (pevp != _TARGET_NODATA) &
+        (absevap != _TARGET_NODATA) &
+        (asmos_1 != _TARGET_NODATA) &
+        (awilt_1 != _TARGET_NODATA) &
+        (adep_1 != _IC_NODATA))
+    evmt = numpy.empty(rwcf_1.shape, dtype=numpy.float32)
+    evmt[:] = _TARGET_NODATA
+    evmt[valid_mask] = numpy.maximum(
+        (rwcf_1[valid_mask] - 0.25) / (1 - 0.25), 0.01)
+    evlos = numpy.empty(rwcf_1.shape, dtype=numpy.float32)
+    evlos[:] = _TARGET_NODATA
+    evlos[valid_mask] = numpy.minimum(
+        evmt[valid_mask] * pevp[valid_mask] * absevap[valid_mask] * 0.1,
+        numpy.maximum(
+            asmos_1[valid_mask] - awilt_1[valid_mask] *
+            adep_1[valid_mask], 0.))
+    return evlos
+
+
+def _soil_water(
+        aligned_inputs, site_param_table, veg_trait_table, current_month,
+        month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
+    """Allocate precipitation to runoff, transpiration, and soil moisture.
+
+    Simulate snowfall and account for evaporation and melting of the snow pack.
+    Allocate the flow of precipitation through interception by plants,
+    runoff and infiltration into the soil, percolation through the soil, and
+    transpiration by plants. Update soil moisture in each soil layer.
+    Estimate avh2o_1 for each PFT (water available to the PFT for growth),
+    avh2o_3 (water in first two soil layers), and amov_2 (indicating whether
+    movement of water occurs from the second soil layer, used in
+    decomposition).
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including precipitation, temperature,
+            plant functional type composition, and site spatial index
+        site_param_table (dict): map of site spatial indices to dictionaries
+            containing site parameters
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters, including nlaypg, number of soil
+            layers access by plant roots
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        month_index (int): month of the simulation, such that month_index=1
+            indicates month 1 of the simulation
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        pp_reg (dict): map of key, path pairs giving persistent parameters
+            including field capacity of each soil layer
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+        pft_id_set (set): set of integers identifying plant functional types
+
+    Modifies:
+        the raster indicated by `sv_reg['snow_path']`, current snowpack
+        the raster indicated by `sv_reg['snlq_path']`, current liquid in snow
+        the raster indicated by `sv_reg['asmos_<lyr>_path']`, soil moisture
+            content, for each soil layer accessible by roots of any plant
+            functional type
+        the raster indicated by `month_reg['amov_2']`, movement of soil
+            moisture out of soil layer 2
+        the raster indicated by `sv_reg['avh2o_1_<PFT>_path']`, soil moisture
+            available for growth, for each plant functional type (PFT)
+        the raster indicated by `sv_reg['avh2o_3_path']`, available water in
+            the top two soil layers
+
+    Returns:
+        None
+    """
+    def calc_avg_temp(max_temp, min_temp):
+        """Calculate average temperature from maximum and minimum temp."""
+        valid_mask = (
+            (~numpy.isclose(max_temp, max_temp_nodata)) &
+            (~numpy.isclose(min_temp, min_temp_nodata)))
+        tave = numpy.empty(max_temp.shape, dtype=numpy.float32)
+        tave[:] = _IC_NODATA
+        tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
+        return tave
+
+    def calc_surface_litter_biomass(strucc_1, metabc_1):
+        """Calculate biomass in surface litter."""
+        valid_mask = (
+            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
+            (~numpy.isclose(metabc_1, metabc_1_nodata)))
+        alit = numpy.empty(strucc_1.shape, dtype=numpy.float32)
+        alit[:] = _TARGET_NODATA
+        alit[valid_mask] = (strucc_1[valid_mask] + metabc_1[valid_mask]) * 2.5
+        alit = numpy.minimum(alit, 400)
+        return alit
+
+    max_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
+    min_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
+    strucc_1_nodata = pygeoprocessing.get_raster_info(
+        prev_sv_reg['strucc_1_path'])['nodata'][0]
+    metabc_1_nodata = pygeoprocessing.get_raster_info(
+        prev_sv_reg['metabc_1_path'])['nodata'][0]
+
+    # get max number of soil layers to track
+    nlaypg_max = get_nlaypg_max(veg_trait_table)
+
+    # temporary intermediate rasters for soil water submodel
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'tave', 'current_moisture_inputs', 'modified_moisture_inputs',
+            'pet_rem', 'alit', 'sum_aglivc', 'sum_stdedc', 'sum_tgprod',
+            'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'trap_revised',
+            'pevp', 'tot', 'tot2', 'rwcf_1', 'evlos', 'avinj_interim_1']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for val in ['asmos_interim', 'avw', 'awwt', 'avinj']:
+        for lyr in xrange(1, nlaypg_max + 1):
+            val_lyr = '{}_{}'.format(val, lyr)
+            temp_val_dict[val_lyr] = os.path.join(
+                temp_dir, '{}.tif'.format(val_lyr))
+    # PFT-level temporary calculated values
+    for pft_i in pft_id_set:
+        for val in ['tgprod_weighted', 'sum_avinj']:
+            temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+
+    param_val_dict = {}
+    for val in ['fracro', 'precro', 'fwloss_1', 'fwloss_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    for val in ['adep', 'awtl']:
+        for lyr in xrange(1, nlaypg_max + 1):
+            val_lyr = '{}_{}'.format(val, lyr)
+            target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
+            param_val_dict[val_lyr] = target_path
+            site_to_val = dict(
+                [(site_code, float(table[val_lyr])) for
+                    (site_code, table) in site_param_table.iteritems()])
+            pygeoprocessing.reclassify_raster(
+                (aligned_inputs['site_index'], 1), site_to_val, target_path,
+                gdal.GDT_Float32, _IC_NODATA)
+
+    # calculate canopy and litter cover that influence moisture inputs
+    # calculate biomass in surface litter
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            prev_sv_reg['strucc_1_path'], prev_sv_reg['metabc_1_path']]],
+        calc_surface_litter_biomass, temp_val_dict['alit'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate the sum of aglivc (standing live biomass) and stdedc
+    # (standing dead biomass) across PFTs, weighted by % cover of each PFT
+    for sv in ['aglivc', 'stdedc']:
+        weighted_sum_path = temp_val_dict['sum_{}'.format(sv)]
+        weighted_state_variable_sum(
+            sv, prev_sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
+
+    # calculate the weighted sum of tgprod, potential production, across PFTs
+    weighted_path_list = []
+    for pft_i in pft_id_set:
+        target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
+        if month_reg['tgprod_{}'.format(pft_i)]:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    month_reg['tgprod_{}'.format(pft_i)],
+                    aligned_inputs['pft_{}'.format(pft_i)]]],
+                multiply_positive_rasters, target_path,
+                gdal.GDT_Float32, _TARGET_NODATA)
+            weighted_path_list.append(target_path)
+    if weighted_path_list:
+        raster_sum(
+            weighted_path_list, _TARGET_NODATA,
+            temp_val_dict['sum_tgprod'], _TARGET_NODATA, nodata_remove=True)
+    else:  # no potential production occurs this month, so tgprod = 0
+        pygeoprocessing.new_raster_from_base(
+            temp_val_dict['sum_aglivc'], temp_val_dict['sum_tgprod'],
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
+
+    # calculate average temperature
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            aligned_inputs['min_temp_{}'.format(current_month)]]],
+        calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
+
+    # calculate aboveground live biomass
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['sum_aglivc'], temp_val_dict['sum_tgprod']]],
+        _calc_aboveground_live_biomass, temp_val_dict['aliv'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate total standing biomass
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['aliv'], temp_val_dict['sum_stdedc']]],
+        _calc_standing_biomass, temp_val_dict['sd'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # modify standing snow, liquid in snow, return moisture inputs after snow
+    _snow(
+        aligned_inputs['site_index'], site_param_table,
+        aligned_inputs['precip_{}'.format(month_index)],
+        temp_val_dict['tave'],
+        aligned_inputs['max_temp_{}'.format(current_month)],
+        aligned_inputs['min_temp_{}'.format(current_month)],
+        prev_sv_reg['snow_path'], prev_sv_reg['snlq_path'],
+        current_month, sv_reg['snow_path'], sv_reg['snlq_path'],
+        temp_val_dict['modified_moisture_inputs'], temp_val_dict['pet_rem'])
+
+    # remove runoff and surface evaporation from moisture inputs
+    shutil.copyfile(
+        temp_val_dict['modified_moisture_inputs'],
+        temp_val_dict['current_moisture_inputs'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['current_moisture_inputs'],
+            param_val_dict['fracro'], param_val_dict['precro'],
+            sv_reg['snow_path'], temp_val_dict['alit'],
+            temp_val_dict['sd'], param_val_dict['fwloss_1'],
+            param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
+        subtract_surface_losses('inputs_after_surface'),
+        temp_val_dict['modified_moisture_inputs'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate bare soil evaporation
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['current_moisture_inputs'],
+            param_val_dict['fracro'], param_val_dict['precro'],
+            sv_reg['snow_path'], temp_val_dict['alit'],
+            temp_val_dict['sd'], param_val_dict['fwloss_1'],
+            param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
+        subtract_surface_losses('absevap'),
+        temp_val_dict['absevap'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate total losses to surface evaporation
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['current_moisture_inputs'],
+            param_val_dict['fracro'], param_val_dict['precro'],
+            sv_reg['snow_path'], temp_val_dict['alit'],
+            temp_val_dict['sd'], param_val_dict['fwloss_1'],
+            param_val_dict['fwloss_2'], temp_val_dict['pet_rem']]],
+        subtract_surface_losses('evap_losses'),
+        temp_val_dict['evap_losses'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # remove losses due to initial transpiration from water inputs
+    shutil.copyfile(
+        temp_val_dict['modified_moisture_inputs'],
+        temp_val_dict['current_moisture_inputs'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['pet_rem'], temp_val_dict['evap_losses'],
+            temp_val_dict['tave'], temp_val_dict['aliv'],
+            temp_val_dict['current_moisture_inputs']]],
+        calc_potential_transpiration('modified_moisture_inputs'),
+        temp_val_dict['modified_moisture_inputs'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate potential transpiration
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['pet_rem'], temp_val_dict['evap_losses'],
+            temp_val_dict['tave'], temp_val_dict['aliv'],
+            temp_val_dict['current_moisture_inputs']]],
+        calc_potential_transpiration('trap'), temp_val_dict['trap'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate potential evaporation from top soil layer
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['pet_rem'], temp_val_dict['evap_losses'],
+            temp_val_dict['tave'], temp_val_dict['aliv'],
+            temp_val_dict['current_moisture_inputs']]],
+        calc_potential_transpiration('pevp'), temp_val_dict['pevp'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # distribute water to each layer
+    for lyr in xrange(1, nlaypg_max + 1):
+        shutil.copyfile(
+            temp_val_dict['modified_moisture_inputs'],
+            temp_val_dict['current_moisture_inputs'])
+        # revise moisture content of this soil layer
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['adep_{}'.format(lyr)],
+                pp_reg['afiel_{}_path'.format(lyr)],
+                prev_sv_reg['asmos_{}_path'.format(lyr)],
+                temp_val_dict['current_moisture_inputs']]],
+            distribute_water_to_soil_layer('asmos_revised'),
+            temp_val_dict['asmos_interim_{}'.format(lyr)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        # calculate soil moisture moving to next layer
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['adep_{}'.format(lyr)],
+                pp_reg['afiel_{}_path'.format(lyr)],
+                prev_sv_reg['asmos_{}_path'.format(lyr)],
+                temp_val_dict['current_moisture_inputs']]],
+            distribute_water_to_soil_layer('amov'),
+            temp_val_dict['modified_moisture_inputs'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        if lyr == 2:
+            # moisture leaving soil layer 2 is needed in decomposition submodel
+            shutil.copyfile(
+                temp_val_dict['modified_moisture_inputs'], month_reg['amov_2'])
+
+    # calculate available water for transpiration
+    avw_list = []
+    for lyr in xrange(1, nlaypg_max + 1):
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['asmos_interim_{}'.format(lyr)],
+                pp_reg['awilt_{}_path'.format(lyr)],
+                param_val_dict['adep_{}'.format(lyr)]]],
+            calc_available_water_for_transpiration,
+            temp_val_dict['avw_{}'.format(lyr)], gdal.GDT_Float32,
+            _TARGET_NODATA)
+        avw_list.append(temp_val_dict['avw_{}'.format(lyr)])
+    # total water available for transpiration
+    raster_sum(avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
+
+    # calculate water available for transpiration weighted by transpiration
+    # depth for that soil layer
+    awwt_list = []
+    for lyr in xrange(1, nlaypg_max + 1):
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['avw_{}'.format(lyr)],
+                param_val_dict['awtl_{}'.format(lyr)]]],
+            multiply_positive_rasters, temp_val_dict['awwt_{}'.format(lyr)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        awwt_list.append(temp_val_dict['awwt_{}'.format(lyr)])
+    # total weighted available water for transpiration
+    raster_sum(
+        awwt_list, _TARGET_NODATA, temp_val_dict['tot2'], _TARGET_NODATA)
+
+    # revise total potential transpiration
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [temp_val_dict['trap'], temp_val_dict['tot']]],
+        revise_potential_transpiration, temp_val_dict['trap_revised'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # remove water via transpiration
+    for lyr in xrange(1, nlaypg_max + 1):
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['asmos_interim_{}'.format(lyr)],
+                pp_reg['awilt_{}_path'.format(lyr)],
+                param_val_dict['adep_{}'.format(lyr)],
+                temp_val_dict['trap_revised'],
+                temp_val_dict['awwt_{}'.format(lyr)], temp_val_dict['tot2']]],
+            remove_transpiration('avinj'),
+            temp_val_dict['avinj_{}'.format(lyr)], gdal.GDT_Float32,
+            _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['asmos_interim_{}'.format(lyr)],
+                pp_reg['awilt_{}_path'.format(lyr)],
+                param_val_dict['adep_{}'.format(lyr)],
+                temp_val_dict['trap_revised'],
+                temp_val_dict['awwt_{}'.format(lyr)], temp_val_dict['tot2']]],
+            remove_transpiration('asmos'), sv_reg['asmos_{}_path'.format(lyr)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # relative water content of soil layer 1
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            sv_reg['asmos_1_path'], param_val_dict['adep_1'],
+            pp_reg['awilt_1_path'], pp_reg['afiel_1_path']]],
+        calc_relative_water_content_lyr_1, temp_val_dict['rwcf_1'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # evaporation from soil layer 1
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['rwcf_1'], temp_val_dict['pevp'],
+            temp_val_dict['absevap'], sv_reg['asmos_1_path'],
+            pp_reg['awilt_1_path'], param_val_dict['adep_1']]],
+        calc_evaporation_loss, temp_val_dict['evlos'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # remove evaporation from total moisture in soil layer 1
+    shutil.copyfile(sv_reg['asmos_1_path'], temp_val_dict['asmos_interim_1'])
+    raster_difference(
+        temp_val_dict['asmos_interim_1'], _TARGET_NODATA,
+        temp_val_dict['evlos'], _TARGET_NODATA, sv_reg['asmos_1_path'],
+        _TARGET_NODATA, nodata_remove=False)
+
+    # remove evaporation from moisture available to plants in soil layer 1
+    shutil.copyfile(temp_val_dict['avinj_1'], temp_val_dict['avinj_interim_1'])
+    raster_difference(
+        temp_val_dict['avinj_interim_1'], _TARGET_NODATA,
+        temp_val_dict['evlos'], _TARGET_NODATA, temp_val_dict['avinj_1'],
+        _TARGET_NODATA, nodata_remove=False)
+
+    # calculate avh2o_1, soil water available for growth, for each PFT
+    for pft_i in pft_id_set:
+        soil_layers_accessible = [
+            temp_val_dict['avinj_{}'.format(lyr)] for lyr in
+            xrange(1, veg_trait_table[pft_i]['nlaypg'] + 1)]
+        raster_sum(
+            soil_layers_accessible, _TARGET_NODATA,
+            temp_val_dict['sum_avinj_{}'.format(pft_i)],
+            _TARGET_NODATA, nodata_remove=True)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['sum_avinj_{}'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
+            multiply_positive_rasters, sv_reg['avh2o_1_{}_path'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate avh2o_3, moisture in top two soil layers
+    soil_layers_to_sum = [
+        temp_val_dict['avinj_{}'.format(lyr)] for lyr in [1, 2]]
+    raster_sum(
+        soil_layers_to_sum, _TARGET_NODATA, sv_reg['avh2o_3_path'],
+        _TARGET_NODATA, nodata_remove=False)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
