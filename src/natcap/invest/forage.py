@@ -749,8 +749,8 @@ def raster_difference(
     def raster_difference_op(raster1, raster2):
         """Subtract raster2 from raster1 without removing nodata values."""
         valid_mask = (
-            (raster1 != raster1_nodata) &
-            (raster2 != raster2_nodata))
+            (~numpy.isclose(raster1, raster1_nodata)) &
+            (~numpy.isclose(raster2, raster2_nodata)))
         result = numpy.empty(raster1.shape, dtype=numpy.float32)
         result[:] = target_nodata
         result[valid_mask] = raster1[valid_mask] - raster2[valid_mask]
@@ -890,10 +890,10 @@ def _calc_ompc(
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
-            (som1c_2 != som1c_2_nodata) &
-            (som2c_2 != som2c_2_nodata) &
-            (som3c != som3c_nodata) &
-            (bulkd != bulkd_nodata) &
+            (~numpy.isclose(som1c_2, som1c_2_nodata)) &
+            (~numpy.isclose(som2c_2, som2c_2_nodata)) &
+            (~numpy.isclose(som3c, som3c_nodata)) &
+            (~numpy.isclose(bulkd, bulkd_nodata)) &
             (edepth != _IC_NODATA))
         ompc[valid_mask] = (
             (som1c_2[valid_mask] + som2c_2[valid_mask] +
@@ -954,11 +954,11 @@ def _calc_afiel(
         afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
         valid_mask = (
-            (sand != sand_nodata) &
-            (silt != silt_nodata) &
-            (clay != clay_nodata) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (~numpy.isclose(silt, silt_nodata)) &
+            (~numpy.isclose(clay, clay_nodata)) &
             (ompc != _TARGET_NODATA) &
-            (bulkd != bulkd_nodata))
+            (~numpy.isclose(bulkd, bulkd_nodata)))
         afiel[valid_mask] = (
             0.3075 * sand[valid_mask] + 0.5886 * silt[valid_mask] +
             0.8039 * clay[valid_mask] + 2.208E-03 * ompc[valid_mask] +
@@ -1023,11 +1023,11 @@ def _calc_awilt(
         awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
         valid_mask = (
-            (sand != sand_nodata) &
-            (silt != silt_nodata) &
-            (clay != clay_nodata) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (~numpy.isclose(silt, silt_nodata)) &
+            (~numpy.isclose(clay, clay_nodata)) &
             (ompc != _TARGET_NODATA) &
-            (bulkd != bulkd_nodata))
+            (~numpy.isclose(bulkd, bulkd_nodata)))
         awilt[valid_mask] = (
             -0.0059 * sand[valid_mask] + 0.1142 * silt[valid_mask] +
             0.5766 * clay[valid_mask] + 2.228E-03 * ompc[valid_mask] +
@@ -1222,7 +1222,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (peftxa != _IC_NODATA) &
             (peftxb != _IC_NODATA) &
-            (sand != sand_nodata))
+            (~numpy.isclose(sand, sand_nodata)))
         eftext[valid_mask] = (
             peftxa[valid_mask] + (peftxb[valid_mask] * sand[valid_mask]))
         return eftext
@@ -1255,7 +1255,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (p1co2a_2 != _IC_NODATA) &
             (p1co2b_2 != _IC_NODATA) &
-            (sand != sand_nodata))
+            (~numpy.isclose(sand, sand_nodata)))
         p1co2_2[valid_mask] = (
             p1co2a_2[valid_mask] + (p1co2b_2[valid_mask] * sand[valid_mask]))
         return p1co2_2
@@ -1287,7 +1287,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (ps1s3_1 != _IC_NODATA) &
             (ps1s3_2 != _IC_NODATA) &
-            (clay != clay_nodata))
+            (~numpy.isclose(clay, clay_nodata)))
         fps1s3[valid_mask] = (
             ps1s3_1[valid_mask] + (ps1s3_2[valid_mask] * clay[valid_mask]))
         return fps1s3
@@ -1318,7 +1318,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (ps2s3_1 != _IC_NODATA) &
             (ps2s3_2 != _IC_NODATA) &
-            (clay != clay_nodata))
+            (~numpy.isclose(clay, clay_nodata)))
         fps2s3[valid_mask] = (
             ps2s3_1[valid_mask] + (ps2s3_2[valid_mask] * clay[valid_mask]))
         return fps2s3
@@ -1349,7 +1349,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         valid_mask = (
             (omlech_1 != _IC_NODATA) &
             (omlech_2 != _IC_NODATA) &
-            (sand != sand_nodata))
+            (~numpy.isclose(sand, sand_nodata)))
         orglch[valid_mask] = (
             omlech_1[valid_mask] + (omlech_2[valid_mask] * sand[valid_mask]))
         return orglch
@@ -1484,8 +1484,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (pcemic1_2 != _IC_NODATA) &
             (pcemic1_1 != _IC_NODATA) &
             (pcemic1_3 != _IC_NODATA) &
-            (struce_1 != struce_1_nodata) &
-            (strucc_1 != strucc_1_nodata))
+            (~numpy.isclose(struce_1, struce_1_nodata)) &
+            (~numpy.isclose(strucc_1, strucc_1_nodata)))
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
@@ -1539,8 +1539,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (pcemic2_2 != _IC_NODATA) &
             (pcemic2_1 != _IC_NODATA) &
             (pcemic2_3 != _IC_NODATA) &
-            (struce_1 != struce_1_nodata) &
-            (strucc_1 != strucc_1_nodata) &
+            (~numpy.isclose(struce_1, struce_1_nodata)) &
+            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
             (rad1p_1 != _IC_NODATA) &
             (rad1p_2 != _IC_NODATA) &
             (rad1p_3 != _IC_NODATA) &
@@ -1893,8 +1893,8 @@ def _reference_evapotranspiration(
         langleys2watts = 54.0
 
         valid_mask = (
-            (max_temp != maxtmp_nodata) &
-            (min_temp != mintmp_nodata) &
+            (~numpy.isclose(max_temp, maxtmp_nodata)) &
+            (~numpy.isclose(min_temp, mintmp_nodata)) &
             (shwave != _TARGET_NODATA) &
             (fwloss_4 != _IC_NODATA))
         trange = numpy.empty(fwloss_4.shape, dtype=numpy.float32)
@@ -2016,9 +2016,9 @@ def _potential_production(
         valid_mask = (
             (aglivc >= 0.) &
             (pmxbio != _IC_NODATA) &
-            (maxtmp != maxtmp_nodata) &
+            (~numpy.isclose(maxtmp, maxtmp_nodata)) &
             (pmxtmp != _IC_NODATA) &
-            (mintmp != mintmp_nodata) &
+            (~numpy.isclose(mintmp, mintmp_nodata)) &
             (pmntmp != _IC_NODATA))
         bio[valid_mask] = aglivc[valid_mask] * 2.5
         bio[bio > pmxbio] = pmxbio[bio > pmxbio]
@@ -2119,8 +2119,8 @@ def _potential_production(
         """
         valid_mask = (
             (pevap != _TARGET_NODATA) &
-            (avh2o_1 != avh2o_1_nodata) &
-            (precip != precip_nodata) &
+            (~numpy.isclose(avh2o_1, avh2o_1_nodata)) &
+            (~numpy.isclose(precip, precip_nodata)) &
             (wc != _TARGET_NODATA) &
             (pprpts_1 != _IC_NODATA) &
             (pprpts_2 != _IC_NODATA) &
@@ -2169,7 +2169,7 @@ def _potential_production(
                 by obstruction
         """
         valid_mask = (
-            (strucc_1 != strucc_1_nodata) &
+            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
             (pmxbio != _IC_NODATA) &
             (biok5 != _IC_NODATA))
 
@@ -2422,7 +2422,7 @@ def _calc_favail_P(sv_reg, param_val_dict):
             favail_P, fraction of mineral P available to plants
         """
         valid_mask = (
-            (minerl_1_1 != minerl_1_1_nodata) &
+            (~numpy.isclose(minerl_1_1, minerl_1_1_nodata)) &
             (favail_4 != _IC_NODATA) &
             (favail_5 != _IC_NODATA) &
             (favail_6 != _IC_NODATA))
@@ -2514,10 +2514,10 @@ def _calc_available_nutrient(
         """
         valid_mask = (
             (rictrl != _IC_NODATA) &
-            (bglivc != bglivc_nodata) &
+            (~numpy.isclose(bglivc, bglivc_nodata)) &
             (riint != _IC_NODATA) &
             (favail != _IC_NODATA) &
-            (crpstg != crpstg_nodata))
+            (~numpy.isclose(crpstg, crpstg_nodata)))
 
         rimpct = numpy.empty(rictrl.shape, dtype=numpy.float32)
         rimpct[:] = _TARGET_NODATA
@@ -2859,7 +2859,7 @@ def calc_ce_ratios(
         valid_mask = (
             (pra_1 != _IC_NODATA) &
             (pra_2 != _IC_NODATA) &
-            (aglivc != aglivc_nodata) &
+            (~numpy.isclose(aglivc, aglivc_nodata)) &
             (biomax != _IC_NODATA))
 
         cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
@@ -2889,7 +2889,7 @@ def calc_ce_ratios(
         valid_mask = (
             (prb_1 != _IC_NODATA) &
             (prb_2 != _IC_NODATA) &
-            (annual_precip != annual_precip_nodata))
+            (~numpy.isclose(annual_precip, annual_precip_nodata)))
 
         cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
         cercrp_below[:] = _TARGET_NODATA
@@ -3632,9 +3632,9 @@ def _snow(
             """
             valid_mask = (
                 (tave != _IC_NODATA) &
-                (precip != precip_nodata) &
-                (snow != snow_nodata) &
-                (snlq != snlq_nodata) &
+                (~numpy.isclose(precip, precip_nodata)) &
+                (~numpy.isclose(snow, snow_nodata)) &
+                (~numpy.isclose(snlq, snlq_nodata)) &
                 (pet != _TARGET_NODATA) &
                 (tmelt_1 != _IC_NODATA) &
                 (tmelt_2 != _IC_NODATA) &
@@ -4361,8 +4361,8 @@ def _soil_water(
     def calc_avg_temp(max_temp, min_temp):
         """Calculate average temperature from maximum and minimum temp."""
         valid_mask = (
-            (max_temp != max_temp_nodata) &
-            (min_temp != min_temp_nodata))
+            (~numpy.isclose(max_temp, max_temp_nodata)) &
+            (~numpy.isclose(min_temp, min_temp_nodata)))
         tave = numpy.empty(max_temp.shape, dtype=numpy.float32)
         tave[:] = _IC_NODATA
         tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
@@ -4371,8 +4371,8 @@ def _soil_water(
     def calc_surface_litter_biomass(strucc_1, metabc_1):
         """Calculate biomass in surface litter."""
         valid_mask = (
-            (strucc_1 != strucc_1_nodata) &
-            (metabc_1 != metabc_1_nodata))
+            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
+            (~numpy.isclose(metabc_1, metabc_1_nodata)))
         alit = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         alit[:] = _TARGET_NODATA
         alit[valid_mask] = (strucc_1[valid_mask] + metabc_1[valid_mask]) * 2.5
