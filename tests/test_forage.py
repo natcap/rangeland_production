@@ -2295,7 +2295,8 @@ class foragetests(unittest.TestCase):
                     minimum temperature and cm of snow that will melt
 
             Returns:
-                dict of modified quantities: snow, snlq, pet, inputs_after_snow
+                dict of modified quantities: snowmelt, snow, snlq, pet,
+                inputs_after_snow
             """
             tave = (max_temp + min_temp) / 2.
             inputs_after_snow = precip
@@ -2310,6 +2311,7 @@ class foragetests(unittest.TestCase):
                     # all precip is rain on snow, none left
                     inputs_after_snow = 0
 
+            snowmelt = 0
             if snow > 0:
                 snowtot = snow + snlq
                 evsnow = min(snowtot, (pet * 0.87))
@@ -2329,6 +2331,7 @@ class foragetests(unittest.TestCase):
                         inputs_after_snow = add
 
             results_dict = {
+                'snowmelt': snowmelt,
                 'snow': snow,
                 'snlq': snlq,
                 'pet': pet,
@@ -2373,6 +2376,7 @@ class foragetests(unittest.TestCase):
         min_temp_path = os.path.join(self.workspace_dir, 'min_temp.tif')
         prev_snow_path = os.path.join(self.workspace_dir, 'prev_snow.tif')
         prev_snlq_path = os.path.join(self.workspace_dir, 'prev_snlq.tif')
+        snowmelt_path = os.path.join(self.workspace_dir, 'snowmelt.tif')
         snow_path = os.path.join(self.workspace_dir, 'snow.tif')
         snlq_path = os.path.join(self.workspace_dir, 'snlq.tif')
         inputs_after_snow_path = os.path.join(
@@ -2411,12 +2415,16 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
 
         self.assert_all_values_in_raster_within_range(
             pet_rem_path, result_dict['pet'] - tolerance,
             result_dict['pet'] + tolerance, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'], result_dict['snow'],
@@ -2473,8 +2481,12 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'] - tolerance,
@@ -2534,8 +2546,12 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'] - tolerance,
@@ -2596,8 +2612,12 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'], result_dict['snow'],
@@ -3953,6 +3973,7 @@ class foragetests(unittest.TestCase):
             # monthly shared quantities
             month_reg = {
                 'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+                'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif')
             }
             for pft_i in pft_dict.iterkeys():
                 month_reg['tgprod_{}'.format(pft_i)] = os.path.join(

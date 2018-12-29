@@ -174,7 +174,7 @@ _PFT_INTERMEDIATE_VALUES = [
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
-_SITE_INTERMEDIATE_VALUES = ['amov_2']
+_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -3545,8 +3545,8 @@ def _root_shoot_ratio(
 def _snow(
         site_index_path, site_param_table, precip_path, tave_path,
         max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-        current_month, snow_path, snlq_path, inputs_after_snow_path,
-        pet_rem_path):
+        current_month, snowmelt_path, snow_path, snlq_path,
+        inputs_after_snow_path, pet_rem_path):
     """Account for precipitation as snow and snowmelt from snowpack.
 
     Determine whether precipitation falls as snow. Track the fate of
@@ -3579,6 +3579,7 @@ def _snow(
             evapotranspiration remaining after any evaporation of snow
 
     Modifies:
+        the raster indicated by `snowmelt_path`
         the raster indicated by `snow_path`
         the raster indicated by `snlq_path`
         the raster indicated by `inputs_after_snow_path`
@@ -3625,6 +3626,7 @@ def _snow(
                     the atmosphere
 
             Returns:
+                snowmelt if return_type is 'snowmelt'
                 snow_revised if return_type is 'snow'
                 snlq_revised if return_type is 'snlq'
                 pet_revised if return_type is 'pet'
@@ -3696,7 +3698,9 @@ def _snow(
             snlq_revised[drain_mask] = (
                 snlq_revised[drain_mask] - inputs_after_snow[drain_mask])
 
-            if return_type == 'snow':
+            if return_type == 'snowmelt':
+                return snowmelt
+            elif return_type == 'snow':
                 return snow_revised
             elif return_type == 'snlq':
                 return snlq_revised
@@ -3739,6 +3743,16 @@ def _snow(
     _reference_evapotranspiration(
         max_temp_path, min_temp_path, temp_val_dict['shwave'],
         param_val_dict['fwloss_4'], temp_val_dict['pet'])
+
+    # calculate snowmelt
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            tave_path, precip_path, prev_snow_path,
+            prev_snlq_path, temp_val_dict['pet'],
+            param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
+            temp_val_dict['shwave']]],
+        calc_snow_moisture("snowmelt"), snowmelt_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate change in snow
     pygeoprocessing.raster_calculator(
@@ -4498,8 +4512,9 @@ def _soil_water(
         aligned_inputs['max_temp_{}'.format(current_month)],
         aligned_inputs['min_temp_{}'.format(current_month)],
         prev_sv_reg['snow_path'], prev_sv_reg['snlq_path'],
-        current_month, sv_reg['snow_path'], sv_reg['snlq_path'],
-        temp_val_dict['modified_moisture_inputs'], temp_val_dict['pet_rem'])
+        current_month, month_reg['snowmelt'], sv_reg['snow_path'],
+        sv_reg['snlq_path'], temp_val_dict['modified_moisture_inputs'],
+        temp_val_dict['pet_rem'])
 
     # remove runoff and surface evaporation from moisture inputs
     shutil.copyfile(
