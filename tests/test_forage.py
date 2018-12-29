@@ -4203,3 +4203,81 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg']['avh2o_3_path'],
             results_dict['avh2o_3'] - tolerance,
             results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
+
+    def test_monthly_N_fixation(self):
+        """Test `_monthly_N_fixation`.
+
+        Use the function `_monthly_N_fixation` to calculate monthly atmospheric
+        N deposition and add it to the surface mineral N pool.  Compare results
+        to values calculated by hand.
+
+        Raises:
+            AssertionError if updated mineral_1_1 does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        # known inputs
+        precip = 12.6
+        month_index = 4
+        annual_precip = 230.
+        baseNdep = 24.
+        epnfs_2 = 0.01
+        prev_minerl_1_1 = 3.2
+        minerl_1_1 = 4.5695652
+
+        aligned_inputs = {
+            'precip_{}'.format(month_index): os.path.join(
+                self.workspace_dir, 'precip_{}.tif'.format(month_index)),
+            'site_index': os.path.join(
+                    self.workspace_dir, 'site_index.tif'),
+        }
+        year_reg = {
+            'annual_precip_path': os.path.join(
+                self.workspace_dir, 'annual_precip.tif'),
+            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif')
+        }
+        prev_sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1_prev.tif'),
+        }
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+        }
+        site_param_table = {1: {'epnfs_2': epnfs_2}}
+
+        create_random_raster(
+            aligned_inputs['precip_{}'.format(month_index)], precip,
+            precip)
+        create_random_raster(aligned_inputs['site_index'], 1, 1)
+        create_random_raster(
+            year_reg['annual_precip_path'], annual_precip, annual_precip)
+        create_random_raster(year_reg['baseNdep_path'], baseNdep, baseNdep)
+        create_random_raster(
+            prev_sv_reg['minerl_1_1_path'], prev_minerl_1_1, prev_minerl_1_1)
+
+        tolerance = 0.000001
+        forage._monthly_N_fixation(
+            aligned_inputs, month_index, site_param_table,
+            year_reg, prev_sv_reg, sv_reg)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
+            minerl_1_1 + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(
+            aligned_inputs['precip_{}'.format(month_index)], -9999)
+        insert_nodata_values_into_raster(
+            year_reg['baseNdep_path'], _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            prev_sv_reg['minerl_1_1_path'], _TARGET_NODATA)
+
+        forage._monthly_N_fixation(
+            aligned_inputs, month_index, site_param_table,
+            year_reg, prev_sv_reg, sv_reg)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
+            minerl_1_1 + tolerance, _TARGET_NODATA)

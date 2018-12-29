@@ -662,6 +662,10 @@ def execute(args):
             aligned_inputs, site_param_table, veg_trait_table, current_month,
             month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
 
+        _monthly_N_fixation(
+            aligned_inputs, month_index, site_param_table, year_reg,
+            prev_sv_reg, sv_reg)
+
 
 def multiply_positive_rasters(raster1, raster2):
         """Multiply positive values in two rasters."""
@@ -2889,7 +2893,7 @@ def calc_ce_ratios(
         valid_mask = (
             (prb_1 != _IC_NODATA) &
             (prb_2 != _IC_NODATA) &
-            (~numpy.isclose(annual_precip, annual_precip_nodata)))
+            (annual_precip != _TARGET_NODATA))
 
         cercrp_below = numpy.empty(prb_1.shape, dtype=numpy.float32)
         cercrp_below[:] = _TARGET_NODATA
@@ -2901,8 +2905,6 @@ def calc_ce_ratios(
 
     aglivc_nodata = pygeoprocessing.get_raster_info(
         aglivc_path)['nodata'][0]
-    annual_precip_nodata = pygeoprocessing.get_raster_info(
-        annual_precip_path)['nodata'][0]
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
@@ -4727,6 +4729,106 @@ def _soil_water(
     raster_sum(
         soil_layers_to_sum, _TARGET_NODATA, sv_reg['avh2o_3_path'],
         _TARGET_NODATA, nodata_remove=False)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def _monthly_N_fixation(
+        aligned_inputs, month_index, site_param_table, year_reg, prev_sv_reg,
+        sv_reg):
+    """Add monthly atmospheric nitrogen fixation to surface mineral N.
+
+    Atmospheric N fixation for the month is calculated from annual N
+    deposition, calculated once per year, according to the ratio of monthly
+    precipitation to annual precipitation.  Total N fixed in this month is
+    added to the surface mineral N pool.  Lines 193-205, Simsom.f
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including precipitation and site index
+            path
+        month_index (int): month of the simulation, such that month_index=13
+            indicates month 13 of the simulation
+        site_param_table (dict): map of site spatial indices to dictionaries
+            containing site parameters
+        year_reg (dict): map of key, path pairs giving paths to rasters that
+            are modified once per year, including annual precipitation and base
+            N deposition
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month, including minerl_1_1, mineral N in the
+            surface layer
+
+    Modifies:
+        the raster indicated by sv_reg['minerl_1_1_path']
+
+    Returns:
+        none
+    """
+    def calc_N_fixation(
+            precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1):
+        """Add monthly N fixation to surface mineral N pool.
+
+        Monthly N fixation is calculated from annual N deposition according to
+        the ratio of monthly precipitation to annual precipitation.
+
+        Parameters:
+            precip (numpy.ndarray): input, monthly precipitation
+            annual_precip (numpy.ndarray): derived, annual precipitation
+            baseNdep (numpy.ndarray): derived, annual atmospheric N deposition
+            epnfs_2 (numpy.ndarray): parameter, intercept of regression
+                predicting N deposition from annual precipitation
+            prev_minerl_1_1 (numpy.ndarray): state variable, mineral N in the
+                surface layer in previous month
+
+        Returns:
+            minerl_1_1, updated mineral N in the surface layer
+        """
+        valid_mask = (
+            (~numpy.isclose(precip, precip_nodata)) &
+            (annual_precip != _TARGET_NODATA) &
+            (baseNdep != _TARGET_NODATA) &
+            (epnfs_2 != _IC_NODATA) &
+            (~numpy.isclose(prev_minerl_1_1, minerl_1_1_nodata)))
+        wdfxm = numpy.zeros(precip.shape, dtype=numpy.float32)
+        wdfxm[valid_mask] = (
+            baseNdep[valid_mask] *
+            (precip[valid_mask] / annual_precip[valid_mask]) +
+            epnfs_2[valid_mask] *
+            numpy.minimum(annual_precip[valid_mask], 100.) *
+            (precip[valid_mask] / annual_precip[valid_mask]))
+
+        minerl_1_1 = numpy.empty(precip.shape, dtype=numpy.float32)
+        minerl_1_1[:] = _TARGET_NODATA
+        minerl_1_1[valid_mask] = (
+            prev_minerl_1_1[valid_mask] + wdfxm[valid_mask])
+        return minerl_1_1
+
+    precip_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['precip_{}'.format(month_index)])['nodata'][0]
+    minerl_1_1_nodata = pygeoprocessing.get_raster_info(
+        prev_sv_reg['minerl_1_1_path'])['nodata'][0]
+
+    # temporary intermediate rasters for calculating available nutrient
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    target_path = os.path.join(temp_dir, 'epnfs_2.tif')
+    param_val_dict = {'epnfs_2': target_path}
+    site_to_val = dict(
+        [(site_code, float(table['epnfs_2'])) for
+            (site_code, table) in site_param_table.iteritems()])
+    pygeoprocessing.reclassify_raster(
+        (aligned_inputs['site_index'], 1), site_to_val, target_path,
+        gdal.GDT_Float32, _IC_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            aligned_inputs['precip_{}'.format(month_index)],
+            year_reg['annual_precip_path'], year_reg['baseNdep_path'],
+            param_val_dict['epnfs_2'], prev_sv_reg['minerl_1_1_path']]],
+        calc_N_fixation, sv_reg['minerl_1_1_path'], gdal.GDT_Float32,
+        _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
