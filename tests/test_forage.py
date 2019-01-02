@@ -1948,7 +1948,7 @@ class foragetests(unittest.TestCase):
 
         insert_nodata_values_into_raster(aglivc_path, -999)
         insert_nodata_values_into_raster(prbmn_1_path, _IC_NODATA)
-        insert_nodata_values_into_raster(annual_precip_path, -9)
+        insert_nodata_values_into_raster(annual_precip_path, _TARGET_NODATA)
         forage.calc_ce_ratios(
             pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
@@ -4281,3 +4281,124 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
             minerl_1_1 + tolerance, _TARGET_NODATA)
+
+    def test_calc_anerb(self):
+        """Test `calc_anerb`.
+
+        Use the function `calc_anerb` to calculate the effect of soil anaerobic
+        conditions on decomposition. Compare the calculated value to a value
+        calculated by point-based version.
+
+        Raises:
+            AssertionError if anerb does not match value calculated by
+                point-based version
+
+        Returns:
+            None
+        """
+        def calc_anerb_point(
+                rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
+            """Calculate effect of soil anaerobic conditions on decomposition.
+
+            The impact of soil anaerobic conditions on decomposition is
+            calculated from soil moisture and reference evapotranspiration.
+            Anerob.f.
+
+            Parameters:
+                rprpet (float): ratio of precipitation or snowmelt to
+                    reference evapotranspiration
+                pevap (float): reference evapotranspiration
+                drain (float): the fraction of excess water lost by
+                    drainage. Indicates whether a soil is sensitive for
+                    anaerobiosis (drain = 0) or not (drain = 1)
+                aneref_1 (float): value of rprpet below which there
+                    is no negative impact of soil anaerobic conditions on
+                    decomposition
+                aneref_2 (float): value of rprpet above which there
+                    is maximum negative impact of soil anaerobic conditions on
+                    decomposition
+                aneref_3 (float): minimum value of the impact of
+                    soil anaerobic conditions on decomposition
+
+            Returns:
+                anerb, the effect of soil anaerobic conditions on decomposition
+            """
+            anerb = 1
+            if rprpet > aneref_1:
+                xh2o = (rprpet - aneref_1) * pevap * (1. - drain)
+                if xh2o > 0:
+                    newrat = aneref_1 + (xh2o / pevap)
+                    slope = (1. - aneref_3) / (aneref_1 - aneref_2)
+                    anerb = 1. + slope * (newrat - aneref_1)
+                anerb = max(anerb, aneref_3)
+            return anerb
+        from natcap.invest import forage
+
+        array_shape = (10, 10)
+        tolerance = 0.00000001
+
+        # low rprpet, anerb = 1
+        rprpet = 0.8824
+        pevap = 6.061683
+        drain = 0.003
+        aneref_1 = 1.5
+        aneref_2 = 3.
+        aneref_3 = 0.3
+
+        rprpet_arr = numpy.full(array_shape, rprpet)
+        pevap_arr = numpy.full(array_shape, pevap)
+        drain_arr = numpy.full(array_shape, drain)
+        aneref_1_arr = numpy.full(array_shape, aneref_1)
+        aneref_2_arr = numpy.full(array_shape, aneref_2)
+        aneref_3_arr = numpy.full(array_shape, aneref_3)
+
+        anerb = calc_anerb_point(
+            rprpet, pevap, drain, aneref_1, aneref_2, aneref_3)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(rprpet_arr, _TARGET_NODATA)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        # high rprpet, xh2o > 0
+        rprpet = 2.0004
+        rprpet_arr = numpy.full(array_shape, rprpet)
+        anerb = calc_anerb_point(
+            rprpet, pevap, drain, aneref_1, aneref_2, aneref_3)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(drain_arr, _IC_NODATA)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        # high rprpet, xh2o = 0
+        drain = 1.
+        drain_arr = numpy.full(array_shape, drain)
+        anerb = calc_anerb_point(
+            rprpet, pevap, drain, aneref_1, aneref_2, aneref_3)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(pevap_arr, _TARGET_NODATA)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)

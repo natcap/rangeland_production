@@ -3753,7 +3753,7 @@ def _snow(
             prev_snlq_path, temp_val_dict['pet'],
             param_val_dict['tmelt_1'], param_val_dict['tmelt_2'],
             temp_val_dict['shwave']]],
-        calc_snow_moisture("snowmelt"), snowmelt_path,
+        calc_snow_moisture('snowmelt'), snowmelt_path,
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate change in snow
@@ -4832,3 +4832,56 @@ def _monthly_N_fixation(
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+
+def calc_anerb(rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
+    """Calculate the effect of soil anaerobic conditions on decomposition.
+
+    The impact of soil anaerobic conditions on decomposition is calculated from
+    soil moisture and reference evapotranspiration. Anerob.f.
+
+    Parameters:
+        rprpet (numpy.ndarray): derived, ratio of precipitation or snowmelt to
+            reference evapotranspiration
+        pevap (numpy.ndarray): derived, reference evapotranspiration
+        drain (numpy.ndarray): parameter, the fraction of excess water lost by
+            drainage. Indicates whether a soil is sensitive for anaerobiosis
+            (drain = 0) or not (drain = 1)
+        aneref_1 (numpy.ndarray): parameter, value of rprpet below which there
+            is no negative impact of soil anaerobic conditions on decomposition
+        aneref_2 (numpy.ndarray): parameter, value of rprpet above which there
+            is maximum negative impact of soil anaerobic conditions on
+            decomposition
+        aneref_3 (numpy.ndarray): parameter, minimum value of the impact of
+            soil anaerobic conditions on decomposition
+
+    Returns:
+        anerb, the effect of soil anaerobic conditions on decomposition
+    """
+    valid_mask = (
+        (rprpet != _TARGET_NODATA) &
+        (pevap != _TARGET_NODATA) &
+        (drain != _IC_NODATA) &
+        (aneref_1 != _IC_NODATA) &
+        (aneref_2 != _IC_NODATA) &
+        (aneref_3 != _IC_NODATA))
+
+    xh2o = numpy.empty(rprpet.shape, dtype=numpy.float32)
+    xh2o[:] = _TARGET_NODATA
+    xh2o[valid_mask] = (
+        (rprpet[valid_mask] - aneref_1[valid_mask]) * pevap[valid_mask] *
+        (1. - drain[valid_mask]))
+
+    anerb = numpy.empty(rprpet.shape, dtype=numpy.float32)
+    anerb[:] = _TARGET_NODATA
+    anerb[valid_mask] = 1.
+
+    high_rprpet_mask = (valid_mask & (rprpet > aneref_1) & (xh2o > 0))
+    anerb[high_rprpet_mask] = numpy.maximum(
+        1. + (1. - aneref_3[high_rprpet_mask]) /
+        (aneref_1[high_rprpet_mask] - aneref_2[high_rprpet_mask]) *
+        (aneref_1[high_rprpet_mask] +
+            (xh2o[high_rprpet_mask] / pevap[high_rprpet_mask]) -
+            aneref_1[high_rprpet_mask]),
+        aneref_3[high_rprpet_mask])
+    return anerb
