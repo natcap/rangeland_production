@@ -662,10 +662,6 @@ def execute(args):
             aligned_inputs, site_param_table, veg_trait_table, current_month,
             month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
 
-        _monthly_N_fixation(
-            aligned_inputs, month_index, site_param_table, year_reg,
-            prev_sv_reg, sv_reg)
-
 
 def multiply_positive_rasters(raster1, raster2):
         """Multiply positive values in two rasters."""
