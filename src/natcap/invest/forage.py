@@ -45,6 +45,8 @@ _SITE_STATE_VARIABLE_FILES = {
     'som3c_path': 'som3c.tif',
     'strucc_1_path': 'strucc_1.tif',
     'strucc_2_path': 'strucc_2.tif',
+    'strlig_1_path': 'strlig_1.tif',
+    'strlig_2_path': 'strlig_2.tif',
     'metabe_1_1_path': 'metabe_1_1.tif',
     'metabe_2_1_path': 'metabe_2_1.tif',
     'som1e_1_1_path': 'som1e_1_1.tif',
@@ -1576,7 +1578,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
                 param_val_dict['pcemic1_3_{}'.format(iel)],
                 sv_reg['struce_1_{}_path'.format(iel)],
                 sv_reg['strucc_1_path']]],
-            calc_rnewas_som1, pp_reg['rnewas_1_{}_path'.format(iel)],
+            calc_rnewas_som1, pp_reg['rnewas_{}_1_path'.format(iel)],
             gdal.GDT_Float32, _TARGET_NODATA)
         # calculate rnewas_iel_2 - aboveground material to SOM2
         pygeoprocessing.raster_calculator(
@@ -1590,8 +1592,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
                 param_val_dict['rad1p_2_{}'.format(iel)],
                 param_val_dict['rad1p_3_{}'.format(iel)],
                 param_val_dict['pcemic1_2_{}'.format(iel)],
-                pp_reg['rnewas_1_{}_path'.format(iel)]]],
-            calc_rnewas_som2, pp_reg['rnewas_2_{}_path'.format(iel)],
+                pp_reg['rnewas_{}_1_path'.format(iel)]]],
+            calc_rnewas_som2, pp_reg['rnewas_{}_2_path'.format(iel)],
             gdal.GDT_Float32, _TARGET_NODATA)
         # calculate rnewbs_iel_1 - belowground material to SOM1
         site_to_varat1_1 = dict([
