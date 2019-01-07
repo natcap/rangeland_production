@@ -162,6 +162,305 @@ def insert_nodata_values_into_array(target_array, nodata_value):
     return modified_array
 
 
+def esched_point(return_type):
+    """Calculate flow of an element accompanying decomposition of C.
+
+    Calculate the movement of one element (N or P) as C decomposes from one
+    state variable (the donating stock, or box A) to another state variable
+    (the receiving stock, or box B).  Esched.f
+
+    Parameters:
+        return_type (string): flag indicating whether to return material
+            leaving box A, material arriving in box B, or material flowing
+            into or out of the mineral pool
+
+    Returns:
+        the function `_esched`
+    """
+    def _esched(cflow, tca, rcetob, anps, labile):
+        """Calculate the flow of one element to accompany decomp of C.
+
+        This is a transcription of Esched.f: "Schedule N, P, or S flow and
+        associated mineralization or immobilization flow for decomposition
+        from Box A to Box B."
+        If there is enough of iel (N or P) in the donating stock to satisfy
+        the required ratio, that material flows from the donating stock to
+        the receiving stock and whatever iel is leftover goes to mineral
+        pool. If there is not enough iel to satisfy the required ratio, iel
+        is drawn from the mineral pool to satisfy the ratio; if there is
+        not enough iel in the mineral pool, the material does not leave the
+        donating stock.
+
+        Parameters:
+            cflow: total C that is decomposing from box A to box B
+            tca: C in donating stock, i.e. box A
+            rcetob: required ratio of C/iel in the receiving stock
+            anps: iel (N or P) in the donating stock
+            labile: mineral iel (N or P)
+
+        Returns:
+            material_leaving_a, the amount of material leaving box A, if
+                return_type is 'material_leaving_a'
+            material_arriving_b, the amount of material arriving in box B,
+                if return_type is 'material_arriving_b'
+            mnrflo, flow in or out of mineral pool, if return_type is
+                'mineral_flow'
+        """
+        outofa = anps * (cflow/tca)
+        if (cflow/outofa > rcetob):
+            # immobilization occurs
+            immflo = cflow/rcetob - outofa
+            if ((labile - immflo) > 0):
+                material_leaving_a = outofa  # outofa flows from anps to bnps
+                material_arriving_b = outofa + immflo
+                mnrflo = -immflo  # immflo flows from mineral to bnps
+            else:
+                mnrflo = 0  # no flow from box A to B, nothing moves
+                material_leaving_a = 0
+                material_arriving_b = 0
+        else:
+            # mineralization
+            atob = cflow/rcetob
+            material_leaving_a = outofa
+            material_arriving_b = atob  # atob flows from anps to bnps
+            mnrflo = outofa - atob  # the rest of material leaving box A
+                                    # goes to mineral
+        if return_type == 'material_leaving_a':
+            return material_leaving_a
+        elif return_type == 'material_arriving_b':
+            return material_arriving_b
+        elif return_type == 'mineral_flow':
+            return mnrflo
+    return _esched
+
+
+def declig_point(return_type):
+    """Point implementation of decomposition of structural material.
+
+    Track the decomposition of structural material (i.e., material containing
+    lignin) into SOM2 and SOM1.
+
+    Returns:
+        the function `_declig`
+    """
+    def _declig(
+            aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr, tcflow,
+            struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+            rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2):
+        """Decomposition of material containing lignin into SOM2 and SOM1.
+
+        This function is called when surface structural C (STRUCC_1)
+        decomposes, and again when soil structural C (STRUCC_2) decomposes.
+        Declig.f
+
+        Parameters:
+            aminrl_1: mineral N averaged across the 4-times-per-monthly
+                decomposition timesteps
+            aminrl_2: mineral P averaged across the 4-times-per-monthly
+                decomposition timesteps
+            ligcon: lignin content of the decomposing material
+            rsplig: co2 loss with decomposition to SOM2
+            ps1co2_1: co2 loss with decomposition to SOM1
+            strucc_lyr: structural C in lyr that is decomposing
+            tcflow: the total amount of C flowing out of strucc_lyr
+            struce_lyr_1: N in structural material in the layer that is
+                decomposing
+            struce_lyr_2: P in structural material in the layer that is
+                decomposing
+            rnew_lyr_1_1: required C/N ratio of material decomposing to SOM1
+            rnew_lyr_2_1: required C/P ratio of material decomposing to SOM1
+            rnew_lyr_1_2: required C/N ratio of material decomposing to SOM2
+            rnew_lyr_2_2: required C/P ratio of material decomposing to SOM2
+            minerl_1_1: surface mineral N
+            minerl_1_2: surface mineral P
+
+        Returns:
+            The change in one state variable, where the state variable is
+                specified by return_type:
+                d_strucc_lyr, change in C in the decomposing layer, if
+                    return_type is 'd_strucc'
+                d_struce_lyr_1, change in N in the decomposing lyr, if
+                    return_type is 'd_struce_1'
+                d_struce_lyr_2, change in P in the decomposing lyr, if
+                    return_type is 'd_struce_2'
+                d_minerl_1_1, change in surface mineral N, if return_type is
+                    'd_minerl_1_1'
+                d_minerl_1_2, change in surface mineral P, if return_type is
+                    'd_minerl_1_2'
+                d_gromin_1, change in gross N mineralization, if return_type is
+                    'd_gromin_1'
+                d_som2c_lyr, change in C in SOM2, if return_type is 'd_som2c'
+                d_som2e_lyr_1, change in N in SOM2, if return_type is
+                    'd_som2e_1'
+                d_som2e_lyr_2, change in P in SOM2, if return_type is
+                    'd_som2e_2'
+                d_som1c_lyr, change in C in SOM1, if return_type is 'd_som1c'
+                d_som1e_lyr_1, change in N in SOM1, if return_type is
+                    'd_som1e_1'
+                d_som1e_lyr_2, change in P in SOM1, if return_type is
+                    'd_som1e_2'
+        """
+        # initialize change (delta, d) in state variables
+        d_strucc_lyr = 0  # change in structural C in decomposing lyr
+        d_struce_lyr_1 = 0  # change in structural N in decomposing lyr
+        d_struce_lyr_2 = 0  # change in structural P in decomposing lyr
+        d_minerl_1_1 = 0  # change in surface mineral N
+        d_minerl_1_2 = 0  # change in surface mineral P
+        d_gromin_1 = 0  # change in gross N mineralization
+        d_som2c_lyr = 0  # change in C in SOM2 in lyr
+        d_som2e_lyr_1 = 0  # change in N in SOM2 in lyr
+        d_som2e_lyr_2 = 0  # change in P in SOM2 in lyr
+        d_som1c_lyr = 0  # change in C in SOM1 in lyr
+        d_som1e_lyr_1 = 0  # change in N in SOM1 in lyr
+        d_som1e_lyr_2 = 0  # change in P in SOM1 in lyr
+
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (strucc_lyr / struce_lyr_1) <= rnew_lyr_1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (strucc_lyr / struce_lyr_2) <= rnew_lyr_2_1)))
+
+        if decompose_mask:
+            d_strucc_lyr = -tcflow
+            # material decomposes first to som2
+            tosom2 = tcflow * ligcon  # line 127 Declig.f
+
+            # respiration associated with decomposition to som2
+            co2los_som2 = tosom2 * rsplig  # line 130 Declig.f
+            mnrflo_1 = co2los_som2 * struce_lyr_1 / strucc_lyr  # line 132
+            d_struce_lyr_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            if mnrflo_1 > 0:
+                d_gromin_1 += mnrflo_1
+            mnrflo_2 = co2los_som2 * struce_lyr_2 / strucc_lyr
+            d_struce_lyr_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom2 = tosom2 - co2los_som2  # line 136 Declig.f
+            d_som2c_lyr += net_tosom2  # line 140 Declig.f
+
+            # N and P flows from struce_lyr to som2e_lyr, line 145 Declig.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, strucc_lyr, rnew_lyr_1_2, struce_lyr_1,
+                    minerl_1_1)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, strucc_lyr, rnew_lyr_1_2, struce_lyr_1,
+                    minerl_1_1)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, strucc_lyr, rnew_lyr_1_2, struce_lyr_1,
+                    minerl_1_1)
+            # schedule flows
+            d_struce_lyr_1 -= material_leaving_a
+            d_som2e_lyr_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                d_gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, strucc_lyr, rnew_lyr_2_2, struce_lyr_2,
+                    minerl_1_2)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, strucc_lyr, rnew_lyr_2_2, struce_lyr_2,
+                    minerl_1_2)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, strucc_lyr, rnew_lyr_2_2, struce_lyr_2,
+                    minerl_1_2)
+            # schedule flows
+            d_struce_lyr_2 -= material_leaving_a
+            d_som2e_lyr_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+            # what's left decomposes to som1
+            tosom1 = tcflow - tosom2  # line 160 Declig.f
+            co2los_som1 = tosom1 * ps1co2_1  # line 163 Declig.f
+
+            # respiration associated with decomposition to som1
+            mnrflo_1 = co2los_som1 * struce_lyr_1 / strucc_lyr  # line 165
+            d_struce_lyr_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            if mnrflo_1 > 0:
+                d_gromin_1 += mnrflo_1
+            mnrflo_2 = co2los_som1 * struce_lyr_2 / strucc_lyr
+            d_struce_lyr_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom1 = tosom1 - co2los_som1  # line 169 Declig.f
+            d_som1c_lyr += net_tosom1  # line 173 Declig.f
+
+            # N and P flows from struce_lyr to som1e_lyr, line 178 Declig.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, strucc_lyr, rnew_lyr_1_1, struce_lyr_1,
+                    minerl_1_1)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, strucc_lyr, rnew_lyr_1_1, struce_lyr_1,
+                    minerl_1_1)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, strucc_lyr, rnew_lyr_1_1, struce_lyr_1,
+                    minerl_1_1)
+            # schedule flows
+            d_struce_lyr_1 -= material_leaving_a
+            d_som1e_lyr_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                d_gromin_1 += mineral_flow
+
+            # P
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, strucc_lyr, rnew_lyr_2_1, struce_lyr_2,
+                    minerl_1_2)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, strucc_lyr, rnew_lyr_2_1, struce_lyr_2,
+                    minerl_1_2)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, strucc_lyr, rnew_lyr_2_1, struce_lyr_2,
+                    minerl_1_2)
+            # schedule flows
+            d_struce_lyr_2 -= material_leaving_a
+            d_som1e_lyr_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        if return_type == 'd_strucc':
+            return d_strucc_lyr
+        elif return_type == 'd_struce_1':
+            return d_struce_lyr_1
+        elif return_type == 'd_struce_2':
+            return d_struce_lyr_2
+        elif return_type == 'd_minerl_1_1':
+            return d_minerl_1_1
+        elif return_type == 'd_minerl_1_2':
+            return d_minerl_1_2
+        elif return_type == 'd_gromin_1':
+            return d_gromin_1
+        elif return_type == 'd_som2c':
+            return d_som2c_lyr
+        elif return_type == 'd_som2e_1':
+            return d_som2e_lyr_1
+        elif return_type == 'd_som2e_2':
+            return d_som2e_lyr_2
+        elif return_type == 'd_som1c':
+            return d_som1c_lyr
+        elif return_type == 'd_som1e_1':
+            return d_som1e_lyr_1
+        elif return_type == 'd_som1e_2':
+            return d_som1e_lyr_2
+    return _declig
+
+
 class foragetests(unittest.TestCase):
     """Regression tests for InVEST forage model."""
 
@@ -4402,3 +4701,214 @@ class foragetests(unittest.TestCase):
             aneref_3_arr)
         self.assert_all_values_in_array_within_range(
             anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+    def test_declig_point(self):
+        """Test `declig_point`.
+
+        Use the function `declig_point` to calculate change in state variables
+        as material containing lignin decomposes into SOM2 and SOM1. Compare
+        calculated changes in state variables to changes calculated by hand.
+
+        Raises:
+            AssertionError if `declig_point` does not match values calculated
+                by hand
+
+        Returns:
+            None
+        """
+        # no decomposition happens, mineral ratios are insufficient
+        aminrl_1 = 0.
+        aminrl_2 = 0.
+        ligcon = 0.3779
+        rsplig = 0.0146
+        ps1co2_1 = 0.0883
+        strucc_lyr = 155.5253
+        tcflow = 40.82
+        struce_lyr_1 = 0.7776
+        struce_lyr_2 = 0.3111
+        rnew_lyr_1_1 = 190.  # observed ratio: 200.0068
+        rnew_lyr_2_1 = 300.  # observed ratio: 499.9206
+        rnew_lyr_1_2 = 0.
+        rnew_lyr_2_2 = 0.
+        minerl_1_1 = 0.
+        minerl_1_2 = 0.
+
+        d_strucc_lyr = declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_1 = declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_2 = declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_1 = declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_2 = declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_gromin_1 = declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2c_lyr = declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_1 = declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_2 = declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1c_lyr = declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_1 = declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_2 = declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+
+        self.assertEqual(d_strucc_lyr, 0)
+        self.assertEqual(d_struce_lyr_1, 0)
+        self.assertEqual(d_struce_lyr_2, 0)
+        self.assertEqual(d_minerl_1_1, 0)
+        self.assertEqual(d_minerl_1_2, 0)
+        self.assertEqual(d_gromin_1, 0)
+        self.assertEqual(d_som2c_lyr, 0)
+        self.assertEqual(d_som2e_lyr_1, 0)
+        self.assertEqual(d_som2e_lyr_2, 0)
+        self.assertEqual(d_som1c_lyr, 0)
+        self.assertEqual(d_som1e_lyr_1, 0)
+        self.assertEqual(d_som1e_lyr_2, 0)
+
+        # decomposition occurs, subsidized by mineral N and P
+        aminrl_1 = 6.4944
+        aminrl_2 = 33.2791
+        ligcon = 0.3779
+        rsplig = 0.0146
+        ps1co2_1 = 0.0883
+        strucc_lyr = 155.5253
+        tcflow = 40.82
+        struce_lyr_1 = 0.7776
+        struce_lyr_2 = 0.3111
+        rnew_lyr_1_1 = 210.8  # greater than observed ratio: 200.0068
+        rnew_lyr_2_1 = 540.2  # greater than observed ratio: 499.9206
+        rnew_lyr_1_2 = 190.3
+        rnew_lyr_2_2 = 520.8
+        minerl_1_1 = 6.01
+        minerl_1_2 = 32.87
+
+        # values calculated by hand
+        d_strucc_lyr_obs = -40.82
+        d_struce_lyr_1_obs = -0.204093044668617
+        d_struce_lyr_2_obs = -0.08165296578756
+        d_minerl_1_1_obs = 0.014387319170996
+        d_minerl_1_2_obs = 0.00960796090459662
+        d_gromin_1_obs = 0.0182639608121622
+        d_som2c_lyr_obs = 15.2006601812
+        d_som2e_lyr_1_obs = 0.0798773525023647
+        d_som2e_lyr_2_obs = 0.029187135524578
+        d_som1c_lyr_obs = 23.1518210274
+        d_som1e_lyr_1_obs = 0.109828372995256
+        d_som1e_lyr_2_obs = 0.0428578693583858
+
+        # call 12 times, 12 return values
+        d_strucc_lyr = declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_1 = declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_2 = declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_1 = declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_2 = declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_gromin_1 = declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2c_lyr = declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_1 = declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_2 = declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1c_lyr = declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_1 = declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_2 = declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+
+        self.assertAlmostEqual(d_strucc_lyr, d_strucc_lyr_obs, places=10)
+        self.assertAlmostEqual(d_struce_lyr_1, d_struce_lyr_1_obs, places=10)
+        self.assertAlmostEqual(d_struce_lyr_2, d_struce_lyr_2_obs, places=10)
+        self.assertAlmostEqual(d_minerl_1_1, d_minerl_1_1_obs, places=10)
+        self.assertAlmostEqual(d_minerl_1_2, d_minerl_1_2_obs, places=10)
+        self.assertAlmostEqual(d_gromin_1, d_gromin_1_obs, places=10)
+        self.assertAlmostEqual(d_som2c_lyr, d_som2c_lyr_obs, places=10)
+        self.assertAlmostEqual(d_som2e_lyr_1, d_som2e_lyr_1_obs, places=10)
+        self.assertAlmostEqual(d_som2e_lyr_2, d_som2e_lyr_2_obs, places=10)
+        self.assertAlmostEqual(d_som1c_lyr, d_som1c_lyr_obs, places=10)
+        self.assertAlmostEqual(d_som1e_lyr_1, d_som1e_lyr_1_obs, places=10)
+        self.assertAlmostEqual(d_som1e_lyr_2, d_som1e_lyr_2_obs, places=10)
