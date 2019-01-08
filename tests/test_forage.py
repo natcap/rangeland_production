@@ -162,6 +162,143 @@ def insert_nodata_values_into_array(target_array, nodata_value):
     return modified_array
 
 
+def rprpet_point(pet, snowmelt, avh2o_3, precip):
+    """Calculate the ratio of precipitation to ref evapotranspiration.
+
+    The ratio of precipitation or snowmelt to reference
+    evapotranspiration influences agdefac and bgdefac, the above- and
+    belowground decomposition factors.
+
+    Parameters:
+        pet (float): derived, reference evapotranspiration
+        snowmelt (float): derived, snowmelt occuring this month
+        avh2o_3 (float): derived, moisture in top two soil layers
+        precip (float): input, precipitation for this month
+
+    Returns:
+        rprpet, the ratio of precipitation or snowmelt to reference
+            evapotranspiration
+    """
+    if snowmelt > 0:
+        rprpet = snowmelt / pet
+    else:
+        rprpet = (avh2o_3 + precip) / pet
+    return rprpet
+
+
+def defac_point(
+        snow, min_temp, max_temp, rprpet, teff_1, teff_2, teff_3, teff_4):
+    """Point-based version of `calc_defac`.
+
+    The decomposition factor reflects the influence of soil temperature and
+    moisture on decomposition. Lines 151-200, Cycle.f.
+
+    Parameters:
+        snow (float): standing snowpack
+        min_temp (float): average minimum temperature for the month
+        max_temp (float): average maximum temperature for the month
+        rprpet (float): ratio of precipitation or snowmelt to
+            reference evapotranspiration
+        teff_1 (float): x location of inflection point for
+            calculating the effect of soil temperature on decomposition
+            factor
+        teff_2 (float): y location of inflection point for
+            calculating the effect of soil temperature on decomposition
+            factor
+        teff_3 (float): step size for calculating the effect
+            of soil temperature on decomposition factor
+        teff_4 (float): lope of the line at the inflection
+            point, for calculating the effect of soil temperature on
+            decomposition factor
+
+    Returns:
+        defac, aboveground and belowground decomposition factor
+    """
+    if rprpet > 9:
+        agwfunc = 1
+    else:
+        agwfunc = 1. / (1 + 30 * math.exp(-8.5 * rprpet))
+    if snow > 0:
+        stemp = 0
+    else:
+        stemp = (min_temp + max_temp) / 2.
+    tfunc = max(
+        0.01, (teff_2 + (teff_3 / math.pi) * numpy.arctan(math.pi *
+            teff_4 * (stemp - teff_1))) /
+        (teff_2 + (teff_3 / math.pi) * numpy.arctan(math.pi *
+            teff_4 * (30.0 - teff_1))))
+    defac = max(0, tfunc * agwfunc)
+    return defac
+
+
+def calc_anerb_point(
+        rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
+    """Calculate effect of soil anaerobic conditions on decomposition.
+
+    The impact of soil anaerobic conditions on decomposition is
+    calculated from soil moisture and reference evapotranspiration.
+    Anerob.f.
+
+    Parameters:
+        rprpet (float): ratio of precipitation or snowmelt to
+            reference evapotranspiration
+        pevap (float): reference evapotranspiration
+        drain (float): the fraction of excess water lost by
+            drainage. Indicates whether a soil is sensitive for
+            anaerobiosis (drain = 0) or not (drain = 1)
+        aneref_1 (float): value of rprpet below which there
+            is no negative impact of soil anaerobic conditions on
+            decomposition
+        aneref_2 (float): value of rprpet above which there
+            is maximum negative impact of soil anaerobic conditions on
+            decomposition
+        aneref_3 (float): minimum value of the impact of
+            soil anaerobic conditions on decomposition
+
+    Returns:
+        anerb, the effect of soil anaerobic conditions on decomposition
+    """
+    anerb = 1
+    if rprpet > aneref_1:
+        xh2o = (rprpet - aneref_1) * pevap * (1. - drain)
+        if xh2o > 0:
+            newrat = aneref_1 + (xh2o / pevap)
+            slope = (1. - aneref_3) / (aneref_1 - aneref_2)
+            anerb = 1. + slope * (newrat - aneref_1)
+        anerb = max(anerb, aneref_3)
+    return anerb
+
+
+def bgdrat_point(aminrl, varat_1_iel, varat_2_iel, varat_3_iel):
+    """Calculate required C/iel ratio for belowground decomposition.
+
+    When belowground material decomposes, its nutrient content is
+    compared to this ratio to check whether nutrient content is
+    sufficiently high to allow decomposition. This ratio is calculated at
+    each decomposition time step.
+
+    Parameters:
+        aminrl (float): mineral <iel> (N or P) in top soil layer, averaged
+            across decomposition time steps
+        varat_1_iel (float): parameter, maximum C/iel ratio
+        varat_2_iel (float): parameter, minimum C/iel ratio
+        varat_3_iel (float): parameter, amount of iel present when minimum
+            ratio applies
+
+    Returns:
+        bgdrat, the required C/iel ratio for decomposition
+    """
+    if aminrl <= 0:
+        bgdrat = varat_1_iel
+    elif aminrl > varat_3_iel:
+        bgdrat = varat_2_iel
+    else:
+        bgdrat = (
+            (1. - aminrl / varat_3_iel) * (varat_1_iel - varat_2_iel) +
+            varat_2_iel)
+    return bgdrat
+
+
 def esched_point(return_type):
     """Calculate flow of an element accompanying decomposition of C.
 
@@ -244,7 +381,7 @@ def declig_point(return_type):
         the function `_declig`
     """
     def _declig(
-            aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr, tcflow,
+            aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr, tcflow,
             struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
             rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2):
         """Decomposition of material containing lignin into SOM2 and SOM1.
@@ -260,7 +397,7 @@ def declig_point(return_type):
                 decomposition timesteps
             ligcon: lignin content of the decomposing material
             rsplig: co2 loss with decomposition to SOM2
-            ps1co2_1: co2 loss with decomposition to SOM1
+            ps1co2_lyr: co2 loss with decomposition to SOM1
             strucc_lyr: structural C in lyr that is decomposing
             tcflow: the total amount of C flowing out of strucc_lyr
             struce_lyr_1: N in structural material in the layer that is
@@ -380,7 +517,7 @@ def declig_point(return_type):
 
             # what's left decomposes to som1
             tosom1 = tcflow - tosom2  # line 160 Declig.f
-            co2los_som1 = tosom1 * ps1co2_1  # line 163 Declig.f
+            co2los_som1 = tosom1 * ps1co2_lyr  # line 163 Declig.f
 
             # respiration associated with decomposition to som1
             mnrflo_1 = co2los_som1 * struce_lyr_1 / strucc_lyr  # line 165
@@ -459,6 +596,541 @@ def declig_point(return_type):
         elif return_type == 'd_som1e_2':
             return d_som1e_lyr_2
     return _declig
+
+
+def decomposition_point(
+        inputs, params, state_var, month_reg, rnew_dict, pevap):
+    """Point implementation of decomposition.
+
+    Parameters:
+        inputs (dict): dictionary of input values, including precipitation,
+            temperature, and soil pH
+        params (dict): dictionary of parameter values
+        state_var (dict): dictionary of state variables prior to
+            decomposition
+        month_reg (dict): dictionary of values that are shared between
+            submodels, including snowmelt
+        rnew_dict (dict): dictionary of required ratios for aboveground
+            decomposition, calculated during initialization
+        evap (float): reference evapotranspiration
+
+    Returns
+        dictionary of modified state variables following decomposition
+    """
+    gromin_1 = 0  # gross mineralization of N, used outside decomposition
+    rprpet = rprpet_point(
+        pevap, month_reg['snowmelt'], state_var['avh2o_3'], inputs['precip'])
+    defac = defac_point(
+        state_var['snow'], inputs['min_temp'], inputs['max_temp'], rprpet,
+        params['teff_1'], params['teff_2'], params['teff_3'], params['teff_4'])
+    anerb = calc_anerb_point(
+        rprpet, pevap, params['drain'], params['aneref_1'], params['aneref_2'],
+        params['aneref_3'])
+
+    # pH effect on decomposition for structural material, line 45
+    pheff_struc = numpy.clip(
+        (0.5 + (1.1 / numpy.pi) *
+            numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 4.))), 0, 1)
+
+    # pH effect on decomposition for metabolic material, line 158
+    pheff_metab = numpy.clip(
+        (0.5 + (1.14 / numpy.pi) *
+            numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 4.8))), 0, 1)
+
+    # calculate aminrl_1, intermediate surface mineral N that is tracked
+    # during decomposition
+    aminrl_1 = state_var['minerl_1_1']
+
+    # calculate aminerl_2, intermediate surface mineral P that is tracked
+    # during decomposition
+    c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
+    b = params['sorpmx'] - state_var['minerl_1_2'] + c
+    labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
+    fsfunc = labile / state_var['minerl_1_2']
+    aminrl_2 = state_var['minerl_1_2'] * fsfunc
+
+    for _ in xrange(4):
+        # initialize change (delta, d) in state variables for this decomp step
+        d_minerl_1_1 = 0  # change in surface mineral N
+        d_minerl_1_2 = 0  # change in surface mineral P
+
+        d_strucc_1 = 0  # change in surface structural C
+        d_struce_1_1 = 0  # change in surface structural N
+        d_struce_1_2 = 0  # change in surface strctural P
+        d_som2c_1 = 0  # change in surface SOM2 C
+        d_som2e_1_1 = 0  # change in surface SOM2 N
+        d_som2e_1_2 = 0  # change in surface SOM2 P
+        d_som1c_1 = 0  # change in surface SOM1 C
+        d_som1e_1_1 = 0  # change in surface SOM1 N
+        d_som1e_1_2 = 0  # change in surface SOM1 P
+
+        d_strucc_2 = 0  # change in soil structural C
+        d_struce_2_1 = 0  # change in soil structural N
+        d_struce_2_2 = 0  # change in soil structural P
+        d_som2c_2 = 0  # change in soil SOM2 C
+        d_som2e_2_1 = 0  # change in soil SOM2 N
+        d_som2e_2_2 = 0  # change in soil SOM2 P
+        d_som1c_2 = 0  # change in soil SOM1 C
+        d_som1e_2_1 = 0  # change in soil SOM1 N
+        d_som1e_2_2 = 0  # change in soil SOM1 P
+
+        d_metabc_1 = 0  # change in surface metabolic C
+        d_metabe_1_1 = 0  # change in surface metabolic N
+        d_metabe_1_2 = 0  # change in surface metabolic P
+
+        d_metabc_2 = 0  # change in soil metabolic C
+        d_metabe_2_1 = 0  # change in soil metabolic N
+        d_metabe_2_2 = 0  # change in soil metabolic P
+
+        # litdec.f
+        # decomposition of strucc_1, surface structural material
+        tcflow_strucc_1 = (min(
+            state_var['strucc_1'], params['strmax_1']) * defac *
+            params['dec1_1'] *
+            math.exp(-params['pligst_1'] * state_var['strlig_1']) *
+            0.020833 * pheff_struc)
+
+        d_strucc_1 += declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_struce_1_1 += declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_struce_1_2 += declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_minerl_1_1 += declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_minerl_1_2 += declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        gromin_1 += declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som2c_1 += declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som2e_1_1 += declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som2e_1_2 += declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som1c_1 += declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som1e_1_1 += declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som1e_1_2 += declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow_strucc_1, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+
+        # decomposition of strucc_2, soil structural material: line 99 Litdec.f
+        tcflow_strucc_2 = (
+            min(state_var['strucc_2'], params['strmax_2']) * defac *
+            params['dec1_2'] *
+            math.exp(-params['pligst_2'] * state_var['strlig_2']) *
+            anerb * 0.020833 * pheff_struc)
+
+        d_strucc_2 += declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_struce_2_1 += declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_struce_2_2 += declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_minerl_1_1 += declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_minerl_1_2 += declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        gromin_1 += declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som2c_2 += declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som2e_2_1 += declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som2e_2_2 += declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som1c_2 += declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som1e_2_1 += declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som1e_2_2 += declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+
+        # decomposition of surface metabolic material: line 136 Litdec.f
+        # C/N ratio for surface metabolic residue
+        rceto1_1 = agdrat_point(
+            state_var['metabe_1_1'], state_var['metabc_1'],
+            params['pcemic1_1_1'], params['pcemic1_2_1'],
+            params['pcemic1_3_1'])
+        # C/P ratio for surface metabolic residue
+        rceto1_2 = agdrat_point(
+            state_var['metabe_1_2'], state_var['metabc_1'],
+            params['pcemic1_1_2'], params['pcemic1_2_2'],
+            params['pcemic1_3_2'])
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['metabc_1'] / state_var['metabe_1_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['metabc_1'] / state_var['metabe_1_2']) <=
+                rceto1_2)))  # line 194 Litdec.f
+        if decompose_mask:
+            tcflow_metabc_1 = numpy.clip(
+                (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
+                    pheff_metab), 0,
+                state_var['metabc_1'])
+            co2los = tcflow_metabc_1 * params['pmco2_1']
+            d_metabc_1 -= tcflow_metabc_1
+            # respiration, line 201 Litdec.f
+            mnrflo_1 = (
+                co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
+            d_metabe_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = (
+                co2los * state_var['metabe_1_2'] / state_var['metabc_1'])
+            d_metabe_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom1 = tcflow_metabc_1 - co2los  # line 210 Litdec.f
+            # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_metabe_1_1 -= material_leaving_a
+            d_som1e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_metabe_1_2 -= material_leaving_a
+            d_som1e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        # decomposition of soil metabolic material: line 136 Litdec.f
+        # C/N ratio for soil metabolic material
+        rceto1_1 = bgdrat_point(
+            aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
+            params['varat1_3_1'])
+        # C/P ratio for soil metabolic material
+        rceto1_2 = bgdrat_point(
+            aminrl_2, params['varat1_1_2'], params['varat1_2_2'],
+            params['varat1_3_2'])
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['metabc_2'] / state_var['metabe_2_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['metabc_2'] / state_var['metabe_2_2']) <=
+                rceto1_2)))  # line 194 Litdec.f
+        if decompose_mask:
+            tcflow_metabc_2 = numpy.clip(
+                (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
+                    pheff_metab * anerb),
+                0, state_var['metabc_2'])
+            co2los = tcflow_metabc_2 * params['pmco2_2']
+            d_metabc_2 -= tcflow_metabc_2
+            # respiration, line 201 Litdec.f
+            mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
+            d_metabe_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['metabe_2_2'] / state_var['metabc_2']
+            d_metabe_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom1 = tcflow_metabc_2 - co2los  # line 210 Litdec.f
+            # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_metabe_2_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_metabe_2_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        # somdec.f
+
+        # pschem.f
+
+        # update state variables: perform flows calculated in previous lines
+        state_var['minerl_1_1'] += d_minerl_1_1
+        state_var['minerl_1_2'] += d_minerl_1_2
+
+        state_var['strucc_1'] += d_strucc_1
+        state_var['struce_1_1'] += d_struce_1_1
+        state_var['struce_1_2'] += d_struce_1_2
+        state_var['som2c_1'] += d_som2c_1
+        state_var['som2e_1_1'] += d_som2e_1_1
+        state_var['som2e_1_2'] += d_som2e_1_2
+        state_var['som1c_1'] += d_som1c_1
+        state_var['som1e_1_1'] += d_som1e_1_1
+        state_var['som1e_1_2'] += d_som1e_1_2
+
+        state_var['strucc_2'] += d_strucc_2
+        state_var['struce_2_1'] += d_struce_2_1
+        state_var['struce_2_2'] += d_struce_2_2
+        state_var['som2c_2'] += d_som2c_2
+        state_var['som2e_2_1'] += d_som2e_2_1
+        state_var['som2e_2_2'] += d_som2e_2_2
+        state_var['som1c_2'] += d_som1c_2
+        state_var['som1e_2_1'] += d_som1e_2_1
+        state_var['som1e_2_2'] += d_som1e_2_2
+
+        state_var['metabc_1'] += d_metabc_1
+        state_var['metabe_1_1'] += d_metabe_1_1
+        state_var['metabe_1_2'] += d_metabe_1_2
+
+        state_var['metabc_2'] += d_metabc_2
+        state_var['metabe_2_1'] += d_metabe_2_1
+        state_var['metabe_2_2'] += d_metabe_2_2
+
+        # update aminrl_1
+        aminrl_1 = aminrl_1 + state_var['minerl_1_1'] / 2.
+
+        # update aminrl_2
+        c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
+        b = params['sorpmx'] - state_var['minerl_1_2'] + c
+        labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
+        fsfunc = labile / state_var['minerl_1_2']
+        aminrl_2 = aminrl_2 + (state_var['minerl_1_2'] * fsfunc) / 2.
+
+    # Calculate volatilization loss of nitrogen as a function of
+    # gross mineralization
+    # volgm = vlossg * gromin_1
+    # minerl_1_1 = minerl_1_1 - volgm
+    return state_var
+
+
+def agdrat_point(anps, tca, pcemic_1_iel, pcemic_2_iel, pcemic_3_iel):
+    """Point implementation of `Agdrat.f`.
+
+    Calculate the C/<iel> ratio of new material that is the result of
+    decomposition into "box B".
+
+    Parameters:
+        anps: <iel> (N or P) in the decomposing stock
+        tca: total C in the decomposing stock
+        pcemic_1_iel: maximum C/<iel> of new SOM1
+        pcemic_2_iel: minimum C/<iel> of new SOM1
+        pcemic_3_iel: minimum <iel> content of decomposing material that gives
+            minimum C/<iel> of new material
+
+    Returns:
+        agdrat, the C/<iel> ratio of new material
+    """
+    cemicb = (pcemic_2_iel - pcemic_1_iel) / pcemic_3_iel
+    if ((tca * 2.5) <= 0.0000000001):
+        econt = 0
+    else:
+        econt = anps / (tca * 2.5)
+    if econt > pcemic_3_iel:
+        agdrat = pcemic_2_iel
+    else:
+        agdrat = pcemic_1_iel + econt * cemicb
+    return agdrat
 
 
 class foragetests(unittest.TestCase):
@@ -4595,42 +5267,7 @@ class foragetests(unittest.TestCase):
         Returns:
             None
         """
-        def calc_anerb_point(
-                rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
-            """Calculate effect of soil anaerobic conditions on decomposition.
 
-            The impact of soil anaerobic conditions on decomposition is
-            calculated from soil moisture and reference evapotranspiration.
-            Anerob.f.
-
-            Parameters:
-                rprpet (float): ratio of precipitation or snowmelt to
-                    reference evapotranspiration
-                pevap (float): reference evapotranspiration
-                drain (float): the fraction of excess water lost by
-                    drainage. Indicates whether a soil is sensitive for
-                    anaerobiosis (drain = 0) or not (drain = 1)
-                aneref_1 (float): value of rprpet below which there
-                    is no negative impact of soil anaerobic conditions on
-                    decomposition
-                aneref_2 (float): value of rprpet above which there
-                    is maximum negative impact of soil anaerobic conditions on
-                    decomposition
-                aneref_3 (float): minimum value of the impact of
-                    soil anaerobic conditions on decomposition
-
-            Returns:
-                anerb, the effect of soil anaerobic conditions on decomposition
-            """
-            anerb = 1
-            if rprpet > aneref_1:
-                xh2o = (rprpet - aneref_1) * pevap * (1. - drain)
-                if xh2o > 0:
-                    newrat = aneref_1 + (xh2o / pevap)
-                    slope = (1. - aneref_3) / (aneref_1 - aneref_2)
-                    anerb = 1. + slope * (newrat - aneref_1)
-                anerb = max(anerb, aneref_3)
-            return anerb
         from natcap.invest import forage
 
         array_shape = (10, 10)
@@ -4721,7 +5358,7 @@ class foragetests(unittest.TestCase):
         aminrl_2 = 0.
         ligcon = 0.3779
         rsplig = 0.0146
-        ps1co2_1 = 0.0883
+        ps1co2_lyr = 0.0883
         strucc_lyr = 155.5253
         tcflow = 40.82
         struce_lyr_1 = 0.7776
@@ -4735,62 +5372,62 @@ class foragetests(unittest.TestCase):
 
         d_strucc_lyr = declig_point(
             'd_strucc')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_struce_lyr_1 = declig_point(
             'd_struce_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_struce_lyr_2 = declig_point(
             'd_struce_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_minerl_1_1 = declig_point(
             'd_minerl_1_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_minerl_1_2 = declig_point(
             'd_minerl_1_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_gromin_1 = declig_point(
             'd_gromin_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som2c_lyr = declig_point(
             'd_som2c')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som2e_lyr_1 = declig_point(
             'd_som2e_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som2e_lyr_2 = declig_point(
             'd_som2e_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som1c_lyr = declig_point(
             'd_som1c')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som1e_lyr_1 = declig_point(
             'd_som1e_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som1e_lyr_2 = declig_point(
             'd_som1e_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
 
@@ -4812,7 +5449,7 @@ class foragetests(unittest.TestCase):
         aminrl_2 = 33.2791
         ligcon = 0.3779
         rsplig = 0.0146
-        ps1co2_1 = 0.0883
+        ps1co2_lyr = 0.0883
         strucc_lyr = 155.5253
         tcflow = 40.82
         struce_lyr_1 = 0.7776
@@ -4841,62 +5478,62 @@ class foragetests(unittest.TestCase):
         # call 12 times, 12 return values
         d_strucc_lyr = declig_point(
             'd_strucc')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_struce_lyr_1 = declig_point(
             'd_struce_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_struce_lyr_2 = declig_point(
             'd_struce_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_minerl_1_1 = declig_point(
             'd_minerl_1_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_minerl_1_2 = declig_point(
             'd_minerl_1_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_gromin_1 = declig_point(
             'd_gromin_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som2c_lyr = declig_point(
             'd_som2c')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som2e_lyr_1 = declig_point(
             'd_som2e_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som2e_lyr_2 = declig_point(
             'd_som2e_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som1c_lyr = declig_point(
             'd_som1c')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som1e_lyr_1 = declig_point(
             'd_som1e_1')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
         d_som1e_lyr_2 = declig_point(
             'd_som1e_2')(
-                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_1, strucc_lyr,
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
                 tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
                 rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
 
@@ -4912,3 +5549,104 @@ class foragetests(unittest.TestCase):
         self.assertAlmostEqual(d_som1c_lyr, d_som1c_lyr_obs, places=10)
         self.assertAlmostEqual(d_som1e_lyr_1, d_som1e_lyr_1_obs, places=10)
         self.assertAlmostEqual(d_som1e_lyr_2, d_som1e_lyr_2_obs, places=10)
+
+    def test_decomposition(self):
+        """Test the point implementation of decomposition.
+
+        Use the function `decomposition_point` to calculate the change in
+        state variables after one monthly step.
+
+        Returns:
+            None
+        """
+        inputs = {
+            'min_temp': 3.2,
+            'max_temp': 17.73,
+            'precip': 30.5,
+            'pH': 6.84,
+        }
+        params = {
+            'teff_1': 15.4,
+            'teff_2': 11.75,
+            'teff_3': 29.7,
+            'teff_4': 0.031,
+            'drain': 1,
+            'aneref_1': 1.5,
+            'aneref_2': 3,
+            'aneref_3': 0.3,
+            'sorpmx': 2,
+            'pslsrb': 1,
+            'strmax_1': 5000,
+            'dec1_1': 3.9,
+            'pligst_1': 3,
+            'rsplig': 0.3,
+            'ps1co2_1': 0.45,
+            'strmax_2': 5000,
+            'dec1_2': 4.9,
+            'pligst_2': 3,
+            'ps1co2_2': 0.55,
+            'pcemic1_1_1': 16,
+            'pcemic1_2_1': 10,
+            'pcemic1_3_1': 0.02,
+            'pcemic1_1_2': 200,
+            'pcemic1_2_2': 99,
+            'pcemic1_3_2': 0.0015,
+            'dec2_1': 14.8,
+            'pmco2_1': 0.55,
+            'varat1_1_1': 14,
+            'varat1_2_1': 3,
+            'varat1_3_1': 2,
+            'varat1_1_2': 150,
+            'varat1_2_2': 30,
+            'varat1_3_2': 2,
+            'dec2_2': 18.5,
+            'pmco2_2': 0.55,
+        }
+        state_var = {
+            'snow': 0.,
+            'avh2o_3': 3.110,
+            'strlig_1': 0.3779,
+            'strlig_2': 0.2871,
+            'minerl_1_1': 6.4143,
+            'minerl_1_2': 33.1954,
+            'strucc_1': 156.0546,
+            'struce_1_1': 0.7803,
+            'struce_1_2': 0.3121,
+            'som2c_1': 92.9935,
+            'som2e_1_1': 4.2466,
+            'som2e_1_2': 0.1328,
+            'som1c_1': 12.8192,
+            'som1e_1_1': 1.5752,
+            'som1e_1_2': 0.1328,
+            'strucc_2': 163.2008,
+            'struce_2_1': 0.816,
+            'struce_2_2': 0.3264,
+            'som2c_2': 922.1382,
+            'som2e_2_1': 60.0671,
+            'som2e_2_2': 5.6575,
+            'som1c_2': 39.1055,
+            'som1e_2_1': 12.2767,
+            'som1e_2_2': 1.2263,
+            'metabc_1': 13.7579,
+            'metabe_1_1': 1.1972,
+            'metabe_1_2': 0.0351,
+            'metabc_2': 9.8169,
+            'metabe_2_1': 0.6309,
+            'metabe_2_2': 0.088,
+        }
+        month_reg = {
+            'snowmelt': 0.29,
+        }
+        rnew_dict = {
+            'rnewas_1_1': 210.8,
+            'rnewas_2_1': 540.2,
+            'rnewas_1_2': 190.3,
+            'rnewas_2_2': 520.8,
+            'rnewbs_1_1': 210.8,
+            'rnewbs_2_1': 540.2,
+            'rnewbs_1_2': 190.3,
+            'rnewbs_2_2': 520.8,
+        }
+        pevap = 6.0618
+        state_var_mod = decomposition_point(
+            inputs, params, state_var, month_reg, rnew_dict, pevap)
