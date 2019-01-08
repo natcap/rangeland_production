@@ -182,6 +182,8 @@ _SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt']
 # for rasters that are any range
 _TARGET_NODATA = -1.0
 _IC_NODATA = numpy.finfo('float32').min
+# SV_NODATA is for state variables
+_SV_NODATA = -1.0
 
 
 def execute(args):
@@ -526,12 +528,16 @@ def execute(args):
 
         # check that all necessary state variables are supplied
         missing_initial_values = []
+        # set _SV_NODATA from initial rasters
+        state_var_nodata = set([])
         # align initial state variables to resampled inputs
         resample_initial_path_map = {}
         for sv in _SITE_STATE_VARIABLE_FILES.iterkeys():
             sv_path = os.path.join(
                 args['initial_conditions_dir'],
                 _SITE_STATE_VARIABLE_FILES[sv])
+            state_var_nodata.update(
+                set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
             resample_initial_path_map[sv] = sv_path
             if not os.path.exists(sv_path):
                 missing_initial_values.append(sv_path)
@@ -541,6 +547,9 @@ def execute(args):
                 sv_path = os.path.join(
                     args['initial_conditions_dir'],
                     '{}_{}.tif'.format(sv, pft_i))
+                state_var_nodata.update(
+                    set([pygeoprocessing.get_raster_info(sv_path)['nodata']
+                        [0]]))
                 resample_initial_path_map[sv_key] = sv_path
                 if not os.path.exists(sv_path):
                     missing_initial_values.append(sv_path)
@@ -548,6 +557,10 @@ def execute(args):
             raise ValueError(
                 "Couldn't find the following required initial values: " +
                 "\n\t".join(missing_initial_values))
+        if len(state_var_nodata) > 1:
+            raise ValueError(
+                "Initial state variable rasters contain >1 nodata value")
+        _SV_NODATA = list(state_var_nodata)[0]
 
         # align and resample initialization rasters with inputs
         sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
@@ -892,9 +905,9 @@ def _calc_ompc(
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
         valid_mask = (
-            (~numpy.isclose(som1c_2, som1c_2_nodata)) &
-            (~numpy.isclose(som2c_2, som2c_2_nodata)) &
-            (~numpy.isclose(som3c, som3c_nodata)) &
+            (~numpy.isclose(som1c_2, _SV_NODATA)) &
+            (~numpy.isclose(som2c_2, _SV_NODATA)) &
+            (~numpy.isclose(som3c, _SV_NODATA)) &
             (~numpy.isclose(bulkd, bulkd_nodata)) &
             (edepth != _IC_NODATA))
         ompc[valid_mask] = (
@@ -903,11 +916,7 @@ def _calc_ompc(
             (10000. * bulkd[valid_mask] * edepth[valid_mask]))
         return ompc
 
-    som1c_2_nodata = pygeoprocessing.get_raster_info(som1c_2_path)['nodata'][0]
-    som2c_2_nodata = pygeoprocessing.get_raster_info(som2c_2_path)['nodata'][0]
-    som3c_nodata = pygeoprocessing.get_raster_info(som3c_path)['nodata'][0]
     bulkd_nodata = pygeoprocessing.get_raster_info(bulkd_path)['nodata'][0]
-
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             som1c_2_path, som2c_2_path, som3c_path,
@@ -1386,8 +1395,8 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
         agdrat, the C/<iel> ratio of new material
     """
     valid_mask = (
-        (anps != _TARGET_NODATA) &
-        (tca != _TARGET_NODATA) &
+        (~numpy.isclose(anps, _SV_NODATA)) &
+        (~numpy.isclose(tca, _SV_NODATA)) &
         (pcemic_1 != _IC_NODATA) &
         (pcemic_2 != _IC_NODATA) &
         (pcemic_3 != _IC_NODATA) &
@@ -1436,9 +1445,6 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     Returns:
         None
     """
-    strucc_1_nodata = pygeoprocessing.get_raster_info(
-            sv_reg['strucc_1_path'])['nodata'][0]
-
     # temporary parameter rasters for structural ratios calculations
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
@@ -1486,8 +1492,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (pcemic1_2 != _IC_NODATA) &
             (pcemic1_1 != _IC_NODATA) &
             (pcemic1_3 != _IC_NODATA) &
-            (~numpy.isclose(struce_1, struce_1_nodata)) &
-            (~numpy.isclose(strucc_1, strucc_1_nodata)))
+            (~numpy.isclose(struce_1, _SV_NODATA)) &
+            (~numpy.isclose(strucc_1, _SV_NODATA)))
         cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         cemicb1[:] = _TARGET_NODATA
         cemicb1[valid_mask] = (
@@ -1541,8 +1547,8 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (pcemic2_2 != _IC_NODATA) &
             (pcemic2_1 != _IC_NODATA) &
             (pcemic2_3 != _IC_NODATA) &
-            (~numpy.isclose(struce_1, struce_1_nodata)) &
-            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
+            (~numpy.isclose(struce_1, _SV_NODATA)) &
+            (~numpy.isclose(strucc_1, _SV_NODATA)) &
             (rad1p_1 != _IC_NODATA) &
             (rad1p_2 != _IC_NODATA) &
             (rad1p_3 != _IC_NODATA) &
@@ -1569,8 +1575,6 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
     for iel in [1, 2]:
         # calculate rnewas_iel_1 - aboveground material to SOM1
-        struce_1_nodata = pygeoprocessing.get_raster_info(
-            sv_reg['struce_1_{}_path'.format(iel)])['nodata'][0]
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 param_val_dict['pcemic1_2_{}'.format(iel)],
@@ -2121,7 +2125,7 @@ def _potential_production(
         """
         valid_mask = (
             (pevap != _TARGET_NODATA) &
-            (~numpy.isclose(avh2o_1, avh2o_1_nodata)) &
+            (~numpy.isclose(avh2o_1, _SV_NODATA)) &
             (~numpy.isclose(precip, precip_nodata)) &
             (wc != _TARGET_NODATA) &
             (pprpts_1 != _IC_NODATA) &
@@ -2171,7 +2175,7 @@ def _potential_production(
                 by obstruction
         """
         valid_mask = (
-            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
+            (~numpy.isclose(strucc_1, _SV_NODATA)) &
             (pmxbio != _IC_NODATA) &
             (biok5 != _IC_NODATA))
 
@@ -2293,8 +2297,6 @@ def _potential_production(
         aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
     precip_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['precip_{}'.format(month_index)])['nodata'][0]
-    strucc_1_nodata = pygeoprocessing.get_raster_info(
-        prev_sv_reg['strucc_1_path'])['nodata'][0]
 
     # calculate intermediate quantities that do not differ between PFTs:
     # sum of aglivc (standing live biomass) and stdedc (standing dead biomass)
@@ -2329,8 +2331,6 @@ def _potential_production(
 
     # calculate quantities that differ between PFTs
     for pft_i in do_PFT:
-        avh2o_1_nodata = pygeoprocessing.get_raster_info(
-            prev_sv_reg['avh2o_1_{}_path'.format(pft_i)])['nodata'][0]
         # potprd, the limiting effect of temperature
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
@@ -2424,7 +2424,7 @@ def _calc_favail_P(sv_reg, param_val_dict):
             favail_P, fraction of mineral P available to plants
         """
         valid_mask = (
-            (~numpy.isclose(minerl_1_1, minerl_1_1_nodata)) &
+            (~numpy.isclose(minerl_1_1, _SV_NODATA)) &
             (favail_4 != _IC_NODATA) &
             (favail_5 != _IC_NODATA) &
             (favail_6 != _IC_NODATA))
@@ -2445,8 +2445,6 @@ def _calc_favail_P(sv_reg, param_val_dict):
                 interim[valid_mask], favail_5[valid_mask]))
         return favail_P
 
-    minerl_1_1_nodata = pygeoprocessing.get_raster_info(
-        sv_reg['minerl_1_1_path'])['nodata'][0]
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             sv_reg['minerl_1_1_path'],
@@ -2516,10 +2514,10 @@ def _calc_available_nutrient(
         """
         valid_mask = (
             (rictrl != _IC_NODATA) &
-            (~numpy.isclose(bglivc, bglivc_nodata)) &
+            (~numpy.isclose(bglivc, _SV_NODATA)) &
             (riint != _IC_NODATA) &
             (favail != _IC_NODATA) &
-            (~numpy.isclose(crpstg, crpstg_nodata)))
+            (~numpy.isclose(crpstg, _SV_NODATA)))
 
         rimpct = numpy.empty(rictrl.shape, dtype=numpy.float32)
         rimpct[:] = _TARGET_NODATA
@@ -2567,11 +2565,6 @@ def _calc_available_nutrient(
         eavail[:] = _TARGET_NODATA
         eavail[valid_mask] = eavail_prior[valid_mask] + maxNfix[valid_mask]
         return eavail
-
-    bglivc_nodata = pygeoprocessing.get_raster_info(
-        sv_reg['bglivc_{}_path'.format(pft_i)])['nodata'][0]
-    crpstg_nodata = pygeoprocessing.get_raster_info(
-        sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)])['nodata'][0]
 
     # temporary intermediate rasters for calculating available nutrient
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -2861,7 +2854,7 @@ def calc_ce_ratios(
         valid_mask = (
             (pra_1 != _IC_NODATA) &
             (pra_2 != _IC_NODATA) &
-            (~numpy.isclose(aglivc, aglivc_nodata)) &
+            (~numpy.isclose(aglivc, _SV_NODATA)) &
             (biomax != _IC_NODATA))
 
         cercrp_above = numpy.empty(pra_1.shape, dtype=numpy.float32)
@@ -2900,9 +2893,6 @@ def calc_ce_ratios(
             prb_1[valid_mask] +
             (prb_2[valid_mask] * annual_precip[valid_mask]))
         return cercrp_below
-
-    aglivc_nodata = pygeoprocessing.get_raster_info(
-        aglivc_path)['nodata'][0]
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
@@ -3635,8 +3625,8 @@ def _snow(
             valid_mask = (
                 (tave != _IC_NODATA) &
                 (~numpy.isclose(precip, precip_nodata)) &
-                (~numpy.isclose(snow, snow_nodata)) &
-                (~numpy.isclose(snlq, snlq_nodata)) &
+                (~numpy.isclose(snow, _SV_NODATA)) &
+                (~numpy.isclose(snlq, _SV_NODATA)) &
                 (pet != _TARGET_NODATA) &
                 (tmelt_1 != _IC_NODATA) &
                 (tmelt_2 != _IC_NODATA) &
@@ -3731,10 +3721,6 @@ def _snow(
         min_temp_path)['nodata'][0]
     precip_nodata = pygeoprocessing.get_raster_info(
         precip_path)['nodata'][0]
-    snow_nodata = pygeoprocessing.get_raster_info(
-        prev_snow_path)['nodata'][0]
-    snlq_nodata = pygeoprocessing.get_raster_info(
-        prev_snlq_path)['nodata'][0]
 
     # solar radiation outside the atmosphere
     _shortwave_radiation(precip_path, current_month, temp_val_dict['shwave'])
@@ -4385,8 +4371,8 @@ def _soil_water(
     def calc_surface_litter_biomass(strucc_1, metabc_1):
         """Calculate biomass in surface litter."""
         valid_mask = (
-            (~numpy.isclose(strucc_1, strucc_1_nodata)) &
-            (~numpy.isclose(metabc_1, metabc_1_nodata)))
+            (~numpy.isclose(strucc_1, _SV_NODATA)) &
+            (~numpy.isclose(metabc_1, _SV_NODATA)))
         alit = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         alit[:] = _TARGET_NODATA
         alit[valid_mask] = (strucc_1[valid_mask] + metabc_1[valid_mask]) * 2.5
@@ -4397,10 +4383,6 @@ def _soil_water(
         aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
     min_temp_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
-    strucc_1_nodata = pygeoprocessing.get_raster_info(
-        prev_sv_reg['strucc_1_path'])['nodata'][0]
-    metabc_1_nodata = pygeoprocessing.get_raster_info(
-        prev_sv_reg['metabc_1_path'])['nodata'][0]
 
     # get max number of soil layers to track
     nlaypg_max = get_nlaypg_max(veg_trait_table)
@@ -4789,7 +4771,7 @@ def _monthly_N_fixation(
             (annual_precip != _TARGET_NODATA) &
             (baseNdep != _TARGET_NODATA) &
             (epnfs_2 != _IC_NODATA) &
-            (~numpy.isclose(prev_minerl_1_1, minerl_1_1_nodata)))
+            (~numpy.isclose(prev_minerl_1_1, _SV_NODATA)))
         wdfxm = numpy.zeros(precip.shape, dtype=numpy.float32)
         wdfxm[valid_mask] = (
             baseNdep[valid_mask] *
@@ -4806,8 +4788,6 @@ def _monthly_N_fixation(
 
     precip_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['precip_{}'.format(month_index)])['nodata'][0]
-    minerl_1_1_nodata = pygeoprocessing.get_raster_info(
-        prev_sv_reg['minerl_1_1_path'])['nodata'][0]
 
     # temporary intermediate rasters for calculating available nutrient
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)

@@ -19,6 +19,7 @@ PROCESSING_DIR = None
 
 _TARGET_NODATA = -1.0
 _IC_NODATA = numpy.finfo('float32').min
+_SV_NODATA = -1.0
 
 NROWS = 3
 NCOLS = 3
@@ -2236,7 +2237,7 @@ class foragetests(unittest.TestCase):
             aligned_inputs['pft_{}'.format(list(pft_id_set)[0])],
             _TARGET_NODATA)
         insert_nodata_values_into_raster(
-            sv_reg['aglivc_{}_path'.format(list(pft_id_set)[0])], _IC_NODATA)
+            sv_reg['aglivc_{}_path'.format(list(pft_id_set)[0])], _SV_NODATA)
         insert_nodata_values_into_raster(
             sv_reg['avh2o_1_{}_path'.format(list(pft_id_set)[1])],
             _TARGET_NODATA)
@@ -2302,9 +2303,10 @@ class foragetests(unittest.TestCase):
             minimum_acceptable_favail_P,
             maximum_acceptable_favail_P, _IC_NODATA)
 
+        insert_nodata_values_into_raster(sv_reg['minerl_1_1_path'], _SV_NODATA)
         for input_raster in [
-                sv_reg['minerl_1_1_path'], param_val_dict['favail_4'],
-                param_val_dict['favail_5'], param_val_dict['favail_6']]:
+                param_val_dict['favail_4'], param_val_dict['favail_5'],
+                param_val_dict['favail_6']]:
             insert_nodata_values_into_raster(input_raster, _IC_NODATA)
             forage._calc_favail_P(sv_reg, param_val_dict)
             self.assert_all_values_in_raster_within_range(
@@ -2917,7 +2919,7 @@ class foragetests(unittest.TestCase):
         }
         tolerance = 0.0001
 
-        insert_nodata_values_into_raster(aglivc_path, -999)
+        insert_nodata_values_into_raster(aglivc_path, _SV_NODATA)
         insert_nodata_values_into_raster(prbmn_1_path, _IC_NODATA)
         insert_nodata_values_into_raster(annual_precip_path, _TARGET_NODATA)
         forage.calc_ce_ratios(
