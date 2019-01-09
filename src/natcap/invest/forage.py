@@ -4863,3 +4863,122 @@ def calc_anerb(rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
             aneref_1[high_rprpet_mask]),
         aneref_3[high_rprpet_mask])
     return anerb
+
+
+def esched(return_type):
+    """Calculate flow of an element accompanying decomposition of C.
+
+    Calculate the movement of one element (N or P) as C decomposes from one
+    state variable (the donating stock, or box A) to another state variable
+    (the receiving stock, or box B).  Esched.f
+
+    Parameters:
+        return_type (string): flag indicating whether to return material
+            leaving box A, material arriving in box B, or material flowing
+            into or out of the mineral pool
+
+    Returns:
+        the function `_esched`
+    """
+    def _esched(cflow, tca, rcetob, anps, labile):
+        """Calculate the flow of one element (iel) to accompany decomp of C.
+
+        This is a transcription of Esched.f: "Schedule N, P, or S flow and
+        associated mineralization or immobilization flow for decomposition
+        from Box A to Box B."
+        If there is enough of iel (N or P) in the donating stock to satisfy
+        the required ratio, that material flows from the donating stock to
+        the receiving stock and whatever iel is leftover goes to mineral
+        pool. If there is not enough iel to satisfy the required ratio, iel
+        is drawn from the mineral pool to satisfy the ratio; if there is
+        not enough iel in the mineral pool, the material does not leave the
+        donating stock.
+
+        Parameters:
+            cflow (numpy.ndarray): derived, total C that is decomposing from
+                box A to box B
+            tca (numpy.ndarray): state variable, C in donating stock, i.e.
+                box A
+            rcetob (numpy.ndarray): derived, required ratio of C/iel in the
+                receiving stock
+            anps (numpy.ndarray): state variable, iel (N or P) in the donating
+                stock
+            labile (numpy.ndarray): state variable, mineral iel (N or P)
+
+        Returns:
+            material_leaving_a, the amount of material leaving box A, if
+                return_type is 'material_leaving_a'
+            material_arriving_b, the amount of material arriving in box B,
+                if return_type is 'material_arriving_b'
+            mnrflo, flow to or from mineral pool, if return_type is
+                'mineral_flow'
+        """
+        valid_mask = (
+            (cflow != _TARGET_NODATA) &
+            (tca != _SV_NODATA) &
+            (rcetob != _TARGET_NODATA) &
+            (anps != _SV_NODATA) &
+            (labile != _SV_NODATA))
+        outofa = numpy.empty(cflow.shape, dtype=numpy.float32)
+        outofa[:] = _TARGET_NODATA
+        outofa[valid_mask] = (
+            anps[valid_mask] * (cflow[valid_mask] / tca[valid_mask]))
+
+        immobil_ratio = numpy.zeros(cflow.shape)
+        immobil_ratio[valid_mask] = (
+            cflow[valid_mask] / outofa[valid_mask])
+
+        immflo = numpy.zeros(cflow.shape)
+        immflo[valid_mask] = (
+            cflow[valid_mask] / rcetob[valid_mask] - outofa[valid_mask])
+
+        labile_supply = numpy.zeros(cflow.shape)
+        labile_supply[valid_mask] = labile[valid_mask] - immflo[valid_mask]
+
+        atob = numpy.zeros(cflow.shape)
+        atob[valid_mask] = cflow[valid_mask] / rcetob[valid_mask]
+
+        # immobilization
+        immobilization_mask = (
+            (immobil_ratio > rcetob) &
+            (labile_supply > 0) &
+            valid_mask)
+        # mineralization
+        mineralization_mask = (
+            (immobil_ratio <= rcetob) &
+            valid_mask)
+        # no movement
+        no_movt_mask = (
+            (immobil_ratio > rcetob) &
+            (labile_supply <= 0) &
+            valid_mask)
+
+        material_leaving_a = numpy.empty(cflow.shape, dtype=numpy.float32)
+        material_leaving_a[:] = _TARGET_NODATA
+        material_arriving_b = numpy.empty(cflow.shape, dtype=numpy.float32)
+        material_arriving_b[:] = _TARGET_NODATA
+        mnrflo = numpy.empty(cflow.shape, dtype=numpy.float32)
+        mnrflo[:] = _TARGET_NODATA
+
+        material_leaving_a[immobilization_mask] = (
+            outofa[immobilization_mask])
+        material_arriving_b[immobilization_mask] = (
+            outofa[immobilization_mask] + immflo[immobilization_mask])
+        mnrflo[immobilization_mask] = -immflo[immobilization_mask]
+
+        material_leaving_a[mineralization_mask] = outofa[mineralization_mask]
+        material_arriving_b[mineralization_mask] = atob[mineralization_mask]
+        mnrflo[mineralization_mask] = (
+            outofa[mineralization_mask] - atob[mineralization_mask])
+
+        material_leaving_a[no_movt_mask] = 0.
+        material_arriving_b[no_movt_mask] = 0.
+        mnrflo[no_movt_mask] = 0.
+
+        if return_type == 'material_leaving_a':
+            return material_leaving_a
+        elif return_type == 'material_arriving_b':
+            return material_arriving_b
+        elif return_type == 'mineral_flow':
+            return mnrflo
+    return _esched

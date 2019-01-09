@@ -5652,3 +5652,256 @@ class foragetests(unittest.TestCase):
         pevap = 6.0618
         state_var_mod = decomposition_point(
             inputs, params, state_var, month_reg, rnew_dict, pevap)
+
+    def test_esched(self):
+        """Test `esched`.
+
+        Use the function `esched` to calculate the flow of one element
+        accompanying decomposition of C.  Test that the function matches
+        values calculated by point-based version.
+
+        Raises:
+            AssertionError if `esched` does not match value calculated
+                by `esched_point`
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00000001
+
+        # immobilization
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 190.3
+        anps = 0.7776
+        labile = 6.01
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        # raster inputs
+        cflow_path = os.path.join(self.workspace_dir, 'cflow.tif')
+        tca_path = os.path.join(self.workspace_dir, 'tca.tif')
+        rcetob_path = os.path.join(self.workspace_dir, 'rcetob.tif')
+        anps_path = os.path.join(self.workspace_dir, 'anps.tif')
+        labile_path = os.path.join(self.workspace_dir, 'labile.tif')
+        # output paths
+        mat_leaving_a_path = os.path.join(self.workspace_dir, 'leavinga.tif')
+        mat_arriving_b_path = os.path.join(self.workspace_dir, 'arrivingb.tif')
+        mineral_flow_path = os.path.join(self.workspace_dir, 'mineralflow.tif')
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(cflow_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(anps_path, _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _TARGET_NODATA)
+
+        # mineralization
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 520.8
+        anps = 0.3111
+        labile = 32.87
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(anps_path, _SV_NODATA)
+        insert_nodata_values_into_raster(tca_path, _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _TARGET_NODATA)
+
+        # no movement
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 520.8
+        anps = 0.3111
+        labile = 0.
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_raster(rcetob_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(labile_path, _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _TARGET_NODATA)
