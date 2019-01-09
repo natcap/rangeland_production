@@ -5905,3 +5905,58 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
             mineral_flow + tolerance, _TARGET_NODATA)
+
+    def test_initialize_aminrl_2(self):
+        """Test `initialize_aminrl_2`.
+
+        Use the function `initialize_aminrl_2` to initialize aminrl_2, average
+        mineral P in the surface layer.  Compare calculated value to value
+        calculated by hand.
+
+        Raises:
+            AssertionError if `initialize_aminrl_2` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        tolerance = 0.00001
+
+        # known values
+        minerl_1_2 = 32.87
+        sorpmx = 2.
+        pslsrb = 1.
+        aminrl_2 = 30.9326319
+
+        # raster inputs
+        minerl_1_2_path = os.path.join(self.workspace_dir, 'minerl_1_2.tif')
+        sorpmx_path = os.path.join(self.workspace_dir, 'sorpmx.tif')
+        pslsrb_path = os.path.join(self.workspace_dir, 'pslsrb.tif')
+        aminrl_2_path = os.path.join(self.workspace_dir, 'aminrl_2.tif')
+
+        create_random_raster(minerl_1_2_path, minerl_1_2, minerl_1_2)
+        create_random_raster(sorpmx_path, sorpmx, sorpmx)
+        create_random_raster(pslsrb_path, pslsrb, pslsrb)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                minerl_1_2_path, sorpmx_path, pslsrb_path]],
+            forage.initialize_aminrl_2, aminrl_2_path, gdal.GDT_Float32,
+            _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            aminrl_2_path, aminrl_2 - tolerance, aminrl_2 + tolerance,
+            _SV_NODATA)
+
+        insert_nodata_values_into_raster(minerl_1_2_path, _SV_NODATA)
+        insert_nodata_values_into_raster(pslsrb_path, _IC_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                minerl_1_2_path, sorpmx_path, pslsrb_path]],
+            forage.initialize_aminrl_2, aminrl_2_path, gdal.GDT_Float32,
+            _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            aminrl_2_path, aminrl_2 - tolerance, aminrl_2 + tolerance,
+            _SV_NODATA)

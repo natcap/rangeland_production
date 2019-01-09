@@ -4915,10 +4915,10 @@ def esched(return_type):
         """
         valid_mask = (
             (cflow != _TARGET_NODATA) &
-            (tca != _SV_NODATA) &
+            (~numpy.isclose(tca, _SV_NODATA)) &
             (rcetob != _TARGET_NODATA) &
-            (anps != _SV_NODATA) &
-            (labile != _SV_NODATA))
+            (~numpy.isclose(anps, _SV_NODATA)) &
+            (~numpy.isclose(labile, _SV_NODATA)))
         outofa = numpy.empty(cflow.shape, dtype=numpy.float32)
         outofa[:] = _TARGET_NODATA
         outofa[valid_mask] = (
@@ -4982,3 +4982,48 @@ def esched(return_type):
         elif return_type == 'mineral_flow':
             return mnrflo
     return _esched
+
+
+def initialize_aminrl_2(minerl_1_2, sorpmx, pslsrb):
+    """Initialize aminrl_2, average mineral P in surface layer.
+
+    While mineral P in the surface layer changes with each four-times-per-
+    month decomposition step, aminrl_2 is the running average value across
+    timesteps.  It estimates the amount of labile P.
+
+    Parameters:
+        minerl_1_2 (numpy.ndarray): state variable, mineral P in top layer
+        sorpmx (numpy.ndarray): parameter, maximum P sorption potential
+        pslsrb (numpy.ndarray): parameter, slope term which controls the
+            fraction of mineral P that is labile
+
+    Returns:
+        aminrl_2, average mineral P in surface layer
+    """
+    valid_mask = (
+        (~numpy.isclose(minerl_1_2, _SV_NODATA)) &
+        (sorpmx != _IC_NODATA) &
+        (pslsrb != _IC_NODATA))
+    c_ar = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
+    c_ar[valid_mask] = (
+        sorpmx[valid_mask] * (2.0 - pslsrb[valid_mask]) / 2.)
+    b_ar = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
+    b_ar[valid_mask] = (
+        sorpmx[valid_mask] - minerl_1_2[valid_mask] + c_ar[valid_mask])
+
+    sq_ar = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
+    sq_ar[valid_mask] = (
+        b_ar[valid_mask] * b_ar[valid_mask] + 4. * c_ar[valid_mask] *
+        minerl_1_2[valid_mask])
+    sqrt_ar = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
+    sqrt_ar[valid_mask] = numpy.sqrt(sq_ar[valid_mask])
+
+    labile = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
+    labile[valid_mask] = (-b_ar[valid_mask] + sqrt_ar[valid_mask]) / 2.
+
+    fsfunc = numpy.full(minerl_1_2.shape, fill_value=1.)
+    fsfunc[valid_mask] = labile[valid_mask] / minerl_1_2[valid_mask]
+    aminrl_2 = numpy.empty(minerl_1_2.shape, dtype=numpy.float32)
+    aminrl_2[:] = _SV_NODATA
+    aminrl_2[valid_mask] = minerl_1_2[valid_mask] * fsfunc[valid_mask]
+    return aminrl_2
