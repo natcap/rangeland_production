@@ -678,12 +678,34 @@ def execute(args):
             month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
 
 
-def multiply_positive_rasters(raster1, raster2):
-        """Multiply positive values in two rasters."""
-        valid_mask = (raster1 > 0.) & (raster2 > 0.)
-        result = numpy.zeros(raster1.shape)
+def raster_multiplication(
+        raster1, raster1_nodata, raster2, raster2_nodata, target_path,
+        target_path_nodata):
+    """Multiply raster1 by raster2.
+
+    Multiply raster1 by raster2 element-wise. In any pixel where raster1 or
+    raster2 is nodata, the result is nodata. The result is always of float
+    datatype.
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    def raster_multiply_op(raster1, raster2):
+        """Multiply two rasters."""
+        valid_mask = (
+            (~numpy.isclose(raster1, raster1_nodata)) &
+            (~numpy.isclose(raster2, raster2_nodata)))
+        result = numpy.empty(raster1.shape, dtype=numpy.float32)
+        result[:] = target_path_nodata
         result[valid_mask] = raster1[valid_mask] * raster2[valid_mask]
         return result
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [raster1, raster2]],
+        raster_multiply_op, target_path, gdal.GDT_Float32,
+        target_path_nodata)
 
 
 def raster_sum(
@@ -826,12 +848,12 @@ def weighted_state_variable_sum(
     weighted_path_list = []
     for pft_i in pft_id_set:
         target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_i)]
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                sv_reg['{}_{}_path'.format(sv, pft_i)],
-                aligned_inputs['pft_{}'.format(pft_i)]]],
-            multiply_positive_rasters, target_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+        raster_multiplication(
+            sv_reg['{}_{}_path'.format(sv, pft_i)], _SV_NODATA,
+            aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+            target_path, _TARGET_NODATA)
         weighted_path_list.append(target_path)
     raster_sum(
         weighted_path_list, _TARGET_NODATA, weighted_sum_path, _TARGET_NODATA,
@@ -4449,12 +4471,12 @@ def _soil_water(
     for pft_i in pft_id_set:
         target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
         if month_reg['tgprod_{}'.format(pft_i)]:
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in [
-                    month_reg['tgprod_{}'.format(pft_i)],
-                    aligned_inputs['pft_{}'.format(pft_i)]]],
-                multiply_positive_rasters, target_path,
-                gdal.GDT_Float32, _TARGET_NODATA)
+            pft_nodata = pygeoprocessing.get_raster_info(
+                aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+            raster_multiplication(
+                month_reg['tgprod_{}'.format(pft_i)], _TARGET_NODATA,
+                aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+                target_path, _TARGET_NODATA)
             weighted_path_list.append(target_path)
     if weighted_path_list:
         raster_sum(
@@ -4617,12 +4639,10 @@ def _soil_water(
     # depth for that soil layer
     awwt_list = []
     for lyr in xrange(1, nlaypg_max + 1):
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                temp_val_dict['avw_{}'.format(lyr)],
-                param_val_dict['awtl_{}'.format(lyr)]]],
-            multiply_positive_rasters, temp_val_dict['awwt_{}'.format(lyr)],
-            gdal.GDT_Float32, _TARGET_NODATA)
+        raster_multiplication(
+            temp_val_dict['avw_{}'.format(lyr)], _TARGET_NODATA,
+            param_val_dict['awtl_{}'.format(lyr)], _IC_NODATA,
+            temp_val_dict['awwt_{}'.format(lyr)], _TARGET_NODATA)
         awwt_list.append(temp_val_dict['awwt_{}'.format(lyr)])
     # total weighted available water for transpiration
     raster_sum(
@@ -4689,6 +4709,8 @@ def _soil_water(
 
     # calculate avh2o_1, soil water available for growth, for each PFT
     for pft_i in pft_id_set:
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         soil_layers_accessible = [
             temp_val_dict['avinj_{}'.format(lyr)] for lyr in
             xrange(1, veg_trait_table[pft_i]['nlaypg'] + 1)]
@@ -4696,12 +4718,10 @@ def _soil_water(
             soil_layers_accessible, _TARGET_NODATA,
             temp_val_dict['sum_avinj_{}'.format(pft_i)],
             _TARGET_NODATA, nodata_remove=True)
-        pygeoprocessing.raster_calculator(
-            [(path, 1) for path in [
-                temp_val_dict['sum_avinj_{}'.format(pft_i)],
-                aligned_inputs['pft_{}'.format(pft_i)]]],
-            multiply_positive_rasters, sv_reg['avh2o_1_{}_path'.format(pft_i)],
-            gdal.GDT_Float32, _TARGET_NODATA)
+        raster_multiplication(
+            temp_val_dict['sum_avinj_{}'.format(pft_i)], _TARGET_NODATA,
+            aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+            sv_reg['avh2o_1_{}_path'.format(pft_i)], _TARGET_NODATA)
 
     # calculate avh2o_3, moisture in top two soil layers
     soil_layers_to_sum = [
