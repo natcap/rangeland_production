@@ -827,9 +827,9 @@ def weighted_state_variable_sum(
     for pft_i in pft_id_set:
         target_path = temp_val_dict['{}_weighted_{}'.format(sv, pft_i)]
         pygeoprocessing.raster_calculator(
-            [(path, 1) for path in
+            [(path, 1) for path in [
                 sv_reg['{}_{}_path'.format(sv, pft_i)],
-                aligned_inputs['pft_{}'.format(pft_i)]],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
             multiply_positive_rasters, target_path,
             gdal.GDT_Float32, _TARGET_NODATA)
         weighted_path_list.append(target_path)
@@ -5096,3 +5096,76 @@ def calc_tcflow_strucc_1(
     tcflow_strucc_1[valid_mask] = 0.
     tcflow_strucc_1[decompose_mask] = potential_flow[decompose_mask]
     return tcflow_strucc_1
+
+
+def calc_tcflow_strucc_2(
+        aminrl_1, aminrl_2, strucc_2, struce_2_1, struce_2_2, rnewbs_1_1,
+        rnewbs_2_1, strmax_2, defac, dec1_2, pligst_2, strlig_2, pheff_struc,
+        anerb):
+    """Calculate total flow out of soil structural C.
+
+    The total potential flow of C out of soil structural material is
+    calculated according to its lignin content, the decomposition factor, and
+    soil pH. The actual flow is limited by the availability of N and P. N and P
+    may be supplied by the mineral source, or by the element (N or P) in the
+    decomposing stock.
+
+    Parameters:
+        aminrl_1 (numpy.ndarray): derived, average soil mineral N
+        aminrl_2 (numpy.ndarray): derived, average soil mineral P
+        strucc_2 (numpy.ndarray): state variable, soil structural C
+        struce_2_1 (numpy.ndarray): state variable, soil structural N
+        struce_2_2 (numpy.ndarray): state variable, soil structural P
+        rnewbs_1_1 (numpy.ndarray): derived, required C/N ratio for
+            belowground material decomposing to SOM1
+        rnewbs_2_1 (numpy.ndarray): derived, required C/P ratio for
+            belowground material decomposing to SOM1
+        strmax_2 (numpy.ndarray): parameter, maximum decomposition amount
+        defac (numpy.ndarray): derived, decomposition factor
+        dec1_2 (numpy.ndarray): parameter, maximum decomposition rate
+        pligst_2 (numpy.ndarray): parameter, effect of lignin content on
+            decomposition rate
+        strlig_2 (numpy.ndarray): state variable, lignin content of decomposing
+            material
+        pheff_struc (numpy.ndarray): derived, effect of soil pH on
+            decomposition rate
+        anerb (numpy.ndarray): derived, effect of soil anaerobic conditions on
+            decomposition rate
+
+    Returns:
+        tcflow_strucc_2, total flow of C out of soil structural
+            material
+    """
+    valid_mask = (
+        (aminrl_1 != _TARGET_NODATA) &
+        (aminrl_2 != _TARGET_NODATA) &
+        (~numpy.isclose(strucc_2, _SV_NODATA)) &
+        (~numpy.isclose(struce_2_1, _SV_NODATA)) &
+        (~numpy.isclose(struce_2_2, _SV_NODATA)) &
+        (rnewbs_1_1 != _TARGET_NODATA) &
+        (rnewbs_2_1 != _TARGET_NODATA) &
+        (strmax_2 != _IC_NODATA) &
+        (defac != _TARGET_NODATA) &
+        (dec1_2 != _IC_NODATA) &
+        (pligst_2 != _IC_NODATA) &
+        (~numpy.isclose(strlig_2, _SV_NODATA)) &
+        (pheff_struc != _TARGET_NODATA) &
+        (anerb != _TARGET_NODATA))
+
+    potential_flow = numpy.zeros(aminrl_1.shape, dtype=numpy.float32)
+    potential_flow[valid_mask] = (
+        numpy.minimum(strucc_2[valid_mask], strmax_2[valid_mask]) *
+        defac[valid_mask] * dec1_2[valid_mask] *
+        numpy.exp(-pligst_2[valid_mask] * strlig_2[valid_mask]) * 0.020833 *
+        pheff_struc * anerb)
+
+    decompose_mask = (
+        ((aminrl_1 > 0.0000001) | ((strucc_2 / struce_2_1) <= rnewbs_1_1)) &
+        ((aminrl_2 > 0.0000001) | ((strucc_2 / struce_2_2) <= rnewbs_2_1)) &
+        valid_mask)
+
+    tcflow_strucc_2 = numpy.empty(aminrl_1.shape, dtype=numpy.float32)
+    tcflow_strucc_2[:] = _TARGET_NODATA
+    tcflow_strucc_2[valid_mask] = 0.
+    tcflow_strucc_2[decompose_mask] = potential_flow[decompose_mask]
+    return tcflow_strucc_2
