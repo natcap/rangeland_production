@@ -5027,3 +5027,72 @@ def initialize_aminrl_2(minerl_1_2, sorpmx, pslsrb):
     aminrl_2[:] = _SV_NODATA
     aminrl_2[valid_mask] = minerl_1_2[valid_mask] * fsfunc[valid_mask]
     return aminrl_2
+
+
+def calc_tcflow_strucc_1(
+        aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2, rnewas_1_1,
+        rnewas_2_1, strmax_1, defac, dec1_1, pligst_1, strlig_1, pheff_struc):
+    """Calculate total flow out of surface structural C.
+
+    The total potential flow of C out of surface structural material is
+    calculated according to its lignin content, the decomposition factor, and
+    soil pH. The actual flow is limited by the availability of N and P. N and P
+    may be supplied by the mineral source, or by the element (N or P) in the
+    decomposing stock.
+
+    Parameters:
+        aminrl_1 (numpy.ndarray): derived, average surface mineral N
+        aminrl_2 (numpy.ndarray): derived, average surface mineral P
+        strucc_1 (numpy.ndarray): state variable, surface structural C
+        struce_1_1 (numpy.ndarray): state variable, surface structural N
+        struce_1_2 (numpy.ndarray): state variable, surface structural P
+        rnewas_1_1 (numpy.ndarray): derived, required C/N ratio for
+            aboveground material decomposing to SOM1
+        rnewas_2_1 (numpy.ndarray): derived, required C/P ratio for
+            aboveground material decomposing to SOM1
+        strmax_1 (numpy.ndarray): parameter, maximum decomposition amount
+        defac (numpy.ndarray): derived, decomposition factor
+        dec1_1 (numpy.ndarray): parameter, maximum decomposition rate
+        pligst_1 (numpy.ndarray): parameter, effect of lignin content on
+            decomposition rate
+        strlig_1 (numpy.ndarray): state variable, lignin content of decomposing
+            material
+        pheff_struc (numpy.ndarray): derived, effect of soil pH on
+            decomposition rate
+
+    Returns:
+        tcflow_strucc_1, total flow of C out of surface structural
+            material
+    """
+    valid_mask = (
+        (aminrl_1 != _TARGET_NODATA) &
+        (aminrl_2 != _TARGET_NODATA) &
+        (~numpy.isclose(strucc_1, _SV_NODATA)) &
+        (~numpy.isclose(struce_1_1, _SV_NODATA)) &
+        (~numpy.isclose(struce_1_2, _SV_NODATA)) &
+        (rnewas_1_1 != _TARGET_NODATA) &
+        (rnewas_2_1 != _TARGET_NODATA) &
+        (strmax_1 != _IC_NODATA) &
+        (defac != _TARGET_NODATA) &
+        (dec1_1 != _IC_NODATA) &
+        (pligst_1 != _IC_NODATA) &
+        (~numpy.isclose(strlig_1, _SV_NODATA)) &
+        (pheff_struc != _TARGET_NODATA))
+
+    potential_flow = numpy.zeros(aminrl_1.shape, dtype=numpy.float32)
+    potential_flow[valid_mask] = (
+        numpy.minimum(strucc_1[valid_mask], strmax_1[valid_mask]) *
+        defac[valid_mask] * dec1_1[valid_mask] *
+        numpy.exp(-pligst_1[valid_mask] * strlig_1[valid_mask]) * 0.020833 *
+        pheff_struc[valid_mask])
+
+    decompose_mask = (
+        ((aminrl_1 > 0.0000001) | ((strucc_1 / struce_1_1) <= rnewas_1_1)) &
+        ((aminrl_2 > 0.0000001) | ((strucc_1 / struce_1_2) <= rnewas_2_1)) &
+        valid_mask)
+
+    tcflow_strucc_1 = numpy.empty(aminrl_1.shape, dtype=numpy.float32)
+    tcflow_strucc_1[:] = _TARGET_NODATA
+    tcflow_strucc_1[valid_mask] = 0.
+    tcflow_strucc_1[decompose_mask] = potential_flow[decompose_mask]
+    return tcflow_strucc_1

@@ -5960,3 +5960,166 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             aminrl_2_path, aminrl_2 - tolerance, aminrl_2 + tolerance,
             _SV_NODATA)
+
+    def test_calc_tcflow_strucc_1(self):
+        """Test `calc_tcflow_strucc_1`.
+
+        Use the function `calc_tcflow_strucc_1` to calculate total flow
+        out of surface structural C. Ensure that calculated values match
+        values calculated by point-based version defined here.
+
+        Raises:
+            AssertionError if `calc_tcflow_strucc_1` does not match values
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def tcflow_strucc_1_point(
+                aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
+                rnewas_1_1, rnewas_2_1, strmax_1, defac, dec1_1, pligst_1,
+                strlig_1, pheff_struc):
+            """Point-based implementation of `calc_tcflow_strucc_1`.
+
+            Returns:
+                tcflow_strucc_1, total flow of C limited by N and P
+            """
+            potential_flow = (min(
+                strucc_1, strmax_1) * defac * dec1_1 *
+                math.exp(-pligst_1 * strlig_1) * 0.020833 * pheff_struc)
+
+            decompose_mask = (
+                ((aminrl_1 > 0.0000001) | (
+                    (strucc_1 / struce_1_1) <= rnewas_1_1)) &
+                ((aminrl_2 > 0.0000001) | (
+                    (strucc_1 / struce_1_2) <= rnewas_2_1)))
+
+            if decompose_mask:
+                tcflow_strucc_1 = potential_flow
+            else:
+                tcflow_strucc_1 = 0
+            return tcflow_strucc_1
+        from natcap.invest import forage
+
+        array_shape = (10, 10)
+        tolerance = 0.0000001
+
+        # decomposition can occur
+        aminrl_1 = 6.4143
+        aminrl_2 = 30.9253
+        strucc_1 = 156.0546
+        struce_1_1 = 0.7803
+        struce_1_2 = 0.3121
+        rnewas_1_1 = 210.8
+        rnewas_2_1 = 540.2
+        strmax_1 = 5000.
+        defac = 0.822
+        dec1_1 = 3.9
+        pligst_1 = 3.
+        strlig_1 = 0.3779
+        pH = 6.84
+        pheff_struc = numpy.clip(
+            (0.5 + (1.1 / numpy.pi) *
+                numpy.arctan(numpy.pi * 0.7 * (pH - 4.))), 0, 1)
+
+        tcflow_strucc_1 = tcflow_strucc_1_point(
+            aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
+            rnewas_1_1, rnewas_2_1, strmax_1, defac, dec1_1, pligst_1,
+            strlig_1, pheff_struc)
+
+        # array inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        strucc_1_ar = numpy.full(array_shape, strucc_1)
+        struce_1_1_ar = numpy.full(array_shape, struce_1_1)
+        struce_1_2_ar = numpy.full(array_shape, struce_1_2)
+        rnewas_1_1_ar = numpy.full(array_shape, rnewas_1_1)
+        rnewas_2_1_ar = numpy.full(array_shape, rnewas_2_1)
+        strmax_1_ar = numpy.full(array_shape, strmax_1)
+        defac_ar = numpy.full(array_shape, defac)
+        dec1_1_ar = numpy.full(array_shape, dec1_1)
+        pligst_1_ar = numpy.full(array_shape, pligst_1)
+        strlig_1_ar = numpy.full(array_shape, strlig_1)
+        pheff_struc_ar = numpy.full(array_shape, pheff_struc)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(struce_1_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(strlig_1_ar, _SV_NODATA)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+
+        # N insufficient to allow decomposition
+        aminrl_1 = 0.
+        aminrl_2 = 30.9253
+        strucc_1 = 156.0546
+        struce_1_1 = 0.7803
+        struce_1_2 = 0.3121
+        rnewas_1_1 = 170.
+        rnewas_2_1 = 540.2
+        strmax_1 = 5000.
+        defac = 0.822
+        dec1_1 = 3.9
+        pligst_1 = 3.
+        strlig_1 = 0.3779
+        pH = 6.84
+        pheff_struc = numpy.clip(
+            (0.5 + (1.1 / numpy.pi) *
+                numpy.arctan(numpy.pi * 0.7 * (pH - 4.))), 0, 1)
+
+        tcflow_strucc_1 = tcflow_strucc_1_point(
+            aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
+            rnewas_1_1, rnewas_2_1, strmax_1, defac, dec1_1, pligst_1,
+            strlig_1, pheff_struc)
+
+        # array inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        strucc_1_ar = numpy.full(array_shape, strucc_1)
+        struce_1_1_ar = numpy.full(array_shape, struce_1_1)
+        struce_1_2_ar = numpy.full(array_shape, struce_1_2)
+        rnewas_1_1_ar = numpy.full(array_shape, rnewas_1_1)
+        rnewas_2_1_ar = numpy.full(array_shape, rnewas_2_1)
+        strmax_1_ar = numpy.full(array_shape, strmax_1)
+        defac_ar = numpy.full(array_shape, defac)
+        dec1_1_ar = numpy.full(array_shape, dec1_1)
+        pligst_1_ar = numpy.full(array_shape, pligst_1)
+        strlig_1_ar = numpy.full(array_shape, strlig_1)
+        pheff_struc_ar = numpy.full(array_shape, pheff_struc)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(strmax_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(dec1_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(aminrl_1_ar, _TARGET_NODATA)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
