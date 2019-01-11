@@ -1881,9 +1881,9 @@ class foragetests(unittest.TestCase):
         }
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         create_random_raster(site_index_path, 1, 1)
-        create_random_raster(sv_reg['strucc_1_path'], 120, 180)
-        create_random_raster(sv_reg['struce_1_1_path'], 0.5, 1)
-        create_random_raster(sv_reg['struce_1_2_path'], 0.1, 0.5)
+        create_random_raster(sv_reg['strucc_1_path'], 120, 1800)
+        create_random_raster(sv_reg['struce_1_1_path'], 0.5, 10)
+        create_random_raster(sv_reg['struce_1_2_path'], 0.1, 0.50)
 
         pp_reg = {
             'rnewas_1_1_path': os.path.join(
@@ -2182,12 +2182,10 @@ class foragetests(unittest.TestCase):
         for pft_i in pft_id_set:
             sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
                 self.workspace_dir, 'aglivc_{}.tif'.format(pft_i))
-            create_random_raster(
-                sv_reg['aglivc_{}_path'.format(pft_i)], 0, 50)
+            create_random_raster(sv_reg['aglivc_{}_path'.format(pft_i)], 0, 50)
             sv_reg['stdedc_{}_path'.format(pft_i)] = os.path.join(
                 self.workspace_dir, 'stdedc_{}.tif'.format(pft_i))
-            create_random_raster(
-                sv_reg['stdedc_{}_path'.format(pft_i)], 0, 50)
+            create_random_raster(sv_reg['stdedc_{}_path'.format(pft_i)], 0, 50)
             sv_reg['avh2o_1_{}_path'.format(pft_i)] = os.path.join(
                 self.workspace_dir, 'avh2o_1_{}.tif'.format(pft_i))
             create_random_raster(
@@ -4524,7 +4522,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
         insert_nodata_values_into_array(rwcf_1_ar, _TARGET_NODATA)
-        insert_nodata_values_into_array(asmos_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(asmos_1_ar, _SV_NODATA)
 
         evlos = forage.calc_evaporation_loss(
             rwcf_1_ar, pevp_ar, absevap_ar, asmos_1_ar, awilt_1_ar, adep_1_ar)
@@ -5049,16 +5047,16 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snow_path'],
             results_dict['snow'] - tolerance,
-            results_dict['snow'] + tolerance, _TARGET_NODATA)
+            results_dict['snow'] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snlq_path'],
             results_dict['snlq'] - tolerance,
-            results_dict['snlq'] + tolerance, _TARGET_NODATA)
+            results_dict['snlq'] + tolerance, _SV_NODATA)
         for lyr in xrange(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
-                results_dict['asmos'][lyr] + tolerance, _TARGET_NODATA)
+                results_dict['asmos'][lyr] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['month_reg']['amov_2'],
             results_dict['amov_2'] - tolerance,
@@ -5067,11 +5065,11 @@ class foragetests(unittest.TestCase):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['avh2o_1_{}_path'.format(pft_i)],
                 results_dict['avh2o_1'][pft_i] - tolerance,
-                results_dict['avh2o_1'][pft_i] + tolerance, _TARGET_NODATA)
+                results_dict['avh2o_1'][pft_i] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['avh2o_3_path'],
             results_dict['avh2o_3'] - tolerance,
-            results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
+            results_dict['avh2o_3'] + tolerance, _SV_NODATA)
 
         # large snowmelt, large precip
         pet = 4.9680004
@@ -5153,16 +5151,16 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snow_path'],
             results_dict['snow'] - tolerance,
-            results_dict['snow'] + tolerance, _TARGET_NODATA)
+            results_dict['snow'] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snlq_path'],
             results_dict['snlq'] - tolerance,
-            results_dict['snlq'] + tolerance, _TARGET_NODATA)
+            results_dict['snlq'] + tolerance, _SV_NODATA)
         for lyr in xrange(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
-                results_dict['asmos'][lyr] + tolerance, _TARGET_NODATA)
+                results_dict['asmos'][lyr] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['month_reg']['amov_2'],
             results_dict['amov_2'] - amov_tolerance,
@@ -5175,7 +5173,7 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['avh2o_3_path'],
             results_dict['avh2o_3'] - tolerance,
-            results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
+            results_dict['avh2o_3'] + tolerance, _SV_NODATA)
 
     def test_monthly_N_fixation(self):
         """Test `_monthly_N_fixation`.
@@ -5239,21 +5237,21 @@ class foragetests(unittest.TestCase):
             year_reg, prev_sv_reg, sv_reg)
         self.assert_all_values_in_raster_within_range(
             sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
-            minerl_1_1 + tolerance, _TARGET_NODATA)
+            minerl_1_1 + tolerance, _SV_NODATA)
 
         insert_nodata_values_into_raster(
             aligned_inputs['precip_{}'.format(month_index)], -9999)
         insert_nodata_values_into_raster(
             year_reg['baseNdep_path'], _TARGET_NODATA)
         insert_nodata_values_into_raster(
-            prev_sv_reg['minerl_1_1_path'], _TARGET_NODATA)
+            prev_sv_reg['minerl_1_1_path'], _SV_NODATA)
 
         forage._monthly_N_fixation(
             aligned_inputs, month_index, site_param_table,
             year_reg, prev_sv_reg, sv_reg)
         self.assert_all_values_in_raster_within_range(
             sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
-            minerl_1_1 + tolerance, _TARGET_NODATA)
+            minerl_1_1 + tolerance, _SV_NODATA)
 
     def test_calc_anerb(self):
         """Test `calc_anerb`.
@@ -5705,56 +5703,56 @@ class foragetests(unittest.TestCase):
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_leaving_a'), mat_leaving_a_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_arriving_b'), mat_arriving_b_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('mineral_flow'), mineral_flow_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             mat_leaving_a_path, material_leaving_a - tolerance,
-            material_leaving_a + tolerance, _TARGET_NODATA)
+            material_leaving_a + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mat_arriving_b_path, material_arriving_b - tolerance,
-            material_arriving_b + tolerance, _TARGET_NODATA)
+            material_arriving_b + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
-            mineral_flow + tolerance, _TARGET_NODATA)
+            mineral_flow + tolerance, _IC_NODATA)
 
-        insert_nodata_values_into_raster(cflow_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(cflow_path, _IC_NODATA)
         insert_nodata_values_into_raster(anps_path, _SV_NODATA)
 
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_leaving_a'), mat_leaving_a_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_arriving_b'), mat_arriving_b_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('mineral_flow'), mineral_flow_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             mat_leaving_a_path, material_leaving_a - tolerance,
-            material_leaving_a + tolerance, _TARGET_NODATA)
+            material_leaving_a + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mat_arriving_b_path, material_arriving_b - tolerance,
-            material_arriving_b + tolerance, _TARGET_NODATA)
+            material_arriving_b + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
-            mineral_flow + tolerance, _TARGET_NODATA)
+            mineral_flow + tolerance, _IC_NODATA)
 
         # mineralization
         cflow = 15.2006
@@ -5780,27 +5778,27 @@ class foragetests(unittest.TestCase):
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_leaving_a'), mat_leaving_a_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_arriving_b'), mat_arriving_b_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('mineral_flow'), mineral_flow_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             mat_leaving_a_path, material_leaving_a - tolerance,
-            material_leaving_a + tolerance, _TARGET_NODATA)
+            material_leaving_a + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mat_arriving_b_path, material_arriving_b - tolerance,
-            material_arriving_b + tolerance, _TARGET_NODATA)
+            material_arriving_b + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
-            mineral_flow + tolerance, _TARGET_NODATA)
+            mineral_flow + tolerance, _IC_NODATA)
 
         insert_nodata_values_into_raster(anps_path, _SV_NODATA)
         insert_nodata_values_into_raster(tca_path, _SV_NODATA)
@@ -5809,27 +5807,27 @@ class foragetests(unittest.TestCase):
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_leaving_a'), mat_leaving_a_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_arriving_b'), mat_arriving_b_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('mineral_flow'), mineral_flow_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             mat_leaving_a_path, material_leaving_a - tolerance,
-            material_leaving_a + tolerance, _TARGET_NODATA)
+            material_leaving_a + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mat_arriving_b_path, material_arriving_b - tolerance,
-            material_arriving_b + tolerance, _TARGET_NODATA)
+            material_arriving_b + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
-            mineral_flow + tolerance, _TARGET_NODATA)
+            mineral_flow + tolerance, _IC_NODATA)
 
         # no movement
         cflow = 15.2006
@@ -5855,27 +5853,27 @@ class foragetests(unittest.TestCase):
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_leaving_a'), mat_leaving_a_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_arriving_b'), mat_arriving_b_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('mineral_flow'), mineral_flow_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             mat_leaving_a_path, material_leaving_a - tolerance,
-            material_leaving_a + tolerance, _TARGET_NODATA)
+            material_leaving_a + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mat_arriving_b_path, material_arriving_b - tolerance,
-            material_arriving_b + tolerance, _TARGET_NODATA)
+            material_arriving_b + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
-            mineral_flow + tolerance, _TARGET_NODATA)
+            mineral_flow + tolerance, _IC_NODATA)
 
         insert_nodata_values_into_raster(rcetob_path, _TARGET_NODATA)
         insert_nodata_values_into_raster(labile_path, _SV_NODATA)
@@ -5884,27 +5882,27 @@ class foragetests(unittest.TestCase):
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_leaving_a'), mat_leaving_a_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('material_arriving_b'), mat_arriving_b_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
             forage.esched('mineral_flow'), mineral_flow_path,
-            gdal.GDT_Float32, _TARGET_NODATA)
+            gdal.GDT_Float32, _IC_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             mat_leaving_a_path, material_leaving_a - tolerance,
-            material_leaving_a + tolerance, _TARGET_NODATA)
+            material_leaving_a + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mat_arriving_b_path, material_arriving_b - tolerance,
-            material_arriving_b + tolerance, _TARGET_NODATA)
+            material_arriving_b + tolerance, _IC_NODATA)
         self.assert_all_values_in_raster_within_range(
             mineral_flow_path, mineral_flow - tolerance,
-            mineral_flow + tolerance, _TARGET_NODATA)
+            mineral_flow + tolerance, _IC_NODATA)
 
     def test_initialize_aminrl_2(self):
         """Test `initialize_aminrl_2`.
@@ -6049,7 +6047,7 @@ class foragetests(unittest.TestCase):
 
         self.assert_all_values_in_array_within_range(
             tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
-            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
 
         insert_nodata_values_into_array(struce_1_2_ar, _SV_NODATA)
         insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
@@ -6062,7 +6060,7 @@ class foragetests(unittest.TestCase):
 
         self.assert_all_values_in_array_within_range(
             tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
-            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
 
         # N insufficient to allow decomposition
         aminrl_1 = 0.
@@ -6109,11 +6107,11 @@ class foragetests(unittest.TestCase):
 
         self.assert_all_values_in_array_within_range(
             tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
-            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
 
         insert_nodata_values_into_array(strmax_1_ar, _IC_NODATA)
         insert_nodata_values_into_array(dec1_1_ar, _IC_NODATA)
-        insert_nodata_values_into_array(aminrl_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(aminrl_1_ar, _SV_NODATA)
 
         tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
             aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
@@ -6122,4 +6120,48 @@ class foragetests(unittest.TestCase):
 
         self.assert_all_values_in_array_within_range(
             tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
-            tcflow_strucc_1 + tolerance, _TARGET_NODATA)
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
+
+    def test_reclassify_nodata(self):
+        """Test `reclassify_nodata`.
+
+        Use the function `reclassify_nodata` to reset the nodata value of
+        a raster.
+
+        Raises:
+            AssertionError if the nodata value of a raster following
+                `reclassify_nodata` is not equal to the specified nodata type
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        target_path = os.path.join(self.workspace_dir, 'target_raster.tif')
+        create_random_raster(target_path, 0, 1000)
+        insert_nodata_values_into_raster(target_path, _TARGET_NODATA)
+
+        new_nodata_value = -999
+        forage.reclassify_nodata(target_path, new_nodata_value)
+        result_nodata_value = pygeoprocessing.get_raster_info(
+            target_path)['nodata'][0]
+        self.assertEqual(
+            new_nodata_value, result_nodata_value,
+            msg="New nodata value does not match specified nodata value")
+
+        new_nodata_value = numpy.finfo('float32').min
+        forage.reclassify_nodata(target_path, new_nodata_value)
+        result_nodata_value = pygeoprocessing.get_raster_info(
+            target_path)['nodata'][0]
+        self.assertEqual(
+            new_nodata_value, result_nodata_value,
+            msg="New nodata value does not match specified nodata value")
+
+        new_nodata_value = 8920
+        forage.reclassify_nodata(target_path, new_nodata_value)
+        insert_nodata_values_into_raster(target_path, 8920)
+        result_nodata_value = pygeoprocessing.get_raster_info(
+            target_path)['nodata'][0]
+        self.assertEqual(
+            new_nodata_value, result_nodata_value,
+            msg="New nodata value does not match specified nodata value")

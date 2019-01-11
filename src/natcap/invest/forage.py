@@ -812,6 +812,42 @@ def raster_difference(
             target_nodata)
 
 
+def reclassify_nodata(target_path, new_nodata_value):
+    """Reclassify the nodata value of a raster to a new value.
+
+    Convert all areas of nodata in the target raster to the new nodata
+    value, which must be an integer.
+
+    Parameters:
+        target_path (string): path to target raster
+        new_nodata_value (integer): new value to set as nodata
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    def reclassify_op(target_raster):
+        reclassified_raster = numpy.copy(target_raster)
+        reclassify_mask = (target_raster == previous_nodata_value)
+        reclassified_raster[reclassify_mask] = new_nodata_value
+        return reclassified_raster
+
+    fd, temp_path = tempfile.mkstemp(dir=PROCESSING_DIR)
+    shutil.copyfile(target_path, temp_path)
+    previous_nodata_value = pygeoprocessing.get_raster_info(
+        target_path)['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(temp_path, 1)], reclassify_op, target_path, gdal.GDT_Float32,
+        new_nodata_value)
+
+    # clean up
+    os.close(fd)
+    os.remove(temp_path)
+
+
 def weighted_state_variable_sum(
         sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path):
     """Calculate weighted sum of state variable across plant functional types.
@@ -2127,8 +2163,8 @@ def _potential_production(
 
         Parameters:
             pevap (numpy.ndarray): derived, reference evapotranspiration
-            avh2o_1 (numpy.ndarray): derived, water available to this plant
-                functional type for growth
+            avh2o_1 (numpy.ndarray): state variable, water available to this
+                plant functional type for growth
             precip (numpy.ndarray): input, precipitation for the current month
             wc (numpy.ndarray): derived, water content in soil layer 1
             pprpts_1 (numpy.ndarray): parameter, the minimum ratio of
@@ -2616,19 +2652,8 @@ def _calc_available_nutrient(
     mineral_raster_list = [
         sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
             1, nlay + 1)]
-
-    mineral_nodata = set([])
-    for mineral_raster in mineral_raster_list:
-        mineral_nodata.update(
-            set([pygeoprocessing.get_raster_info(
-                mineral_raster)['nodata'][0]]))
-    if len(mineral_nodata) > 1:
-        raise ValueError(
-            "Mineral rasters for element {} contain >1 nodata value".format(
-                iel))
-    mineral_nodata = mineral_nodata.pop()
     raster_sum(
-        mineral_raster_list, mineral_nodata, temp_val_dict['availm'],
+        mineral_raster_list, _SV_NODATA, temp_val_dict['availm'],
         _TARGET_NODATA, nodata_remove=True)
 
     pygeoprocessing.raster_calculator(
@@ -4089,8 +4114,8 @@ def distribute_water_to_soil_layer(return_type):
         Parameters:
             adep (numpy.ndarray): parameter, depth of this soil layer in cm
             afiel (numpy.ndarray): derived, field capacity of this layer
-            asmos (numpy.ndarray): derived, current soil moisture content of
-                this soil layer
+            asmos (numpy.ndarray): state variable, current soil moisture
+                content of this soil layer
             current_moisture_inputs (numpy.ndarray): derived, moisture inputs
                 added to this soil layer
 
@@ -4103,7 +4128,7 @@ def distribute_water_to_soil_layer(return_type):
         valid_mask = (
             (adep != _IC_NODATA) &
             (afiel != _TARGET_NODATA) &
-            (asmos != _TARGET_NODATA) &
+            (~numpy.isclose(asmos, _SV_NODATA)) &
             (current_moisture_inputs != _TARGET_NODATA))
 
         afl = numpy.empty(adep.shape, dtype=numpy.float32)
@@ -4143,7 +4168,7 @@ def calc_available_water_for_transpiration(asmos, awilt, adep):
     layer minus the wilting point of the soil layer.
 
     Parameters:
-        asmos (numpy.ndarray): derived, current moisture in the soil layer
+        asmos (numpy.ndarray): derived, interim moisture in the soil layer
         awilt (numpy.ndarray): derived, wilting point of the soil layer
         adep (numpy.ndarray): parameter, depth of the soil layer in cm
 
@@ -4205,8 +4230,8 @@ def remove_transpiration(return_type):
         """Remove water from a soil layer via transpiration by plants.
 
         Parameters:
-            asmos (numpy.ndarray): derived, moisture in this soil layer after
-                additions from current month precipitation
+            asmos (numpy.ndarray): derived, interim moisture in this soil layer
+                after additions from current month precipitation
             awilt (numpy.ndarray): derived, wilting point of this soil layer
             adep (numpy.ndarray): parameter, depth of this soil layer in cm
             trap (numpy.ndarray): derived, total potential transpiration
@@ -4264,8 +4289,8 @@ def calc_relative_water_content_lyr_1(asmos_1, adep_1, awilt_1, afiel_1):
     from soil layer 1. Line 280, H2olos.f
 
     Parameters:
-        asmos_1 (numpy.ndarray): derived, moisture in soil layer 1 after losses
-            to transpiration
+        asmos_1 (numpy.ndarray): derived, interim moisture in soil layer 1
+            after losses to transpiration
         adep_1 (numpy.ndarray): parameter, depth of soil layer 1 in cm
         awilt_1 (numpy.ndarray): derived, wilting point of soil layer 1
         afiel_1 (numpy.ndarray): derived, field capacity of soil layer 1
@@ -4299,7 +4324,7 @@ def calc_evaporation_loss(rwcf_1, pevp, absevap, asmos_1, awilt_1, adep_1):
         rwcf_1 (numpy.ndarray): derived, relative water content of soil layer 1
         pevp (numpy.ndarray): derived, potential evaporation from soil layer 1
         absevap (numpy.ndarray): derived, bare soil evaporation
-        asmos_1 (numpy.ndarray): derived, current moisture in soil layer 1
+        asmos_1 (numpy.ndarray): derived, interim moisture in soil layer 1
         awilt_1 (numpy.ndarray): derived, wilting point of soil layer 1
         adep_1 (numpy.ndarray): parameter, depth of soil layer 1 in cm
 
@@ -4721,14 +4746,18 @@ def _soil_water(
         raster_multiplication(
             temp_val_dict['sum_avinj_{}'.format(pft_i)], _TARGET_NODATA,
             aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
-            sv_reg['avh2o_1_{}_path'.format(pft_i)], _TARGET_NODATA)
+            sv_reg['avh2o_1_{}_path'.format(pft_i)], _SV_NODATA)
 
     # calculate avh2o_3, moisture in top two soil layers
     soil_layers_to_sum = [
         temp_val_dict['avinj_{}'.format(lyr)] for lyr in [1, 2]]
     raster_sum(
         soil_layers_to_sum, _TARGET_NODATA, sv_reg['avh2o_3_path'],
-        _TARGET_NODATA, nodata_remove=False)
+        _SV_NODATA, nodata_remove=False)
+
+    # set correct nodata value for all revised asmos rasters
+    for lyr in xrange(1, nlaypg_max + 1):
+        reclassify_nodata(sv_reg['asmos_{}_path'.format(lyr)], _SV_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -4801,7 +4830,7 @@ def _monthly_N_fixation(
             (precip[valid_mask] / annual_precip[valid_mask]))
 
         minerl_1_1 = numpy.empty(precip.shape, dtype=numpy.float32)
-        minerl_1_1[:] = _TARGET_NODATA
+        minerl_1_1[:] = _SV_NODATA
         minerl_1_1[valid_mask] = (
             prev_minerl_1_1[valid_mask] + wdfxm[valid_mask])
         return minerl_1_1
@@ -4826,7 +4855,7 @@ def _monthly_N_fixation(
             year_reg['annual_precip_path'], year_reg['baseNdep_path'],
             param_val_dict['epnfs_2'], prev_sv_reg['minerl_1_1_path']]],
         calc_N_fixation, sv_reg['minerl_1_1_path'], gdal.GDT_Float32,
-        _TARGET_NODATA)
+        _SV_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -4934,13 +4963,13 @@ def esched(return_type):
                 'mineral_flow'
         """
         valid_mask = (
-            (cflow != _TARGET_NODATA) &
+            (cflow != _IC_NODATA) &
             (~numpy.isclose(tca, _SV_NODATA)) &
             (rcetob != _TARGET_NODATA) &
             (~numpy.isclose(anps, _SV_NODATA)) &
             (~numpy.isclose(labile, _SV_NODATA)))
         outofa = numpy.empty(cflow.shape, dtype=numpy.float32)
-        outofa[:] = _TARGET_NODATA
+        outofa[:] = _IC_NODATA
         outofa[valid_mask] = (
             anps[valid_mask] * (cflow[valid_mask] / tca[valid_mask]))
 
@@ -4974,11 +5003,11 @@ def esched(return_type):
             valid_mask)
 
         material_leaving_a = numpy.empty(cflow.shape, dtype=numpy.float32)
-        material_leaving_a[:] = _TARGET_NODATA
+        material_leaving_a[:] = _IC_NODATA
         material_arriving_b = numpy.empty(cflow.shape, dtype=numpy.float32)
-        material_arriving_b[:] = _TARGET_NODATA
+        material_arriving_b[:] = _IC_NODATA
         mnrflo = numpy.empty(cflow.shape, dtype=numpy.float32)
-        mnrflo[:] = _TARGET_NODATA
+        mnrflo[:] = _IC_NODATA
 
         material_leaving_a[immobilization_mask] = (
             outofa[immobilization_mask])
@@ -5085,8 +5114,8 @@ def calc_tcflow_strucc_1(
             material
     """
     valid_mask = (
-        (aminrl_1 != _TARGET_NODATA) &
-        (aminrl_2 != _TARGET_NODATA) &
+        (~numpy.isclose(aminrl_1, _SV_NODATA)) &
+        (~numpy.isclose(aminrl_2, _SV_NODATA)) &
         (~numpy.isclose(strucc_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_2, _SV_NODATA)) &
@@ -5112,7 +5141,7 @@ def calc_tcflow_strucc_1(
         valid_mask)
 
     tcflow_strucc_1 = numpy.empty(aminrl_1.shape, dtype=numpy.float32)
-    tcflow_strucc_1[:] = _TARGET_NODATA
+    tcflow_strucc_1[:] = _IC_NODATA
     tcflow_strucc_1[valid_mask] = 0.
     tcflow_strucc_1[decompose_mask] = potential_flow[decompose_mask]
     return tcflow_strucc_1
@@ -5157,8 +5186,8 @@ def calc_tcflow_strucc_2(
             material
     """
     valid_mask = (
-        (aminrl_1 != _TARGET_NODATA) &
-        (aminrl_2 != _TARGET_NODATA) &
+        (~numpy.isclose(aminrl_1, _SV_NODATA)) &
+        (~numpy.isclose(aminrl_2, _SV_NODATA)) &
         (~numpy.isclose(strucc_2, _SV_NODATA)) &
         (~numpy.isclose(struce_2_1, _SV_NODATA)) &
         (~numpy.isclose(struce_2_2, _SV_NODATA)) &
@@ -5185,7 +5214,7 @@ def calc_tcflow_strucc_2(
         valid_mask)
 
     tcflow_strucc_2 = numpy.empty(aminrl_1.shape, dtype=numpy.float32)
-    tcflow_strucc_2[:] = _TARGET_NODATA
+    tcflow_strucc_2[:] = _IC_NODATA
     tcflow_strucc_2[valid_mask] = 0.
     tcflow_strucc_2[decompose_mask] = potential_flow[decompose_mask]
     return tcflow_strucc_2
