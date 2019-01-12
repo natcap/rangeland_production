@@ -163,6 +163,32 @@ def insert_nodata_values_into_array(target_array, nodata_value):
     return modified_array
 
 
+def monthly_N_fixation_point(
+        precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1):
+    """Add monthly N fixation to surface mineral N pool.
+
+    Monthly N fixation is calculated from annual N deposition according to
+    the ratio of monthly precipitation to annual precipitation.
+
+    Parameters:
+        precip (float): input, monthly precipitation
+        annual_precip (float): derived, annual precipitation
+        baseNdep (float): derived, annual atmospheric N deposition
+        epnfs_2 (float): parameter, intercept of regression
+            predicting N deposition from annual precipitation
+        prev_minerl_1_1 (float): state variable, mineral N in the
+            surface layer in previous month
+
+    Returns:
+        minerl_1_1, updated mineral N in the surface layer
+    """
+    wdfxm = (
+        baseNdep * (precip / annual_precip) + epnfs_2 *
+        min(annual_precip, 100.) * (precip / annual_precip))
+    minerl_1_1 = prev_minerl_1_1 + wdfxm
+    return minerl_1_1
+
+
 def rprpet_point(pet, snowmelt, avh2o_3, precip):
     """Calculate the ratio of precipitation to ref evapotranspiration.
 
@@ -5232,11 +5258,11 @@ class foragetests(unittest.TestCase):
 
         Use the function `_monthly_N_fixation` to calculate monthly atmospheric
         N deposition and add it to the surface mineral N pool.  Compare results
-        to values calculated by hand.
+        to values calculated by point-based version.
 
         Raises:
             AssertionError if updated mineral_1_1 does not match value
-                calculated by hand
+                calculated by point-based version
 
         Returns:
             None
@@ -5250,7 +5276,8 @@ class foragetests(unittest.TestCase):
         baseNdep = 24.
         epnfs_2 = 0.01
         prev_minerl_1_1 = 3.2
-        minerl_1_1 = 4.5695652
+        minerl_1_1 = monthly_N_fixation_point(
+            precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1)
 
         aligned_inputs = {
             'precip_{}'.format(month_index): os.path.join(
