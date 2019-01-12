@@ -5218,3 +5218,99 @@ def calc_tcflow_strucc_2(
     tcflow_strucc_2[valid_mask] = 0.
     tcflow_strucc_2[decompose_mask] = potential_flow[decompose_mask]
     return tcflow_strucc_2
+
+
+def calc_respiration_mineral_flow(cflow, frac_co2, estatv, cstatv):
+    """Calculate mineral flow of one element associated with respiration.
+
+    As material decomposes from one stock to another, some CO2 is lost
+    to microbial respiration and some nutrient (N or P) moves to the
+    mineral pool. Respir.f
+
+    Parameters:
+        cflow (numpy.ndarray): derived, C decomposing from one stock
+            to another
+        frac_co2 (numpy.ndarray): parameter, fraction of decomposing
+            C lost as CO2
+        estatv (numpy.ndarray): state variable, iel (N or P) in the
+            decomposing stock
+        cstatv (numpy.ndarray): state variable, C in the decomposing
+            stock
+
+    Returns:
+        mineral_flow, flow of iel (N or P) accompanying respiration
+    """
+    valid_mask = (
+        (cflow != _IC_NODATA) &
+        (frac_co2 != _IC_NODATA) &
+        (~numpy.isclose(estatv, _SV_NODATA)) &
+        (~numpy.isclose(cstatv, _SV_NODATA)))
+
+    co2_loss = numpy.zeros(cflow.shape, dtype=numpy.float32)
+    co2_loss[valid_mask] = cflow[valid_mask] * frac_co2[valid_mask]
+
+    mineral_flow = numpy.empty(cflow.shape, dtype=numpy.float32)
+    mineral_flow[:] = _IC_NODATA
+    mineral_flow[valid_mask] = (
+        co2_loss[valid_mask] * estatv[valid_mask] / cstatv[valid_mask])
+    return mineral_flow
+
+
+def update_gross_mineralization(gross_mineralization, mineral_flow):
+    """Update gross N mineralization with current mineral flow.
+
+    Gross mineralization of N during decomposition is used to calculate
+    volatilization loss of N after decomposition. It is updated with N
+    mineral flow if mineral flow is positive.
+
+    Parameters:
+        gross_mineralization (numpy.ndarray): gross N mineralization during
+            decomposition
+        mineral_flow (numpy.ndarray): N mineral flow
+
+    Returns:
+        gromin_updated, updated gross mineralization
+    """
+    valid_mask = (
+        (gross_mineralization != _TARGET_NODATA) &
+        (mineral_flow != _IC_NODATA))
+
+    gromin_updated = numpy.empty(
+        gross_mineralization.shape, dtype=numpy.float32)
+    gromin_updated[:] = _TARGET_NODATA
+    gromin_updated[valid_mask] = gross_mineralization[valid_mask]
+
+    update_mask = ((mineral_flow > 0) & valid_mask)
+    gromin_updated[update_mask] = (
+        gross_mineralization[update_mask] + mineral_flow[update_mask])
+    return gromin_updated
+
+
+def calc_net_cflow(cflow, frac_co2):
+    """Calculate net flow of C after loss to CO2.
+
+    As material decomposes from one stock to another, some C is lost to
+    CO2 through microbial respiration.  Calculate the net flow of C after
+    subtracting losses to CO2.
+
+    Parameters:
+        cflow (numpy.ndarray): derived, C decomposing from one stock
+            to another
+        frac_co2 (numpy.ndarray): parameter, fraction of decomposing
+            C lost as CO2
+
+    Returns:
+        net_cflow, amount of decomposing C that flows after accounting
+            for CO2 losses
+    """
+    valid_mask = (
+        (cflow != _IC_NODATA) &
+        (frac_co2 != _IC_NODATA))
+
+    co2_loss = numpy.zeros(cflow.shape, dtype=numpy.float32)
+    co2_loss[valid_mask] = cflow[valid_mask] * frac_co2[valid_mask]
+
+    net_cflow = numpy.empty(cflow.shape, dtype=numpy.float32)
+    net_cflow[:] = _IC_NODATA
+    net_cflow[valid_mask] = cflow[valid_mask] - co2_loss[valid_mask]
+    return net_cflow

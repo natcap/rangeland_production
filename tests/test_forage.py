@@ -906,151 +906,151 @@ def decomposition_point(
 
         # decomposition of surface metabolic material: line 136 Litdec.f
         # C/N ratio for surface metabolic residue
-        rceto1_1 = agdrat_point(
-            state_var['metabe_1_1'], state_var['metabc_1'],
-            params['pcemic1_1_1'], params['pcemic1_2_1'],
-            params['pcemic1_3_1'])
-        # C/P ratio for surface metabolic residue
-        rceto1_2 = agdrat_point(
-            state_var['metabe_1_2'], state_var['metabc_1'],
-            params['pcemic1_1_2'], params['pcemic1_2_2'],
-            params['pcemic1_3_2'])
-        decompose_mask = (
-            ((aminrl_1 > 0.0000001) | (
-                (state_var['metabc_1'] / state_var['metabe_1_1']) <=
-                rceto1_1)) &
-            ((aminrl_2 > 0.0000001) | (
-                (state_var['metabc_1'] / state_var['metabe_1_2']) <=
-                rceto1_2)))  # line 194 Litdec.f
-        if decompose_mask:
-            tcflow_metabc_1 = numpy.clip(
-                (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
-                    pheff_metab), 0,
-                state_var['metabc_1'])
-            co2los = tcflow_metabc_1 * params['pmco2_1']
-            d_metabc_1 -= tcflow_metabc_1
-            # respiration, line 201 Litdec.f
-            mnrflo_1 = (
-                co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
-            d_metabe_1_1 -= mnrflo_1
-            d_minerl_1_1 += mnrflo_1
-            gromin_1 += mnrflo_1
-            mnrflo_2 = (
-                co2los * state_var['metabe_1_2'] / state_var['metabc_1'])
-            d_metabe_1_2 -= mnrflo_2
-            d_minerl_1_2 += mnrflo_2
+        # rceto1_1 = agdrat_point(
+        #     state_var['metabe_1_1'], state_var['metabc_1'],
+        #     params['pcemic1_1_1'], params['pcemic1_2_1'],
+        #     params['pcemic1_3_1'])
+        # # C/P ratio for surface metabolic residue
+        # rceto1_2 = agdrat_point(
+        #     state_var['metabe_1_2'], state_var['metabc_1'],
+        #     params['pcemic1_1_2'], params['pcemic1_2_2'],
+        #     params['pcemic1_3_2'])
+        # decompose_mask = (
+        #     ((aminrl_1 > 0.0000001) | (
+        #         (state_var['metabc_1'] / state_var['metabe_1_1']) <=
+        #         rceto1_1)) &
+        #     ((aminrl_2 > 0.0000001) | (
+        #         (state_var['metabc_1'] / state_var['metabe_1_2']) <=
+        #         rceto1_2)))  # line 194 Litdec.f
+        # if decompose_mask:
+        #     tcflow_metabc_1 = numpy.clip(
+        #         (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
+        #             pheff_metab), 0,
+        #         state_var['metabc_1'])
+        #     co2los = tcflow_metabc_1 * params['pmco2_1']
+        #     d_metabc_1 -= tcflow_metabc_1
+        #     # respiration, line 201 Litdec.f
+        #     mnrflo_1 = (
+        #         co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
+        #     d_metabe_1_1 -= mnrflo_1
+        #     d_minerl_1_1 += mnrflo_1
+        #     gromin_1 += mnrflo_1
+        #     mnrflo_2 = (
+        #         co2los * state_var['metabe_1_2'] / state_var['metabc_1'])
+        #     d_metabe_1_2 -= mnrflo_2
+        #     d_minerl_1_2 += mnrflo_2
 
-            net_tosom1 = tcflow_metabc_1 - co2los  # line 210 Litdec.f
-            # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
-            # N first
-            material_leaving_a = esched_point(
-                'material_leaving_a')(
-                    net_tosom1, state_var['metabc_1'], rceto1_1,
-                    state_var['metabe_1_1'], state_var['minerl_1_1'])
-            material_arriving_b = esched_point(
-                'material_arriving_b')(
-                    net_tosom1, state_var['metabc_1'], rceto1_1,
-                    state_var['metabe_1_1'], state_var['minerl_1_1'])
-            mineral_flow = esched_point(
-                'mineral_flow')(
-                    net_tosom1, state_var['metabc_1'], rceto1_1,
-                    state_var['metabe_1_1'], state_var['minerl_1_1'])
-            # schedule flows
-            d_metabe_1_1 -= material_leaving_a
-            d_som1e_1_1 += material_arriving_b
-            d_minerl_1_1 += mineral_flow
-            if mineral_flow > 0:
-                gromin_1 += mineral_flow
+        #     net_tosom1 = tcflow_metabc_1 - co2los  # line 210 Litdec.f
+        #     # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
+        #     # N first
+        #     material_leaving_a = esched_point(
+        #         'material_leaving_a')(
+        #             net_tosom1, state_var['metabc_1'], rceto1_1,
+        #             state_var['metabe_1_1'], state_var['minerl_1_1'])
+        #     material_arriving_b = esched_point(
+        #         'material_arriving_b')(
+        #             net_tosom1, state_var['metabc_1'], rceto1_1,
+        #             state_var['metabe_1_1'], state_var['minerl_1_1'])
+        #     mineral_flow = esched_point(
+        #         'mineral_flow')(
+        #             net_tosom1, state_var['metabc_1'], rceto1_1,
+        #             state_var['metabe_1_1'], state_var['minerl_1_1'])
+        #     # schedule flows
+        #     d_metabe_1_1 -= material_leaving_a
+        #     d_som1e_1_1 += material_arriving_b
+        #     d_minerl_1_1 += mineral_flow
+        #     if mineral_flow > 0:
+        #         gromin_1 += mineral_flow
 
-            # P second
-            material_leaving_a = esched_point(
-                'material_leaving_a')(
-                    net_tosom1, state_var['metabc_1'], rceto1_2,
-                    state_var['metabe_1_2'], state_var['minerl_1_2'])
-            material_arriving_b = esched_point(
-                'material_arriving_b')(
-                    net_tosom1, state_var['metabc_1'], rceto1_2,
-                    state_var['metabe_1_2'], state_var['minerl_1_2'])
-            mineral_flow = esched_point(
-                'mineral_flow')(
-                    net_tosom1, state_var['metabc_1'], rceto1_2,
-                    state_var['metabe_1_2'], state_var['minerl_1_2'])
-            # schedule flows
-            d_metabe_1_2 -= material_leaving_a
-            d_som1e_1_2 += material_arriving_b
-            d_minerl_1_2 += mineral_flow
+        #     # P second
+        #     material_leaving_a = esched_point(
+        #         'material_leaving_a')(
+        #             net_tosom1, state_var['metabc_1'], rceto1_2,
+        #             state_var['metabe_1_2'], state_var['minerl_1_2'])
+        #     material_arriving_b = esched_point(
+        #         'material_arriving_b')(
+        #             net_tosom1, state_var['metabc_1'], rceto1_2,
+        #             state_var['metabe_1_2'], state_var['minerl_1_2'])
+        #     mineral_flow = esched_point(
+        #         'mineral_flow')(
+        #             net_tosom1, state_var['metabc_1'], rceto1_2,
+        #             state_var['metabe_1_2'], state_var['minerl_1_2'])
+        #     # schedule flows
+        #     d_metabe_1_2 -= material_leaving_a
+        #     d_som1e_1_2 += material_arriving_b
+        #     d_minerl_1_2 += mineral_flow
 
-        # decomposition of soil metabolic material: line 136 Litdec.f
-        # C/N ratio for soil metabolic material
-        rceto1_1 = bgdrat_point(
-            aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
-            params['varat1_3_1'])
-        # C/P ratio for soil metabolic material
-        rceto1_2 = bgdrat_point(
-            aminrl_2, params['varat1_1_2'], params['varat1_2_2'],
-            params['varat1_3_2'])
-        decompose_mask = (
-            ((aminrl_1 > 0.0000001) | (
-                (state_var['metabc_2'] / state_var['metabe_2_1']) <=
-                rceto1_1)) &
-            ((aminrl_2 > 0.0000001) | (
-                (state_var['metabc_2'] / state_var['metabe_2_2']) <=
-                rceto1_2)))  # line 194 Litdec.f
-        if decompose_mask:
-            tcflow_metabc_2 = numpy.clip(
-                (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
-                    pheff_metab * anerb),
-                0, state_var['metabc_2'])
-            co2los = tcflow_metabc_2 * params['pmco2_2']
-            d_metabc_2 -= tcflow_metabc_2
-            # respiration, line 201 Litdec.f
-            mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
-            d_metabe_2_1 -= mnrflo_1
-            d_minerl_1_1 += mnrflo_1
-            gromin_1 += mnrflo_1
-            mnrflo_2 = co2los * state_var['metabe_2_2'] / state_var['metabc_2']
-            d_metabe_2_2 -= mnrflo_2
-            d_minerl_1_2 += mnrflo_2
+        # # decomposition of soil metabolic material: line 136 Litdec.f
+        # # C/N ratio for soil metabolic material
+        # rceto1_1 = bgdrat_point(
+        #     aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
+        #     params['varat1_3_1'])
+        # # C/P ratio for soil metabolic material
+        # rceto1_2 = bgdrat_point(
+        #     aminrl_2, params['varat1_1_2'], params['varat1_2_2'],
+        #     params['varat1_3_2'])
+        # decompose_mask = (
+        #     ((aminrl_1 > 0.0000001) | (
+        #         (state_var['metabc_2'] / state_var['metabe_2_1']) <=
+        #         rceto1_1)) &
+        #     ((aminrl_2 > 0.0000001) | (
+        #         (state_var['metabc_2'] / state_var['metabe_2_2']) <=
+        #         rceto1_2)))  # line 194 Litdec.f
+        # if decompose_mask:
+        #     tcflow_metabc_2 = numpy.clip(
+        #         (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
+        #             pheff_metab * anerb),
+        #         0, state_var['metabc_2'])
+        #     co2los = tcflow_metabc_2 * params['pmco2_2']
+        #     d_metabc_2 -= tcflow_metabc_2
+        #     # respiration, line 201 Litdec.f
+        #     mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
+        #     d_metabe_2_1 -= mnrflo_1
+        #     d_minerl_1_1 += mnrflo_1
+        #     gromin_1 += mnrflo_1
+        #     mnrflo_2 = co2los * state_var['metabe_2_2'] / state_var['metabc_2']
+        #     d_metabe_2_2 -= mnrflo_2
+        #     d_minerl_1_2 += mnrflo_2
 
-            net_tosom1 = tcflow_metabc_2 - co2los  # line 210 Litdec.f
-            # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
-            # N first
-            material_leaving_a = esched_point(
-                'material_leaving_a')(
-                    net_tosom1, state_var['metabc_2'], rceto1_1,
-                    state_var['metabe_2_1'], state_var['minerl_1_1'])
-            material_arriving_b = esched_point(
-                'material_arriving_b')(
-                    net_tosom1, state_var['metabc_2'], rceto1_1,
-                    state_var['metabe_2_1'], state_var['minerl_1_1'])
-            mineral_flow = esched_point(
-                'mineral_flow')(
-                    net_tosom1, state_var['metabc_2'], rceto1_1,
-                    state_var['metabe_2_1'], state_var['minerl_1_1'])
-            # schedule flows
-            d_metabe_2_1 -= material_leaving_a
-            d_som1e_2_1 += material_arriving_b
-            d_minerl_1_1 += mineral_flow
-            if mineral_flow > 0:
-                gromin_1 += mineral_flow
+        #     net_tosom1 = tcflow_metabc_2 - co2los  # line 210 Litdec.f
+        #     # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
+        #     # N first
+        #     material_leaving_a = esched_point(
+        #         'material_leaving_a')(
+        #             net_tosom1, state_var['metabc_2'], rceto1_1,
+        #             state_var['metabe_2_1'], state_var['minerl_1_1'])
+        #     material_arriving_b = esched_point(
+        #         'material_arriving_b')(
+        #             net_tosom1, state_var['metabc_2'], rceto1_1,
+        #             state_var['metabe_2_1'], state_var['minerl_1_1'])
+        #     mineral_flow = esched_point(
+        #         'mineral_flow')(
+        #             net_tosom1, state_var['metabc_2'], rceto1_1,
+        #             state_var['metabe_2_1'], state_var['minerl_1_1'])
+        #     # schedule flows
+        #     d_metabe_2_1 -= material_leaving_a
+        #     d_som1e_2_1 += material_arriving_b
+        #     d_minerl_1_1 += mineral_flow
+        #     if mineral_flow > 0:
+        #         gromin_1 += mineral_flow
 
-            # P second
-            material_leaving_a = esched_point(
-                'material_leaving_a')(
-                    net_tosom1, state_var['metabc_2'], rceto1_2,
-                    state_var['metabe_2_2'], state_var['minerl_1_2'])
-            material_arriving_b = esched_point(
-                'material_arriving_b')(
-                    net_tosom1, state_var['metabc_2'], rceto1_2,
-                    state_var['metabe_2_2'], state_var['minerl_1_2'])
-            mineral_flow = esched_point(
-                'mineral_flow')(
-                    net_tosom1, state_var['metabc_2'], rceto1_2,
-                    state_var['metabe_2_2'], state_var['minerl_1_2'])
-            # schedule flows
-            d_metabe_2_2 -= material_leaving_a
-            d_som1e_2_2 += material_arriving_b
-            d_minerl_1_2 += mineral_flow
+        #     # P second
+        #     material_leaving_a = esched_point(
+        #         'material_leaving_a')(
+        #             net_tosom1, state_var['metabc_2'], rceto1_2,
+        #             state_var['metabe_2_2'], state_var['minerl_1_2'])
+        #     material_arriving_b = esched_point(
+        #         'material_arriving_b')(
+        #             net_tosom1, state_var['metabc_2'], rceto1_2,
+        #             state_var['metabe_2_2'], state_var['minerl_1_2'])
+        #     mineral_flow = esched_point(
+        #         'mineral_flow')(
+        #             net_tosom1, state_var['metabc_2'], rceto1_2,
+        #             state_var['metabe_2_2'], state_var['minerl_1_2'])
+        #     # schedule flows
+        #     d_metabe_2_2 -= material_leaving_a
+        #     d_som1e_2_2 += material_arriving_b
+        #     d_minerl_1_2 += mineral_flow
 
         # somdec.f
 
@@ -6131,14 +6131,17 @@ class foragetests(unittest.TestCase):
         Raises:
             AssertionError if the nodata value of a raster following
                 `reclassify_nodata` is not equal to the specified nodata type
+            AssertionError if unique values in a raster contain more than the
+                fill value and the correct nodata value
 
         Returns:
             None
         """
         from natcap.invest import forage
 
+        fill_value = 0
         target_path = os.path.join(self.workspace_dir, 'target_raster.tif')
-        create_random_raster(target_path, 0, 1000)
+        create_random_raster(target_path, fill_value, fill_value)
         insert_nodata_values_into_raster(target_path, _TARGET_NODATA)
 
         new_nodata_value = -999
@@ -6149,6 +6152,15 @@ class foragetests(unittest.TestCase):
             new_nodata_value, result_nodata_value,
             msg="New nodata value does not match specified nodata value")
 
+        # check unique values inside raster
+        raster_values = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                target_path):
+            raster_values.update(numpy.unique(raster_block))
+        self.assertEqual(
+            raster_values, set([fill_value, new_nodata_value]),
+            msg="Raster contains extraneous values")
+
         new_nodata_value = numpy.finfo('float32').min
         forage.reclassify_nodata(target_path, new_nodata_value)
         result_nodata_value = pygeoprocessing.get_raster_info(
@@ -6156,6 +6168,13 @@ class foragetests(unittest.TestCase):
         self.assertEqual(
             new_nodata_value, result_nodata_value,
             msg="New nodata value does not match specified nodata value")
+        raster_values = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                target_path):
+            raster_values.update(numpy.unique(raster_block))
+        self.assertEqual(
+            raster_values, set([fill_value, new_nodata_value]),
+            msg="Raster contains extraneous values")
 
         new_nodata_value = 8920
         forage.reclassify_nodata(target_path, new_nodata_value)
@@ -6165,3 +6184,167 @@ class foragetests(unittest.TestCase):
         self.assertEqual(
             new_nodata_value, result_nodata_value,
             msg="New nodata value does not match specified nodata value")
+        raster_values = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                target_path):
+            raster_values.update(numpy.unique(raster_block))
+        self.assertEqual(
+            raster_values, set([fill_value, new_nodata_value]),
+            msg="Raster contains extraneous values")
+
+    def test_calc_respiration_mineral_flow(self):
+        """Test `calc_respiration_mineral_flow`.
+
+        Use the function `calc_respiration_mineral_flow` to calculate
+        mineral flow of one element associated with respiration. Compare
+        the result to values calculated by point-based verison defined
+        here.
+
+        Raises:
+            AssertionError if `calc_respiration_mineral_flow` does not
+                match values calculated by point-based version
+
+        Returns:
+            None
+        """
+        def respir_minr_flow_point(cflow, frac_co2, estatv, cstatv):
+            co2_loss = cflow * frac_co2
+            mineral_flow = co2_loss * estatv / cstatv
+            return mineral_flow
+
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.0000000001
+
+        # known values
+        cflow = 15.2006601
+        frac_co2 = 0.0146
+        estatv = 0.7776
+        cstatv = 155.5253
+        mineral_flow = respir_minr_flow_point(cflow, frac_co2, estatv, cstatv)
+
+        cflow_ar = numpy.full(array_shape, cflow)
+        frac_co2_ar = numpy.full(array_shape, frac_co2)
+        estatv_ar = numpy.full(array_shape, estatv)
+        cstatv_ar = numpy.full(array_shape, cstatv)
+        mineral_flow_ar = forage.calc_respiration_mineral_flow(
+            cflow_ar, frac_co2_ar, estatv_ar, cstatv_ar)
+
+        self.assert_all_values_in_array_within_range(
+            mineral_flow_ar, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(cflow_ar, _IC_NODATA)
+        insert_nodata_values_into_array(frac_co2_ar, _IC_NODATA)
+        insert_nodata_values_into_array(estatv_ar, _SV_NODATA)
+        insert_nodata_values_into_array(cstatv_ar, _SV_NODATA)
+
+        mineral_flow_ar = forage.calc_respiration_mineral_flow(
+            cflow_ar, frac_co2_ar, estatv_ar, cstatv_ar)
+
+        self.assert_all_values_in_array_within_range(
+            mineral_flow_ar, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+    def test_update_gross_mineralization(self):
+        """Test `update_gross_mineralization`.
+
+        Test the function `update_gross_mineralization`  against values
+        calculated by hand.
+
+        Raises:
+            AssertionError if `update_gross_mineralization` does not match
+                values calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.0000001
+
+        # known values
+        gross_mineralization = 0.0481
+        mineral_flow = 0.00044
+        gromin_updated = gross_mineralization + mineral_flow
+
+        gross_mineralization_ar = numpy.full(array_shape, gross_mineralization)
+        mineral_flow_ar = numpy.full(array_shape, mineral_flow)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(
+            gross_mineralization_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(mineral_flow_ar, _IC_NODATA)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+        # known values
+        gross_mineralization = 0.048881
+        mineral_flow = -0.00674
+        gromin_updated = gross_mineralization
+
+        gross_mineralization_ar = numpy.full(array_shape, gross_mineralization)
+        mineral_flow_ar = numpy.full(array_shape, mineral_flow)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(
+            gross_mineralization_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(mineral_flow_ar, _IC_NODATA)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+    def test_calc_net_cflow(self):
+        """Test `calc_net_cflow`.
+
+        Test `calc_net_cflow` against value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_net_cflow` does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.0000001
+
+        # known values
+        cflow = 5.2006601
+        frac_co2 = 0.0182
+        net_cflow = cflow - (cflow * frac_co2)
+
+        cflow_ar = numpy.full(array_shape, cflow)
+        frac_co2_ar = numpy.full(array_shape, frac_co2)
+        net_cflow_ar = forage.calc_net_cflow(cflow_ar, frac_co2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            net_cflow_ar, net_cflow - tolerance, net_cflow + tolerance,
+            _IC_NODATA)
+
+        insert_nodata_values_into_array(cflow_ar, _IC_NODATA)
+        insert_nodata_values_into_array(frac_co2_ar, _IC_NODATA)
+
+        net_cflow_ar = forage.calc_net_cflow(cflow_ar, frac_co2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            net_cflow_ar, net_cflow - tolerance, net_cflow + tolerance,
+            _IC_NODATA)
