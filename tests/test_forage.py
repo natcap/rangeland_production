@@ -2327,10 +2327,10 @@ class foragetests(unittest.TestCase):
             known_favail_2 - tolerance, known_favail_2 + tolerance,
             _IC_NODATA)
 
-    def test_raster_sum(self):
-        """Test `raster_sum`.
+    def test_raster_list_sum(self):
+        """Test `raster_list_sum`.
 
-        Use the function `raster_sum` to calculate the sum across pixels
+        Use the function `raster_list_sum` to calculate the sum across pixels
         in three rasters containing nodata.  Test that when
         nodata_remove=False, the result also contains nodata values. Test
         that when nodata_remove=True, nodata pixels are treated as zero.
@@ -2357,13 +2357,13 @@ class foragetests(unittest.TestCase):
         target_nodata = -9.99
 
         # input rasters include no nodata values
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=False)
         self.assert_all_values_in_raster_within_range(
             target_path, num_rasters, num_rasters, target_nodata)
 
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=True)
         self.assert_all_values_in_raster_within_range(
@@ -2372,7 +2372,7 @@ class foragetests(unittest.TestCase):
         # one input raster includes nodata values
         insert_nodata_values_into_raster(raster_list[0], input_nodata)
 
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=False)
         self.assert_all_values_in_raster_within_range(
@@ -2400,7 +2400,7 @@ class foragetests(unittest.TestCase):
         input_including_nodata = None
         result_including_nodata = None
 
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=True)
 
@@ -4610,6 +4610,58 @@ class foragetests(unittest.TestCase):
         create_random_raster(raster1_path, raster1_val, raster1_val)
         create_random_raster(raster2_path, raster2_nodata, raster2_nodata)
         forage.raster_difference(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=True)
+        self.assert_all_values_in_raster_within_range(
+            target_path, raster1_val, raster1_val, _TARGET_NODATA)
+
+    def test_raster_sum(self):
+        """Test `raster_sum`.
+
+        Use the function `raster_sum` to add two rasters, while allowing
+        nodata values in one raster to propagate to the result.  Then
+        calculate the difference again, treating nodata values as zero.
+
+        Raises:
+            AssertionError if `raster_sum` does not match values calculated by
+                hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        raster1_val = 10
+        raster2_val = 3
+        known_result = raster1_val + raster2_val
+        raster1_path = os.path.join(self.workspace_dir, 'raster1.tif')
+        raster2_path = os.path.join(self.workspace_dir, 'raster2.tif')
+        target_path = os.path.join(self.workspace_dir, 'target.tif')
+        create_random_raster(raster1_path, raster1_val, raster1_val)
+        create_random_raster(raster2_path, raster2_val, raster2_val)
+
+        raster1_nodata = -99
+        raster2_nodata = -999
+
+        forage.raster_sum(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=True)
+        self.assert_all_values_in_raster_within_range(
+            target_path, known_result, known_result, _TARGET_NODATA)
+
+        # rasters contain nodata, which should be propagated to result
+        insert_nodata_values_into_raster(raster1_path, raster1_nodata)
+        insert_nodata_values_into_raster(raster2_path, raster2_nodata)
+        forage.raster_sum(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=False)
+        self.assert_all_values_in_raster_within_range(
+            target_path, known_result, known_result, _TARGET_NODATA)
+
+        # full raster of nodata, which should be treated as zero
+        create_random_raster(raster1_path, raster1_val, raster1_val)
+        create_random_raster(raster2_path, raster2_nodata, raster2_nodata)
+        forage.raster_sum(
             raster1_path, raster1_nodata, raster2_path, raster2_nodata,
             target_path, _TARGET_NODATA, nodata_remove=True)
         self.assert_all_values_in_raster_within_range(

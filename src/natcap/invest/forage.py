@@ -708,7 +708,7 @@ def raster_multiplication(
         target_path_nodata)
 
 
-def raster_sum(
+def raster_list_sum(
         raster_list, input_nodata, target_path, target_nodata,
         nodata_remove=False):
     """Calculate the sum per pixel across rasters in a list.
@@ -755,6 +755,60 @@ def raster_sum(
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in raster_list], raster_sum_op,
             target_path, gdal.GDT_Float32, target_nodata)
+
+
+def raster_sum(
+        raster1, raster1_nodata, raster2, raster2_nodata, target_path,
+        target_nodata, nodata_remove):
+    """Add raster 1 and raster2.
+
+    Add raster1 and raster2, allowing nodata values in the rasters to
+    propagate to the result or treating nodata as zero.
+
+    Parameters:
+        raster1 (string): path to one raster operand
+        raster1_nodata (float or int): nodata value in raster1
+        raster2 (string): path to second raster operand
+        raster2_nodata (float or int): nodata value in raster2
+        target_path (string): path to location to store the sum
+        target_nodata (float or int): nodata value for the result raster
+        nodata_remove (bool): if true, treat nodata values in input
+            rasters as zero. If false, the sum in a pixel where any
+            input raster is nodata is nodata.
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    def raster_sum_op(raster1, raster2):
+        """Add raster1 and raster2 without removing nodata values."""
+        valid_mask = (
+            (~numpy.isclose(raster1, raster1_nodata)) &
+            (~numpy.isclose(raster2, raster2_nodata)))
+        result = numpy.empty(raster1.shape, dtype=numpy.float32)
+        result[:] = target_nodata
+        result[valid_mask] = raster1[valid_mask] + raster2[valid_mask]
+        return result
+
+    def raster_sum_op_nodata_remove(raster1, raster2):
+        """Subtract raster2 from raster1, treating nodata as zero."""
+        numpy.place(raster1, numpy.isclose(raster1, raster1_nodata), [0])
+        numpy.place(raster2, numpy.isclose(raster2, raster2_nodata), [0])
+        result = raster1 + raster2
+        return result
+
+    if nodata_remove:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [raster1, raster2]],
+            raster_sum_op_nodata_remove, target_path, gdal.GDT_Float32,
+            target_nodata)
+    else:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [raster1, raster2]],
+            raster_sum_op, target_path, gdal.GDT_Float32,
+            target_nodata)
 
 
 def raster_difference(
@@ -891,7 +945,7 @@ def weighted_state_variable_sum(
             aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
             target_path, _TARGET_NODATA)
         weighted_path_list.append(target_path)
-    raster_sum(
+    raster_list_sum(
         weighted_path_list, _TARGET_NODATA, weighted_sum_path, _TARGET_NODATA,
         nodata_remove=True)
 
@@ -1734,7 +1788,7 @@ def _yearly_tasks(
         raise ValueError("Precipitation rasters include >1 nodata value")
     precip_nodata = list(precip_nodata)[0]
 
-    raster_sum(
+    raster_list_sum(
         annual_precip_rasters, precip_nodata, year_reg['annual_precip_path'],
         _TARGET_NODATA)
 
@@ -2652,7 +2706,7 @@ def _calc_available_nutrient(
     mineral_raster_list = [
         sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
             1, nlay + 1)]
-    raster_sum(
+    raster_list_sum(
         mineral_raster_list, _SV_NODATA, temp_val_dict['availm'],
         _TARGET_NODATA, nodata_remove=True)
 
@@ -4504,7 +4558,7 @@ def _soil_water(
                 target_path, _TARGET_NODATA)
             weighted_path_list.append(target_path)
     if weighted_path_list:
-        raster_sum(
+        raster_list_sum(
             weighted_path_list, _TARGET_NODATA,
             temp_val_dict['sum_tgprod'], _TARGET_NODATA, nodata_remove=True)
     else:  # no potential production occurs this month, so tgprod = 0
@@ -4658,7 +4712,8 @@ def _soil_water(
             _TARGET_NODATA)
         avw_list.append(temp_val_dict['avw_{}'.format(lyr)])
     # total water available for transpiration
-    raster_sum(avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
+    raster_list_sum(
+        avw_list, _TARGET_NODATA, temp_val_dict['tot'], _TARGET_NODATA)
 
     # calculate water available for transpiration weighted by transpiration
     # depth for that soil layer
@@ -4670,7 +4725,7 @@ def _soil_water(
             temp_val_dict['awwt_{}'.format(lyr)], _TARGET_NODATA)
         awwt_list.append(temp_val_dict['awwt_{}'.format(lyr)])
     # total weighted available water for transpiration
-    raster_sum(
+    raster_list_sum(
         awwt_list, _TARGET_NODATA, temp_val_dict['tot2'], _TARGET_NODATA)
 
     # revise total potential transpiration
@@ -4739,7 +4794,7 @@ def _soil_water(
         soil_layers_accessible = [
             temp_val_dict['avinj_{}'.format(lyr)] for lyr in
             xrange(1, veg_trait_table[pft_i]['nlaypg'] + 1)]
-        raster_sum(
+        raster_list_sum(
             soil_layers_accessible, _TARGET_NODATA,
             temp_val_dict['sum_avinj_{}'.format(pft_i)],
             _TARGET_NODATA, nodata_remove=True)
@@ -4751,7 +4806,7 @@ def _soil_water(
     # calculate avh2o_3, moisture in top two soil layers
     soil_layers_to_sum = [
         temp_val_dict['avinj_{}'.format(lyr)] for lyr in [1, 2]]
-    raster_sum(
+    raster_list_sum(
         soil_layers_to_sum, _TARGET_NODATA, sv_reg['avh2o_3_path'],
         _SV_NODATA, nodata_remove=False)
 
