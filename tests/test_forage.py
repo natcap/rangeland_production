@@ -626,7 +626,7 @@ def declig_point(return_type):
 
 
 def decomposition_point(
-        inputs, params, state_var, month_reg, rnew_dict, pevap):
+        inputs, params, state_var, year_reg, month_reg, rnew_dict, pevap):
     """Point implementation of decomposition.
 
     Parameters:
@@ -635,6 +635,8 @@ def decomposition_point(
         params (dict): dictionary of parameter values
         state_var (dict): dictionary of state variables prior to
             decomposition
+        year_reg (dict): dictionary of values that are updated once per year,
+            including annual precipitation and annual N deposition
         month_reg (dict): dictionary of values that are shared between
             submodels, including snowmelt
         rnew_dict (dict): dictionary of required ratios for aboveground
@@ -664,19 +666,27 @@ def decomposition_point(
         (0.5 + (1.14 / numpy.pi) *
             numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 4.8))), 0, 1)
 
+    # monthly N fixation
+    state_var['minerl_1_1'] = monthly_N_fixation_point(
+        inputs['precip'], year_reg['annual_precip'], year_reg['baseNdep'],
+        params['epnfs_2'], state_var['minerl_1_1'])
+
     # calculate aminrl_1, intermediate surface mineral N that is tracked
     # during decomposition
     aminrl_1 = state_var['minerl_1_1']
 
     # calculate aminerl_2, intermediate surface mineral P that is tracked
     # during decomposition
-    c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
-    b = params['sorpmx'] - state_var['minerl_1_2'] + c
-    labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
-    fsfunc = labile / state_var['minerl_1_2']
-    aminrl_2 = state_var['minerl_1_2'] * fsfunc
+    if state_var['minerl_1_2'] == 0:
+        aminrl_2 = 0
+    else:
+        c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
+        b = params['sorpmx'] - state_var['minerl_1_2'] + c
+        labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
+        fsfunc = labile / state_var['minerl_1_2']
+        aminrl_2 = state_var['minerl_1_2'] * fsfunc
 
-    for _ in xrange(4):
+    for _ in xrange(1):  # TODO eventually should be xrange(4)
         # initialize change (delta, d) in state variables for this decomp step
         d_minerl_1_1 = 0  # change in surface mineral N
         d_minerl_1_2 = 0  # change in surface mineral P
@@ -1121,8 +1131,11 @@ def decomposition_point(
         c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
         b = params['sorpmx'] - state_var['minerl_1_2'] + c
         labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
-        fsfunc = labile / state_var['minerl_1_2']
-        aminrl_2 = aminrl_2 + (state_var['minerl_1_2'] * fsfunc) / 2.
+        try:
+            fsfunc = labile / state_var['minerl_1_2']
+            aminrl_2 = aminrl_2 + (state_var['minerl_1_2'] * fsfunc) / 2.
+        except ZeroDivisionError:
+            aminrl_2 = aminrl_2
 
     # Calculate volatilization loss of nitrogen as a function of
     # gross mineralization
@@ -5630,14 +5643,169 @@ class foragetests(unittest.TestCase):
         self.assertAlmostEqual(d_som1e_lyr_2, d_som1e_lyr_2_obs, places=10)
 
     def test_decomposition(self):
-        """Test the point implementation of decomposition.
+        """Test `_decomposition`.
 
-        Use the function `decomposition_point` to calculate the change in
-        state variables after one monthly step.
+        Test the function `_decomposition` to calculate the change in state
+        variables following one decomposition step.  Compare modified state
+        variables to values calculated by point version of decomposition.
+
+        Raises:
+            AssertionError if change in state variable calculated by
+                `_decomposition` does not match change calculated by point-
+                based version
 
         Returns:
             None
         """
+        def generate_model_inputs_from_point_inputs(
+                inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+                rnew_dict):
+            """Generate model inputs for `_decomposition` from test inputs."""
+            nrows = 1
+            ncols = 1
+
+            aligned_inputs = {
+                'precip_{}'.format(month_index): os.path.join(
+                    self.workspace_dir, 'precip.tif'),
+                'min_temp_{}'.format(current_month): os.path.join(
+                    self.workspace_dir, 'min_temp.tif'),
+                'max_temp_{}'.format(current_month): os.path.join(
+                    self.workspace_dir, 'max_temp.tif'),
+                'ph_path': os.path.join(self.workspace_dir, 'pH.tif'),
+                'site_index': os.path.join(
+                    self.workspace_dir, 'site_index.tif'),
+            }
+            create_random_raster(
+                aligned_inputs['precip_{}'.format(month_index)],
+                inputs['precip'], inputs['precip'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['min_temp_{}'.format(current_month)],
+                inputs['min_temp'], inputs['min_temp'],
+                nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['max_temp_{}'.format(current_month)],
+                inputs['max_temp'], inputs['max_temp'], nrows=nrows,
+                ncols=ncols)
+            create_random_raster(
+                aligned_inputs['ph_path'], inputs['pH'], inputs['pH'],
+                nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['site_index'], 1, 1, nrows=nrows, ncols=ncols)
+
+            site_param_table = {1: {}}
+            for key, value in params.iteritems():
+                site_param_table[1][key] = value
+
+            year_reg = {
+                'annual_precip_path': os.path.join(
+                    self.workspace_dir, 'annual_precip.tif'),
+                'baseNdep_path': os.path.join(
+                    self.workspace_dir, 'baseNdep.tif'),
+            }
+            create_random_raster(
+                year_reg['annual_precip_path'], year_reg_vals['annual_precip'],
+                year_reg_vals['annual_precip'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                year_reg['baseNdep_path'], year_reg_vals['baseNdep'],
+                year_reg_vals['baseNdep'], nrows=nrows, ncols=ncols)
+
+            month_reg = {
+                'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif'),
+            }
+            create_random_raster(
+                month_reg['snowmelt'], month_reg_vals['snowmelt'],
+                month_reg_vals['snowmelt'], nrows=nrows, ncols=ncols)
+
+            prev_sv_reg = {}
+            sv_reg = {}
+            for state_var in ['minerl_1_1', 'minerl_1_2', 'snow', 'avh2o_3']:
+                prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}_p.tif'.format(state_var))
+                sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}.tif'.format(state_var))
+                create_random_raster(
+                    prev_sv_reg['{}_path'.format(state_var)],
+                    state_var_dict[state_var], state_var_dict[state_var],
+                    nrows=nrows, ncols=ncols)
+                create_random_raster(
+                    sv_reg['{}_path'.format(state_var)],
+                    state_var_dict[state_var], state_var_dict[state_var],
+                    nrows=nrows, ncols=ncols)
+            for compartment in ['strlig']:
+                for lyr in [1, 2]:
+                    state_var = '{}_{}'.format(compartment, lyr)
+                    prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}_p.tif'.format(state_var))
+                    sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}.tif'.format(state_var))
+                    create_random_raster(
+                        prev_sv_reg['{}_path'.format(state_var)],
+                        state_var_dict[state_var], state_var_dict[state_var],
+                        nrows=nrows, ncols=ncols)
+            for compartment in ['struc', 'metab', 'som1', 'som2']:
+                for lyr in [1, 2]:
+                    state_var = '{}c_{}'.format(compartment, lyr)
+                    prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}_p.tif'.format(state_var))
+                    sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}.tif'.format(state_var))
+                    create_random_raster(
+                        prev_sv_reg['{}_path'.format(state_var)],
+                        state_var_dict[state_var],
+                        state_var_dict[state_var],
+                        nrows=nrows, ncols=ncols)
+                    for iel in [1, 2]:
+                        state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                        prev_sv_reg['{}_path'.format(state_var)] = (
+                            os.path.join(
+                                self.workspace_dir,
+                                '{}_p.tif'.format(state_var)))
+                        sv_reg['{}_path'.format(state_var)] = os.path.join(
+                            self.workspace_dir, '{}.tif'.format(state_var))
+                        create_random_raster(
+                            prev_sv_reg['{}_path'.format(state_var)],
+                            state_var_dict[state_var],
+                            state_var_dict[state_var],
+                            nrows=nrows, ncols=ncols)
+            pp_reg = {
+                'rnewas_1_1': os.path.join(
+                    self.workspace_dir, 'rnewas_1_1.tif'),
+                'rnewas_1_2': os.path.join(
+                    self.workspace_dir, 'rnewas_1_2.tif'),
+                'rnewas_2_1': os.path.join(
+                    self.workspace_dir, 'rnewas_2_1.tif'),
+                'rnewas_2_2': os.path.join(
+                    self.workspace_dir, 'rnewas_2_2.tif'),
+                'rnewbs_1_1': os.path.join(
+                    self.workspace_dir, 'rnewbs_1_1.tif'),
+                'rnewbs_1_2': os.path.join(
+                    self.workspace_dir, 'rnewbs_1_2.tif'),
+                'rnewbs_2_1': os.path.join(
+                    self.workspace_dir, 'rnewbs_2_1.tif'),
+                'rnewbs_2_2': os.path.join(
+                    self.workspace_dir, 'rnewbs_2_2.tif'),
+            }
+            for key in rnew_dict.iterkeys():
+                create_random_raster(
+                    pp_reg[key], rnew_dict[key], rnew_dict[key],
+                    nrows=nrows, ncols=ncols)
+
+            input_dict = {
+                'aligned_inputs': aligned_inputs,
+                'site_param_table': site_param_table,
+                'year_reg': year_reg,
+                'month_reg': month_reg,
+                'prev_sv_reg': prev_sv_reg,
+                'sv_reg': sv_reg,
+                'pp_reg': pp_reg,
+            }
+            return input_dict
+        from natcap.invest import forage
+        tolerance = 0.0001
+
+        # known inputs
+        current_month = 4
+        month_index = 2
         inputs = {
             'min_temp': 3.2,
             'max_temp': 17.73,
@@ -5645,6 +5813,7 @@ class foragetests(unittest.TestCase):
             'pH': 6.84,
         }
         params = {
+            'fwloss_4': 0.8,
             'teff_1': 15.4,
             'teff_2': 11.75,
             'teff_3': 29.7,
@@ -5653,6 +5822,7 @@ class foragetests(unittest.TestCase):
             'aneref_1': 1.5,
             'aneref_2': 3,
             'aneref_3': 0.3,
+            'epnfs_2': 30.,
             'sorpmx': 2,
             'pslsrb': 1,
             'strmax_1': 5000,
@@ -5681,7 +5851,7 @@ class foragetests(unittest.TestCase):
             'dec2_2': 18.5,
             'pmco2_2': 0.55,
         }
-        state_var = {
+        state_var_dict = {
             'snow': 0.,
             'avh2o_3': 3.110,
             'strlig_1': 0.3779,
@@ -5713,7 +5883,11 @@ class foragetests(unittest.TestCase):
             'metabe_2_1': 0.6309,
             'metabe_2_2': 0.088,
         }
-        month_reg = {
+        year_reg_vals = {
+            'annual_precip': 230.,
+            'baseNdep': 24.,
+        }
+        month_reg_vals = {
             'snowmelt': 0.29,
         }
         rnew_dict = {
@@ -5726,9 +5900,127 @@ class foragetests(unittest.TestCase):
             'rnewbs_1_2': 190.3,
             'rnewbs_2_2': 520.8,
         }
-        pevap = 6.0618
-        state_var_mod = decomposition_point(
-            inputs, params, state_var, month_reg, rnew_dict, pevap)
+        pevap = 9.324202
+        input_dict = generate_model_inputs_from_point_inputs(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            rnew_dict)
+
+        sv_mod_point = decomposition_point(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            rnew_dict, pevap)
+
+        sv_mod_raster = forage._decomposition(
+            input_dict['aligned_inputs'], current_month, month_index,
+            input_dict['site_param_table'], input_dict['year_reg'],
+            input_dict['month_reg'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'])
+
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    point_value = sv_mod_point[state_var]
+                    model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                    self.assert_all_values_in_raster_within_range(
+                        model_res_path, point_value - tolerance,
+                        point_value + tolerance, _SV_NODATA)
+
+        # no decomposition, mineral ratios are insufficient
+        rnew_dict = {
+            'rnewas_1_1': 190.,
+            'rnewas_2_1': 300.,
+            'rnewas_1_2': 140.,
+            'rnewas_2_2': 200.,
+            'rnewbs_1_1': 190.,
+            'rnewbs_2_1': 300.,
+            'rnewbs_1_2': 140.,
+            'rnewbs_2_2': 200.
+        }
+        state_var_dict['minerl_1_1'] = 0.
+        state_var_dict['minerl_1_2'] = 0.
+
+        input_dict = generate_model_inputs_from_point_inputs(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            rnew_dict)
+
+        sv_mod_point = decomposition_point(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            rnew_dict, pevap)
+
+        sv_mod_raster = forage._decomposition(
+            input_dict['aligned_inputs'], current_month, month_index,
+            input_dict['site_param_table'], input_dict['year_reg'],
+            input_dict['month_reg'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'])
+
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    point_value = sv_mod_point[state_var]
+                    model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                    self.assert_all_values_in_raster_within_range(
+                        model_res_path, point_value - tolerance,
+                        point_value + tolerance, _SV_NODATA)
+
+        # decomposition occurs, subsidized by mineral N and P
+        rnew_dict = {
+            'rnewas_1_1': 210.8,
+            'rnewas_2_1': 540.2,
+            'rnewas_1_2': 190.3,
+            'rnewas_2_2': 520.8,
+            'rnewbs_1_1': 210.8,
+            'rnewbs_2_1': 540.2,
+            'rnewbs_1_2': 190.3,
+            'rnewbs_2_2': 520.8
+        }
+        state_var_dict['minerl_1_1'] = 6.01
+        state_var_dict['minerl_1_2'] = 32.87
+
+        state_var_dict['strlig_1'] = 0.2987
+        state_var_dict['strlig_2'] = 0.4992
+
+        input_dict = generate_model_inputs_from_point_inputs(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            rnew_dict)
+
+        sv_mod_point = decomposition_point(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            rnew_dict, pevap)
+
+        sv_mod_raster = forage._decomposition(
+            input_dict['aligned_inputs'], current_month, month_index,
+            input_dict['site_param_table'], input_dict['year_reg'],
+            input_dict['month_reg'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'])
+
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    point_value = sv_mod_point[state_var]
+                    model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                    self.assert_all_values_in_raster_within_range(
+                        model_res_path, point_value - tolerance,
+                        point_value + tolerance, _SV_NODATA)
 
     def test_esched(self):
         """Test `esched`.
