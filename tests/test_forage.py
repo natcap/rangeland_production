@@ -7022,3 +7022,117 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
             tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+    def test_belowground_ratio(self):
+        """Test `_belowground_ratio`.
+
+        Use the function `_belowground_ratio` to calculate required C/iel
+        ratio of belowground decomposing material.  Compare calculate values
+        to values calculated by point-based version.
+
+        Raises:
+            AssertionError if `_belowground_ratio` does not match values
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, aminrl > varat_3_iel
+        aminrl = 5.928
+        varat_1_iel = 14.
+        varat_2_iel = 3.
+        varat_3_iel = 2.
+
+        belowground_point = bgdrat_point(
+            aminrl, varat_1_iel, varat_2_iel, varat_3_iel)
+
+        # array inputs
+        aminrl_ar = numpy.full(array_shape, aminrl)
+        varat_1_iel_ar = numpy.full(array_shape, varat_1_iel)
+        varat_2_iel_ar = numpy.full(array_shape, varat_2_iel)
+        varat_3_iel_ar = numpy.full(array_shape, varat_3_iel)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aminrl_ar, _SV_NODATA)
+        insert_nodata_values_into_array(varat_1_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_2_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_3_iel_ar, _IC_NODATA)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        # no mineral source
+        aminrl = 0.
+        varat_1_iel = 14.
+        varat_2_iel = 3.
+        varat_3_iel = 2.
+
+        belowground_point = bgdrat_point(
+            aminrl, varat_1_iel, varat_2_iel, varat_3_iel)
+
+        # array inputs
+        aminrl_ar = numpy.full(array_shape, aminrl)
+        varat_1_iel_ar = numpy.full(array_shape, varat_1_iel)
+        varat_2_iel_ar = numpy.full(array_shape, varat_2_iel)
+        varat_3_iel_ar = numpy.full(array_shape, varat_3_iel)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aminrl_ar, _SV_NODATA)
+        insert_nodata_values_into_array(varat_1_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_2_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_3_iel_ar, _IC_NODATA)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        # known values, aminrl < varat_3_iel
+        aminrl = 1.9917
+        varat_1_iel = 14.
+        varat_2_iel = 5.
+        varat_3_iel = 3.
+
+        belowground_point = bgdrat_point(
+            aminrl, varat_1_iel, varat_2_iel, varat_3_iel)
+
+        # array inputs
+        aminrl_ar = numpy.full(array_shape, aminrl)
+        varat_1_iel_ar = numpy.full(array_shape, varat_1_iel)
+        varat_2_iel_ar = numpy.full(array_shape, varat_2_iel)
+        varat_3_iel_ar = numpy.full(array_shape, varat_3_iel)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aminrl_ar, _SV_NODATA)
+        insert_nodata_values_into_array(varat_1_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_2_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_3_iel_ar, _IC_NODATA)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)

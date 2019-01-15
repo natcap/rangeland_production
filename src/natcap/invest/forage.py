@@ -1538,6 +1538,44 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3):
     return agdrat
 
 
+def _belowground_ratio(aminrl, varat_1_iel, varat_2_iel, varat_3_iel):
+    """Calculate C/<iel> ratios of decomposing belowground material.
+
+    This ratio is used to test whether there is sufficient <iel> (N or P)
+    in soil metabolic material to decompose.  Bgdrat.f
+
+    Parameters:
+        aminrl (numpy.ndarray): derived, average surface mineral <iel>
+        varat_1_iel (numpy.ndarray): parameter, maximum C/<iel> ratio for
+            newly decomposed material
+        varat_2_iel (numpy.ndarray): parameter, minimum C/<iel> ratio
+        varat_3_iel (numpy.ndarray): parameter, amount of <iel> present
+            when minimum ratio applies
+
+    Returns:
+        bgdrat, the C/<iel> ratio of new material
+    """
+    valid_mask = (
+        (~numpy.isclose(aminrl, _SV_NODATA)) &
+        (varat_1_iel != _IC_NODATA) &
+        (varat_2_iel != _IC_NODATA) &
+        (varat_3_iel != _IC_NODATA))
+
+    bgdrat = numpy.empty(aminrl.shape, dtype=numpy.float32)
+    bgdrat[:] = _TARGET_NODATA
+    bgdrat[valid_mask] = (
+        (1. - aminrl[valid_mask] / varat_3_iel[valid_mask]) *
+        (varat_1_iel[valid_mask] - varat_2_iel[valid_mask]) +
+        varat_2_iel[valid_mask])
+
+    max_mask = ((aminrl <= 0) & valid_mask)
+    bgdrat[max_mask] = varat_1_iel[max_mask]
+
+    min_mask = ((aminrl > varat_3_iel) & valid_mask)
+    bgdrat[min_mask] = varat_2_iel[min_mask]
+    return bgdrat
+
+
 def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
     """Calculate maximum C/N and C/P ratios for structural material.
 
@@ -5664,7 +5702,7 @@ def _decomposition(
             'fwloss_4', 'teff_1', 'teff_2', 'teff_3', 'teff_4', 'drain',
             'aneref_1', 'aneref_2', 'aneref_3', 'sorpmx', 'pslsrb', 'strmax_1',
             'dec1_1', 'pligst_1', 'strmax_2', 'dec1_2', 'pligst_2', 'rsplig',
-            'ps1co2_1', 'ps1co2_2']:
+            'ps1co2_1', 'ps1co2_2', 'dec2_1']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
