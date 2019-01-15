@@ -5239,6 +5239,127 @@ def calc_tcflow_strucc_2(
     return tcflow_strucc_2
 
 
+def calc_tcflow_metabc_1(
+        aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2, rceto1_1,
+        rceto1_2, defac, dec2_1, pheff_metab):
+    """Calculate total flow out of surface metabolic C.
+
+    The total potential flow of C out of surface metabolic material is
+    calculated according to the decomposition factor and soil pH. The actual
+    flow is limited by the availability of N and P. N and P may be supplied by
+    the mineral source, or by the element (N or P) in the decomposing stock.
+
+    Parameters:
+        aminrl_1 (numpy.ndarray): derived, average surface mineral N
+        aminrl_2 (numpy.ndarray): derived, average surface mineral P
+        metabc_1 (numpy.ndarray): state variable, surface metabolic C
+        metabe_1_1 (numpy.ndarray): state variable, surface metabolic N
+        metabe_1_2 (numpy.ndarray): state variable, surface metabolic P
+        rceto1_1 (numpy.ndarray): derived, required C/N ratio for
+            aboveground metabolic material decomposing to SOM1
+        rceto1_2 (numpy.ndarray): derived, required C/P ratio for
+            aboveground metabolic material decomposing to SOM1
+        defac (numpy.ndarray): derived, decomposition factor
+        dec2_1 (numpy.ndarray): parameter, maximum decomposition rate
+        pheff_metab (numpy.ndarray): derived, effect of soil pH on
+            decomposition rate of metabolic material
+
+    Returns:
+        tcflow_metabc_1, total flow of C out of surface metabolic
+            material
+    """
+    valid_mask = (
+        (~numpy.isclose(aminrl_1, _SV_NODATA)) &
+        (~numpy.isclose(aminrl_2, _SV_NODATA)) &
+        (~numpy.isclose(metabc_1, _SV_NODATA)) &
+        (~numpy.isclose(metabe_1_1, _SV_NODATA)) &
+        (~numpy.isclose(metabe_1_2, _SV_NODATA)) &
+        (rceto1_1 != _TARGET_NODATA) &
+        (rceto1_2 != _TARGET_NODATA) &
+        (defac != _TARGET_NODATA) &
+        (dec2_1 != _IC_NODATA) &
+        (pheff_metab != _TARGET_NODATA))
+
+    potential_flow = numpy.zeros(aminrl_1.shape, dtype=numpy.float32)
+    potential_flow[valid_mask] = (
+        numpy.minimum(
+            metabc_1[valid_mask] * defac[valid_mask] * dec2_1[valid_mask] *
+            0.020833 * pheff_metab[valid_mask], metabc_1[valid_mask]))
+
+    decompose_mask = (
+        ((aminrl_1 > 0.0000001) | ((metabc_1 / metabe_1_1) <= rceto1_1)) &
+        ((aminrl_2 > 0.0000001) | ((metabc_1 / metabe_1_2) <= rceto1_2)) &
+        valid_mask)
+    tcflow_metabc_1 = numpy.empty(aminrl_1.shape, dtype=numpy.float32)
+    tcflow_metabc_1[:] = _IC_NODATA
+    tcflow_metabc_1[valid_mask] = 0.
+    tcflow_metabc_1[decompose_mask] = potential_flow[decompose_mask]
+    return tcflow_metabc_1
+
+
+def calc_tcflow_metabc_2(
+        aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2, rceto1_1,
+        rceto1_2, defac, dec2_2, pheff_metab, anerb):
+    """Calculate total flow out of soil metabolic C.
+
+    The total potential flow of C out of soil metabolic material is
+    calculated according to the decomposition factor, soil pH, and soil
+    anaerobic conditions. The actual flow is limited by the availability of N
+    and P. N and P may be supplied by the mineral source, or by the element
+    (N or P) in the decomposing stock.
+
+    Parameters:
+        aminrl_1 (numpy.ndarray): derived, average soil mineral N
+        aminrl_2 (numpy.ndarray): derived, average soil mineral P
+        metabc_2 (numpy.ndarray): state variable, soil metabolic C
+        metabe_2_1 (numpy.ndarray): state variable, soil metabolic N
+        metabe_2_2 (numpy.ndarray): state variable, soil metabolic P
+        rceto1_1 (numpy.ndarray): derived, required C/N ratio for
+            belowground metabolic material decomposing to SOM1
+        rceto1_2 (numpy.ndarray): derived, required C/P ratio for
+            belowground metabolic material decomposing to SOM1
+        defac (numpy.ndarray): derived, decomposition factor
+        dec2_2 (numpy.ndarray): parameter, maximum decomposition rate
+        pheff_metab (numpy.ndarray): derived, effect of soil pH on
+            decomposition rate of metabolic material
+        anerb (numpy.ndarray): derived, effect of soil anaerobic
+            conditions on decomposition
+
+    Returns:
+        tcflow_metabc_2, total flow of C out of soil metabolic
+            material
+    """
+    valid_mask = (
+        (~numpy.isclose(aminrl_1, _SV_NODATA)) &
+        (~numpy.isclose(aminrl_2, _SV_NODATA)) &
+        (~numpy.isclose(metabc_2, _SV_NODATA)) &
+        (~numpy.isclose(metabe_2_1, _SV_NODATA)) &
+        (~numpy.isclose(metabe_2_2, _SV_NODATA)) &
+        (rceto1_1 != _TARGET_NODATA) &
+        (rceto1_2 != _TARGET_NODATA) &
+        (defac != _TARGET_NODATA) &
+        (dec2_2 != _IC_NODATA) &
+        (pheff_metab != _TARGET_NODATA) &
+        (anerb != _TARGET_NODATA))
+
+    potential_flow = numpy.zeros(aminrl_1.shape, dtype=numpy.float32)
+    potential_flow[valid_mask] = (
+        numpy.minimum(
+            metabc_2[valid_mask] * defac[valid_mask] * dec2_2[valid_mask] *
+            0.020833 * pheff_metab[valid_mask] * anerb[valid_mask],
+            metabc_2[valid_mask]))
+
+    decompose_mask = (
+        ((aminrl_1 > 0.0000001) | ((metabc_2 / metabe_2_1) <= rceto1_1)) &
+        ((aminrl_2 > 0.0000001) | ((metabc_2 / metabe_2_2) <= rceto1_2)) &
+        valid_mask)
+    tcflow_metabc_2 = numpy.empty(aminrl_1.shape, dtype=numpy.float32)
+    tcflow_metabc_2[:] = _IC_NODATA
+    tcflow_metabc_2[valid_mask] = 0.
+    tcflow_metabc_2[decompose_mask] = potential_flow[decompose_mask]
+    return tcflow_metabc_2
+
+
 def calc_respiration_mineral_flow(cflow, frac_co2, estatv, cstatv):
     """Calculate mineral flow of one element associated with respiration.
 
@@ -5535,12 +5656,15 @@ def _decomposition(
             'aminrl_1', 'aminrl_2', 'tcflow', 'tosom2', 'net_tosom2',
             'tosom1', 'net_tosom1']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+        for iel in [1, 2]:
+            val = 'rceto1_{}'.format(iel)
+            temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     param_val_dict = {}
     for val in [
             'fwloss_4', 'teff_1', 'teff_2', 'teff_3', 'teff_4', 'drain',
             'aneref_1', 'aneref_2', 'aneref_3', 'sorpmx', 'pslsrb', 'strmax_1',
             'dec1_1', 'pligst_1', 'strmax_2', 'dec1_2', 'pligst_2', 'rsplig',
-            'ps1co2_1', 'ps1co2_2', ]:
+            'ps1co2_1', 'ps1co2_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
@@ -5957,6 +6081,8 @@ def _decomposition(
                             temp_val_dict['operand_temp']]],
                         update_gross_mineralization, temp_val_dict['gromin_1'],
                         gdal.GDT_Float32, _TARGET_NODATA)
+
+
     # accumulate flows
     for compartment in ['struc', 'metab', 'som1', 'som2']:
         for lyr in [1, 2]:

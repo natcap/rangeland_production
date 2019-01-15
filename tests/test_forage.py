@@ -6744,3 +6744,281 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             net_cflow_ar, net_cflow - tolerance, net_cflow + tolerance,
             _IC_NODATA)
+
+    def test_calc_tcflow_metabc_1(self):
+        """Test `calc_tcflow_metabc_1`.
+
+        Test `calc_tcflow_metabc_1` against value calculated by point-based
+        version.
+
+        Raises:
+            AssertionError if `calc_tcflow_metabc_1` does not match value
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def calc_tcflow_metabc1_point(
+                aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
+                rceto1_1, rceto1_2, defac, dec2_1, pheff_metab):
+            """Point implementation of `calc_tcflow_metabc_1`."""
+            decompose_mask = (
+                ((aminrl_1 > 0.0000001) | (
+                    (metabc_1 / metabe_1_1) <= rceto1_1)) &
+                ((aminrl_2 > 0.0000001) | (
+                    (metabc_1 / metabe_1_2) <= rceto1_2)))  # line 194 Litdec.f
+            if decompose_mask:
+                tcflow_metabc_1 = numpy.clip(
+                    (metabc_1 * defac * dec2_1 * 0.020833 * pheff_metab), 0,
+                    metabc_1)
+            else:
+                tcflow_metabc_1 = 0.
+            return tcflow_metabc_1
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, decomposition can occur
+        aminrl_1 = 5.8821
+        aminrl_2 = 0.04781
+        metabc_1 = 169.22
+        metabe_1_1 = 0.7776
+        metabe_1_2 = 0.3111
+        rceto1_1 = 5.29
+        rceto1_2 = 2.92
+        defac = 0.822
+        dec2_1 = 3.9
+        pheff_metab = 0.9917
+
+        tcflow_metabc_1_point = calc_tcflow_metabc1_point(
+            aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
+            rceto1_1, rceto1_2, defac, dec2_1, pheff_metab)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_1_ar = numpy.full(array_shape, metabc_1)
+        metabe_1_1_ar = numpy.full(array_shape, metabe_1_1)
+        metabe_1_2_ar = numpy.full(array_shape, metabe_1_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_1_ar = numpy.full(array_shape, dec2_1)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_metabc_1(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_1_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(metabe_1_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(metabc_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_metabc_1(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+        # known values, no decomposition
+        aminrl_1 = 0.
+        aminrl_2 = 0.
+        metabc_1 = 169.22
+        metabe_1_1 = 0.7776
+        metabe_1_2 = 0.3111
+        rceto1_1 = 200.
+        rceto1_2 = 400.
+        defac = 0.822
+        dec2_1 = 3.9
+        pheff_metab = 0.9917
+
+        tcflow_metabc_1_point = calc_tcflow_metabc1_point(
+            aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
+            rceto1_1, rceto1_2, defac, dec2_1, pheff_metab)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_1_ar = numpy.full(array_shape, metabc_1)
+        metabe_1_1_ar = numpy.full(array_shape, metabe_1_1)
+        metabe_1_2_ar = numpy.full(array_shape, metabe_1_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_1_ar = numpy.full(array_shape, dec2_1)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_metabc_1(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rceto1_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_1_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(dec2_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_metabc_1(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+    def test_calc_tcflow_metabc_2(self):
+        """Test `calc_tcflow_metabc_2`.
+
+        Test `calc_tcflow_metabc_2` against value calculated by point-based
+        version.
+
+        Raises:
+            AssertionError if `calc_tcflow_metabc_2` does not match value
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def calc_tcflow_metabc2_point(
+                aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2, rceto1_1,
+                rceto1_2, defac, dec2_2, pheff_metab, anerb):
+            """Point implementation of `calc_tcflow_metabc_2`."""
+            decompose_mask = (
+                ((aminrl_1 > 0.0000001) | (
+                    (metabc_2 / metabe_2_1) <= rceto1_1)) &
+                ((aminrl_2 > 0.0000001) | (
+                    (metabc_2 / metabe_2_2) <= rceto1_2)))  # line 194 Litdec.f
+            if decompose_mask:
+                tcflow_metabc_2 = numpy.clip(
+                    (metabc_2 * defac * dec2_2 * 0.020833 * pheff_metab *
+                        anerb), 0, metabc_2)
+            else:
+                tcflow_metabc_2 = 0.
+            return tcflow_metabc_2
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, decomposition can occur
+        aminrl_1 = 5.8821
+        aminrl_2 = 0.04781
+        metabc_2 = 169.22
+        metabe_2_1 = 0.7776
+        metabe_2_2 = 0.3111
+        rceto1_1 = 5.29
+        rceto1_2 = 2.92
+        defac = 0.822
+        dec2_2 = 3.9
+        pheff_metab = 0.9917
+        anerb = 0.3
+
+        tcflow_metabc_2_point = calc_tcflow_metabc2_point(
+            aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2,
+            rceto1_1, rceto1_2, defac, dec2_2, pheff_metab, anerb)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_2_ar = numpy.full(array_shape, metabc_2)
+        metabe_2_1_ar = numpy.full(array_shape, metabe_2_1)
+        metabe_2_2_ar = numpy.full(array_shape, metabe_2_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_2_ar = numpy.full(array_shape, dec2_2)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+        anerb_ar = numpy.full(array_shape, anerb)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_metabc_2(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_2_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(metabe_2_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(anerb_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabc_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_metabc_2(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+        # known values, no decomposition
+        aminrl_1 = 0.
+        aminrl_2 = 0.
+        metabc_2 = 169.22
+        metabe_2_1 = 0.7776
+        metabe_2_2 = 0.3111
+        rceto1_1 = 200.
+        rceto1_2 = 400.
+        defac = 0.822
+        dec2_2 = 3.9
+        pheff_metab = 0.9917
+
+        tcflow_metabc_2_point = calc_tcflow_metabc2_point(
+            aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2,
+            rceto1_1, rceto1_2, defac, dec2_2, pheff_metab, anerb)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_2_ar = numpy.full(array_shape, metabc_2)
+        metabe_2_1_ar = numpy.full(array_shape, metabe_2_1)
+        metabe_2_2_ar = numpy.full(array_shape, metabe_2_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_2_ar = numpy.full(array_shape, dec2_2)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+        anerb_ar = numpy.full(array_shape, anerb)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_metabc_2(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rceto1_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_2_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(dec2_2_ar, _IC_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_metabc_2(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
