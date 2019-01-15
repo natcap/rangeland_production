@@ -1491,7 +1491,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     shutil.rmtree(temp_dir)
 
 
-def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
+def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3):
     """Calculate C/<iel> ratios of decomposing aboveground material.
 
     This ratio is used to test whether there is sufficient <iel> (N or P)
@@ -1504,8 +1504,6 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
         pcemic_2 (numpy.ndarray): parameter, minimum C/<iel> of new material
         pcemic_3 (numpy.ndarray): parameter, minimum <iel> content of
             decomposing material that gives minimum C/<iel> of new material
-        cemicb (numpy.ndarray): parameter, slope of the regression line for
-            C/<iel>
 
     Returns:
         agdrat, the C/<iel> ratio of new material
@@ -1515,19 +1513,28 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb):
         (~numpy.isclose(tca, _SV_NODATA)) &
         (pcemic_1 != _IC_NODATA) &
         (pcemic_2 != _IC_NODATA) &
-        (pcemic_3 != _IC_NODATA) &
-        (cemicb != _IC_NODATA))
+        (pcemic_3 != _IC_NODATA))
+
+    cemicb = numpy.empty(anps.shape, dtype=numpy.float32)
+    cemicb[:] = _IC_NODATA
+    cemicb[valid_mask] = (
+        (pcemic_2[valid_mask] - pcemic_1[valid_mask]) /
+        pcemic_3[valid_mask])
+
     econt = numpy.empty(anps.shape, dtype=numpy.float32)
     econt[:] = _TARGET_NODATA
-    econt[valid_mask] = numpy.where(
-        tca[valid_mask] > 0., anps[valid_mask] / (tca[valid_mask] * 2.5), 0.)
+    econt[valid_mask] = 0
+
+    decompose_mask = ((tca > 0.) & valid_mask)
+    econt[decompose_mask] = anps[decompose_mask] / (tca[decompose_mask] * 2.5)
 
     agdrat = numpy.empty(anps.shape, dtype=numpy.float32)
     agdrat[:] = _TARGET_NODATA
-    agdrat[valid_mask] = numpy.where(
-        econt[valid_mask] > pcemic_3[valid_mask],
-        pcemic_2[valid_mask],
-        pcemic_1[valid_mask] + econt[valid_mask] * cemicb[valid_mask])
+    agdrat[valid_mask] = pcemic_2[valid_mask]
+
+    compute_mask = ((econt <= pcemic_3) & valid_mask)
+    agdrat[compute_mask] = (
+        pcemic_1[compute_mask] + econt[compute_mask] * cemicb[compute_mask])
     return agdrat
 
 
@@ -1577,48 +1584,6 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             pygeoprocessing.reclassify_raster(
                 (site_index_path, 1), site_to_val, target_path,
                 gdal.GDT_Float32, _IC_NODATA)
-
-    def calc_rnewas_som1(
-            pcemic1_2, pcemic1_1, pcemic1_3, struce_1, strucc_1):
-        """Calculate C/<iel> ratio for decomposition into som1.
-
-        This ratio is calculated separately for each nutrient (i.e., N, P).
-        When material decomposes into the surface active organic pool, the
-        C/<iel> ratio of decomposing material must be smaller than or equal to
-        this ratio.
-
-        Parameters:
-            pcemic1_2 (numpy.ndarray): parameter, minimum C/<iel> ratio for
-                surface active organic pool
-            pcemic1_1 (numpy.ndarray): parameter, maximum C/<iel> ratio for
-                surface active organic pool
-            pcemic1_3 (numpy.ndarray): parameter, mimimum <iel> content of
-                decomposing aboveground material, above which the C/<iel>
-                ratio of the surface microbes equals pcemic1_2
-            struce_1 (numpy.ndarray): state variable, <iel> in surface
-                structural material
-            strucc_1 (numpy.ndarray): state variable, C in surface
-                structural material
-
-        Returns:
-            rnewas1, required ratio for decomposition of structural material
-            into som1 for one nutrient
-        """
-        valid_mask = (
-            (pcemic1_2 != _IC_NODATA) &
-            (pcemic1_1 != _IC_NODATA) &
-            (pcemic1_3 != _IC_NODATA) &
-            (~numpy.isclose(struce_1, _SV_NODATA)) &
-            (~numpy.isclose(strucc_1, _SV_NODATA)))
-        cemicb1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
-        cemicb1[:] = _TARGET_NODATA
-        cemicb1[valid_mask] = (
-            (pcemic1_2[valid_mask] - pcemic1_1[valid_mask]) /
-            pcemic1_3[valid_mask])
-
-        rnewas1 = _aboveground_ratio(
-            struce_1, strucc_1, pcemic1_1, pcemic1_2, pcemic1_3, cemicb1)
-        return rnewas1
 
     def calc_rnewas_som2(
             pcemic2_2, pcemic2_1, pcemic2_3, struce_1, strucc_1, rad1p_1,
@@ -1670,14 +1635,9 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             (rad1p_3 != _IC_NODATA) &
             (pcemic1_2 != _IC_NODATA) &
             (rnewas1 != _TARGET_NODATA))
-        cemicb2 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
-        cemicb2[:] = _TARGET_NODATA
-        cemicb2[valid_mask] = (
-            (pcemic2_2[valid_mask] - pcemic2_1[valid_mask]) /
-            pcemic2_3[valid_mask])
 
         rnewas2 = _aboveground_ratio(
-            struce_1, strucc_1, pcemic2_1, pcemic2_2, pcemic2_3, cemicb2)
+            struce_1, strucc_1, pcemic2_1, pcemic2_2, pcemic2_3)
 
         radds1 = numpy.empty(strucc_1.shape, dtype=numpy.float32)
         radds1[:] = _TARGET_NODATA
@@ -1693,12 +1653,12 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # calculate rnewas_iel_1 - aboveground material to SOM1
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
-                param_val_dict['pcemic1_2_{}'.format(iel)],
-                param_val_dict['pcemic1_1_{}'.format(iel)],
-                param_val_dict['pcemic1_3_{}'.format(iel)],
                 sv_reg['struce_1_{}_path'.format(iel)],
-                sv_reg['strucc_1_path']]],
-            calc_rnewas_som1, pp_reg['rnewas_{}_1_path'.format(iel)],
+                sv_reg['strucc_1_path'],
+                param_val_dict['pcemic1_1_{}'.format(iel)],
+                param_val_dict['pcemic1_2_{}'.format(iel)],
+                param_val_dict['pcemic1_3_{}'.format(iel)]]],
+            _aboveground_ratio, pp_reg['rnewas_{}_1_path'.format(iel)],
             gdal.GDT_Float32, _TARGET_NODATA)
         # calculate rnewas_iel_2 - aboveground material to SOM2
         pygeoprocessing.raster_calculator(

@@ -1804,20 +1804,20 @@ class foragetests(unittest.TestCase):
         from natcap.invest import forage
 
         array_shape = (10, 10)
+        tolerance = 0.0001
 
         tca = numpy.random.uniform(300, 700, array_shape)
         anps = numpy.random.uniform(1, numpy.amin(tca), array_shape)
         pcemic_1 = numpy.random.uniform(12, 20, array_shape)
         pcemic_2 = numpy.random.uniform(3, 11, array_shape)
         pcemic_3 = numpy.random.uniform(0.001, 0.1, array_shape)
-        cemicb = (pcemic_2 - pcemic_1) / pcemic_3
 
         minimum_acceptable_agdrat = 2.285
         maximum_acceptable_agdrat = numpy.amax(pcemic_1)
         agdrat_nodata = _TARGET_NODATA
 
         agdrat = forage._aboveground_ratio(
-            anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+            anps, tca, pcemic_1, pcemic_2, pcemic_3)
 
         self.assert_all_values_in_array_within_range(
             agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
@@ -1826,36 +1826,61 @@ class foragetests(unittest.TestCase):
         for input_array in [anps, tca]:
             insert_nodata_values_into_array(input_array, _TARGET_NODATA)
             agdrat = forage._aboveground_ratio(
-                anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+                anps, tca, pcemic_1, pcemic_2, pcemic_3)
 
             self.assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
-        for input_array in [pcemic_1, pcemic_2, pcemic_3, cemicb]:
+        for input_array in [pcemic_1, pcemic_2, pcemic_3]:
             insert_nodata_values_into_array(input_array, _IC_NODATA)
             agdrat = forage._aboveground_ratio(
-                anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+                anps, tca, pcemic_1, pcemic_2, pcemic_3)
 
             self.assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
 
-        # known inputs
-        tca = numpy.full(array_shape, 413)
-        anps = numpy.full(array_shape, 229)
-        pcemic_1 = numpy.full(array_shape, 17.4)
-        pcemic_2 = numpy.full(array_shape, 3.2)
-        pcemic_3 = numpy.full(array_shape, 0.04)
-        cemicb = numpy.full(array_shape, -20)
+        # known inputs: econt > pcemic_3
+        tca = 413
+        anps = 229
+        pcemic_1 = 17.4
+        pcemic_2 = 3.2
+        pcemic_3 = 0.04
 
         known_agdrat = 3.2
-        tolerance = 0.0001
+        point_agdrat = agdrat_point(anps, tca, pcemic_1, pcemic_2, pcemic_3)
+        self.assertAlmostEqual(known_agdrat, point_agdrat)
+
+        tca_ar = numpy.full(array_shape, tca)
+        anps_ar = numpy.full(array_shape, anps)
+        pcemic_1_ar = numpy.full(array_shape, pcemic_1)
+        pcemic_2_ar = numpy.full(array_shape, pcemic_2)
+        pcemic_3_ar = numpy.full(array_shape, pcemic_3)
 
         agdrat = forage._aboveground_ratio(
-            anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
-
+            anps_ar, tca_ar, pcemic_1_ar, pcemic_2_ar, pcemic_3_ar)
         self.assert_all_values_in_array_within_range(
-            agdrat, known_agdrat - tolerance, known_agdrat + tolerance,
+            agdrat, point_agdrat - tolerance, point_agdrat + tolerance,
+            agdrat_nodata)
+
+        # known inputs: econt < pcemic_3
+        tca = 413.
+        anps = 100.
+        pcemic_1 = 17.4
+        pcemic_2 = 3.2
+        pcemic_3 = 0.11
+        point_agdrat = agdrat_point(anps, tca, pcemic_1, pcemic_2, pcemic_3)
+
+        tca_ar = numpy.full(array_shape, tca)
+        anps_ar = numpy.full(array_shape, anps)
+        pcemic_1_ar = numpy.full(array_shape, pcemic_1)
+        pcemic_2_ar = numpy.full(array_shape, pcemic_2)
+        pcemic_3_ar = numpy.full(array_shape, pcemic_3)
+
+        agdrat = forage._aboveground_ratio(
+            anps_ar, tca_ar, pcemic_1_ar, pcemic_2_ar, pcemic_3_ar)
+        self.assert_all_values_in_array_within_range(
+            agdrat, point_agdrat - tolerance, point_agdrat + tolerance,
             agdrat_nodata)
 
     def test_structural_ratios(self):
