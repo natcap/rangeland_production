@@ -666,11 +666,6 @@ def decomposition_point(
         (0.5 + (1.14 / numpy.pi) *
             numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 4.8))), 0, 1)
 
-    # monthly N fixation
-    state_var['minerl_1_1'] = monthly_N_fixation_point(
-        inputs['precip'], year_reg['annual_precip'], year_reg['baseNdep'],
-        params['epnfs_2'], state_var['minerl_1_1'])
-
     # calculate aminrl_1, intermediate surface mineral N that is tracked
     # during decomposition
     aminrl_1 = state_var['minerl_1_1']
@@ -685,6 +680,11 @@ def decomposition_point(
         labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
         fsfunc = labile / state_var['minerl_1_2']
         aminrl_2 = state_var['minerl_1_2'] * fsfunc
+
+    # monthly N fixation
+    state_var['minerl_1_1'] = monthly_N_fixation_point(
+        inputs['precip'], year_reg['annual_precip'], year_reg['baseNdep'],
+        params['epnfs_2'], state_var['minerl_1_1'])
 
     for _ in xrange(1):  # TODO eventually should be xrange(4)
         # initialize change (delta, d) in state variables for this decomp step
@@ -942,151 +942,153 @@ def decomposition_point(
 
         # decomposition of surface metabolic material: line 136 Litdec.f
         # C/N ratio for surface metabolic residue
-        # rceto1_1 = agdrat_point(
-        #     state_var['metabe_1_1'], state_var['metabc_1'],
-        #     params['pcemic1_1_1'], params['pcemic1_2_1'],
-        #     params['pcemic1_3_1'])
-        # # C/P ratio for surface metabolic residue
-        # rceto1_2 = agdrat_point(
-        #     state_var['metabe_1_2'], state_var['metabc_1'],
-        #     params['pcemic1_1_2'], params['pcemic1_2_2'],
-        #     params['pcemic1_3_2'])
-        # decompose_mask = (
-        #     ((aminrl_1 > 0.0000001) | (
-        #         (state_var['metabc_1'] / state_var['metabe_1_1']) <=
-        #         rceto1_1)) &
-        #     ((aminrl_2 > 0.0000001) | (
-        #         (state_var['metabc_1'] / state_var['metabe_1_2']) <=
-        #         rceto1_2)))  # line 194 Litdec.f
-        # if decompose_mask:
-        #     tcflow_metabc_1 = numpy.clip(
-        #         (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
-        #             pheff_metab), 0,
-        #         state_var['metabc_1'])
-        #     co2los = tcflow_metabc_1 * params['pmco2_1']
-        #     d_metabc_1 -= tcflow_metabc_1
-        #     # respiration, line 201 Litdec.f
-        #     mnrflo_1 = (
-        #         co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
-        #     d_metabe_1_1 -= mnrflo_1
-        #     d_minerl_1_1 += mnrflo_1
-        #     gromin_1 += mnrflo_1
-        #     mnrflo_2 = (
-        #         co2los * state_var['metabe_1_2'] / state_var['metabc_1'])
-        #     d_metabe_1_2 -= mnrflo_2
-        #     d_minerl_1_2 += mnrflo_2
+        rceto1_1 = agdrat_point(
+            state_var['metabe_1_1'], state_var['metabc_1'],
+            params['pcemic1_1_1'], params['pcemic1_2_1'],
+            params['pcemic1_3_1'])
+        # C/P ratio for surface metabolic residue
+        rceto1_2 = agdrat_point(
+            state_var['metabe_1_2'], state_var['metabc_1'],
+            params['pcemic1_1_2'], params['pcemic1_2_2'],
+            params['pcemic1_3_2'])
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['metabc_1'] / state_var['metabe_1_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['metabc_1'] / state_var['metabe_1_2']) <=
+                rceto1_2)))  # line 194 Litdec.f
+        if decompose_mask:
+            tcflow_metabc_1 = numpy.clip(
+                (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
+                    pheff_metab), 0,
+                state_var['metabc_1'])
+            co2los = tcflow_metabc_1 * params['pmco2_1']
+            d_metabc_1 -= tcflow_metabc_1
+            # respiration, line 201 Litdec.f
+            mnrflo_1 = (
+                co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
+            d_metabe_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = (
+                co2los * state_var['metabe_1_2'] / state_var['metabc_1'])
+            d_metabe_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
 
-        #     net_tosom1 = tcflow_metabc_1 - co2los  # line 210 Litdec.f
-        #     # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
-        #     # N first
-        #     material_leaving_a = esched_point(
-        #         'material_leaving_a')(
-        #             net_tosom1, state_var['metabc_1'], rceto1_1,
-        #             state_var['metabe_1_1'], state_var['minerl_1_1'])
-        #     material_arriving_b = esched_point(
-        #         'material_arriving_b')(
-        #             net_tosom1, state_var['metabc_1'], rceto1_1,
-        #             state_var['metabe_1_1'], state_var['minerl_1_1'])
-        #     mineral_flow = esched_point(
-        #         'mineral_flow')(
-        #             net_tosom1, state_var['metabc_1'], rceto1_1,
-        #             state_var['metabe_1_1'], state_var['minerl_1_1'])
-        #     # schedule flows
-        #     d_metabe_1_1 -= material_leaving_a
-        #     d_som1e_1_1 += material_arriving_b
-        #     d_minerl_1_1 += mineral_flow
-        #     if mineral_flow > 0:
-        #         gromin_1 += mineral_flow
+            net_tosom1 = tcflow_metabc_1 - co2los  # line 210 Litdec.f
+            d_som1c_1 += net_tosom1
+            # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_metabe_1_1 -= material_leaving_a
+            d_som1e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
 
-        #     # P second
-        #     material_leaving_a = esched_point(
-        #         'material_leaving_a')(
-        #             net_tosom1, state_var['metabc_1'], rceto1_2,
-        #             state_var['metabe_1_2'], state_var['minerl_1_2'])
-        #     material_arriving_b = esched_point(
-        #         'material_arriving_b')(
-        #             net_tosom1, state_var['metabc_1'], rceto1_2,
-        #             state_var['metabe_1_2'], state_var['minerl_1_2'])
-        #     mineral_flow = esched_point(
-        #         'mineral_flow')(
-        #             net_tosom1, state_var['metabc_1'], rceto1_2,
-        #             state_var['metabe_1_2'], state_var['minerl_1_2'])
-        #     # schedule flows
-        #     d_metabe_1_2 -= material_leaving_a
-        #     d_som1e_1_2 += material_arriving_b
-        #     d_minerl_1_2 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_metabe_1_2 -= material_leaving_a
+            d_som1e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
 
-        # # decomposition of soil metabolic material: line 136 Litdec.f
-        # # C/N ratio for soil metabolic material
-        # rceto1_1 = bgdrat_point(
-        #     aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
-        #     params['varat1_3_1'])
-        # # C/P ratio for soil metabolic material
-        # rceto1_2 = bgdrat_point(
-        #     aminrl_2, params['varat1_1_2'], params['varat1_2_2'],
-        #     params['varat1_3_2'])
-        # decompose_mask = (
-        #     ((aminrl_1 > 0.0000001) | (
-        #         (state_var['metabc_2'] / state_var['metabe_2_1']) <=
-        #         rceto1_1)) &
-        #     ((aminrl_2 > 0.0000001) | (
-        #         (state_var['metabc_2'] / state_var['metabe_2_2']) <=
-        #         rceto1_2)))  # line 194 Litdec.f
-        # if decompose_mask:
-        #     tcflow_metabc_2 = numpy.clip(
-        #         (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
-        #             pheff_metab * anerb),
-        #         0, state_var['metabc_2'])
-        #     co2los = tcflow_metabc_2 * params['pmco2_2']
-        #     d_metabc_2 -= tcflow_metabc_2
-        #     # respiration, line 201 Litdec.f
-        #     mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
-        #     d_metabe_2_1 -= mnrflo_1
-        #     d_minerl_1_1 += mnrflo_1
-        #     gromin_1 += mnrflo_1
-        #     mnrflo_2 = co2los * state_var['metabe_2_2'] / state_var['metabc_2']
-        #     d_metabe_2_2 -= mnrflo_2
-        #     d_minerl_1_2 += mnrflo_2
+        # decomposition of soil metabolic material: line 136 Litdec.f
+        # C/N ratio for soil metabolic material
+        rceto1_1 = bgdrat_point(
+            aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
+            params['varat1_3_1'])
+        # C/P ratio for soil metabolic material
+        rceto1_2 = bgdrat_point(
+            aminrl_2, params['varat1_1_2'], params['varat1_2_2'],
+            params['varat1_3_2'])
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['metabc_2'] / state_var['metabe_2_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['metabc_2'] / state_var['metabe_2_2']) <=
+                rceto1_2)))  # line 194 Litdec.f
+        if decompose_mask:
+            tcflow_metabc_2 = numpy.clip(
+                (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
+                    pheff_metab * anerb),
+                0, state_var['metabc_2'])
+            co2los = tcflow_metabc_2 * params['pmco2_2']
+            d_metabc_2 -= tcflow_metabc_2
+            # respiration, line 201 Litdec.f
+            mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
+            d_metabe_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['metabe_2_2'] / state_var['metabc_2']
+            d_metabe_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
 
-        #     net_tosom1 = tcflow_metabc_2 - co2los  # line 210 Litdec.f
-        #     # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
-        #     # N first
-        #     material_leaving_a = esched_point(
-        #         'material_leaving_a')(
-        #             net_tosom1, state_var['metabc_2'], rceto1_1,
-        #             state_var['metabe_2_1'], state_var['minerl_1_1'])
-        #     material_arriving_b = esched_point(
-        #         'material_arriving_b')(
-        #             net_tosom1, state_var['metabc_2'], rceto1_1,
-        #             state_var['metabe_2_1'], state_var['minerl_1_1'])
-        #     mineral_flow = esched_point(
-        #         'mineral_flow')(
-        #             net_tosom1, state_var['metabc_2'], rceto1_1,
-        #             state_var['metabe_2_1'], state_var['minerl_1_1'])
-        #     # schedule flows
-        #     d_metabe_2_1 -= material_leaving_a
-        #     d_som1e_2_1 += material_arriving_b
-        #     d_minerl_1_1 += mineral_flow
-        #     if mineral_flow > 0:
-        #         gromin_1 += mineral_flow
+            net_tosom1 = tcflow_metabc_2 - co2los  # line 210 Litdec.f
+            d_som1c_2 += net_tosom1
+            # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_metabe_2_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
 
-        #     # P second
-        #     material_leaving_a = esched_point(
-        #         'material_leaving_a')(
-        #             net_tosom1, state_var['metabc_2'], rceto1_2,
-        #             state_var['metabe_2_2'], state_var['minerl_1_2'])
-        #     material_arriving_b = esched_point(
-        #         'material_arriving_b')(
-        #             net_tosom1, state_var['metabc_2'], rceto1_2,
-        #             state_var['metabe_2_2'], state_var['minerl_1_2'])
-        #     mineral_flow = esched_point(
-        #         'mineral_flow')(
-        #             net_tosom1, state_var['metabc_2'], rceto1_2,
-        #             state_var['metabe_2_2'], state_var['minerl_1_2'])
-        #     # schedule flows
-        #     d_metabe_2_2 -= material_leaving_a
-        #     d_som1e_2_2 += material_arriving_b
-        #     d_minerl_1_2 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_metabe_2_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
 
         # somdec.f
 
@@ -5967,8 +5969,8 @@ class foragetests(unittest.TestCase):
             'rnewbs_1_2': 140.,
             'rnewbs_2_2': 200.
         }
-        state_var_dict['minerl_1_1'] = 0.
-        state_var_dict['minerl_1_2'] = 0.
+        state_var_dict['minerl_1_1'] = 0.00000001
+        state_var_dict['minerl_1_2'] = 0.00000001
 
         input_dict = generate_model_inputs_from_point_inputs(
             inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
