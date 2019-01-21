@@ -490,17 +490,17 @@ def declig_point(return_type):
             tosom2 = tcflow * ligcon  # line 127 Declig.f
 
             # respiration associated with decomposition to som2
-            co2los_som2 = tosom2 * rsplig  # line 130 Declig.f
-            mnrflo_1 = co2los_som2 * struce_lyr_1 / strucc_lyr  # line 132
+            co2los = tosom2 * rsplig  # line 130 Declig.f
+            mnrflo_1 = co2los * struce_lyr_1 / strucc_lyr  # line 132
             d_struce_lyr_1 -= mnrflo_1
             d_minerl_1_1 += mnrflo_1
             if mnrflo_1 > 0:
                 d_gromin_1 += mnrflo_1
-            mnrflo_2 = co2los_som2 * struce_lyr_2 / strucc_lyr
+            mnrflo_2 = co2los * struce_lyr_2 / strucc_lyr
             d_struce_lyr_2 -= mnrflo_2
             d_minerl_1_2 += mnrflo_2
 
-            net_tosom2 = tosom2 - co2los_som2  # line 136 Declig.f
+            net_tosom2 = tosom2 - co2los  # line 136 Declig.f
             d_som2c_lyr += net_tosom2  # line 140 Declig.f
 
             # N and P flows from struce_lyr to som2e_lyr, line 145 Declig.f
@@ -544,19 +544,19 @@ def declig_point(return_type):
 
             # what's left decomposes to som1
             tosom1 = tcflow - tosom2  # line 160 Declig.f
-            co2los_som1 = tosom1 * ps1co2_lyr  # line 163 Declig.f
+            co2los = tosom1 * ps1co2_lyr  # line 163 Declig.f
 
             # respiration associated with decomposition to som1
-            mnrflo_1 = co2los_som1 * struce_lyr_1 / strucc_lyr  # line 165
+            mnrflo_1 = co2los * struce_lyr_1 / strucc_lyr  # line 165
             d_struce_lyr_1 -= mnrflo_1
             d_minerl_1_1 += mnrflo_1
             if mnrflo_1 > 0:
                 d_gromin_1 += mnrflo_1
-            mnrflo_2 = co2los_som1 * struce_lyr_2 / strucc_lyr
+            mnrflo_2 = co2los * struce_lyr_2 / strucc_lyr
             d_struce_lyr_2 -= mnrflo_2
             d_minerl_1_2 += mnrflo_2
 
-            net_tosom1 = tosom1 - co2los_som1  # line 169 Declig.f
+            net_tosom1 = tosom1 - co2los  # line 169 Declig.f
             d_som1c_lyr += net_tosom1  # line 173 Declig.f
 
             # N and P flows from struce_lyr to som1e_lyr, line 178 Declig.f
@@ -1104,7 +1104,7 @@ def decomposition_point(
             params['rad1p_1_1'] + params['rad1p_2_1'] *
             ((state_var['som1c_1'] / state_var['som1e_1_1']) -
                 params['pcemic1_2_1']))
-        rceto2_1 = max(
+        rceto2_1_surface = max(
             (state_var['som1c_1'] / state_var['som1e_1_1'] + radds1_1),
             params['rad1p_3_1'])
 
@@ -1112,22 +1112,21 @@ def decomposition_point(
             params['rad1p_1_2'] + params['rad1p_2_2'] *
             ((state_var['som1c_1'] / state_var['som1e_1_2']) -
                 params['pcemic1_2_2']))
-        rceto2_2 = max(
+        rceto2_2_surface = max(
             (state_var['som1c_1'] / state_var['som1e_1_2'] + radds1_2),
             params['rad1p_3_2'])
 
-        pheff = pheff_struc
         decompose_mask = (
             ((aminrl_1 > 0.0000001) | (
                 (state_var['som1c_1'] / state_var['som1e_1_1']) <=
-                rceto2_1)) &
+                rceto2_1_surface)) &
             ((aminrl_2 > 0.0000001) | (
                 (state_var['som1c_1'] / state_var['som1e_1_2']) <=
-                rceto2_2)))  # line 92
+                rceto2_2_surface)))  # line 92
         if decompose_mask:
             tcflow = (
                 state_var['som1c_1'] * defac * params['dec3_1'] * 0.020833 *
-                pheff)
+                pheff_struc)
             co2los = tcflow * params['p1co2a_1']
             d_som1c_1 -= tcflow
             # respiration, line 105 Somdec.f
@@ -1145,15 +1144,15 @@ def decomposition_point(
             # N first
             material_leaving_a = esched_point(
                 'material_leaving_a')(
-                    net_tosom2, state_var['som1c_1'], rceto2_1,
+                    net_tosom2, state_var['som1c_1'], rceto2_1_surface,
                     state_var['som1e_1_1'], state_var['minerl_1_1'])
             material_arriving_b = esched_point(
                 'material_arriving_b')(
-                    net_tosom2, state_var['som1c_1'], rceto2_1,
+                    net_tosom2, state_var['som1c_1'], rceto2_1_surface,
                     state_var['som1e_1_1'], state_var['minerl_1_1'])
             mineral_flow = esched_point(
                 'mineral_flow')(
-                    net_tosom2, state_var['som1c_1'], rceto2_1,
+                    net_tosom2, state_var['som1c_1'], rceto2_1_surface,
                     state_var['som1e_1_1'], state_var['minerl_1_1'])
             # schedule flows
             d_som1e_1_1 -= material_leaving_a
@@ -1165,15 +1164,15 @@ def decomposition_point(
             # P second
             material_leaving_a = esched_point(
                 'material_leaving_a')(
-                    net_tosom2, state_var['som1c_1'], rceto2_2,
+                    net_tosom2, state_var['som1c_1'], rceto2_2_surface,
                     state_var['som1e_1_2'], state_var['minerl_1_2'])
             material_arriving_b = esched_point(
                 'material_arriving_b')(
-                    net_tosom2, state_var['som1c_1'], rceto2_2,
+                    net_tosom2, state_var['som1c_1'], rceto2_2_surface,
                     state_var['som1e_1_2'], state_var['minerl_1_2'])
             mineral_flow = esched_point(
                 'mineral_flow')(
-                    net_tosom2, state_var['som1c_1'], rceto2_2,
+                    net_tosom2, state_var['som1c_1'], rceto2_2_surface,
                     state_var['som1e_1_2'], state_var['minerl_1_2'])
             # schedule flows
             d_som1e_1_2 -= material_leaving_a
@@ -1189,7 +1188,6 @@ def decomposition_point(
             aminrl_2, params['varat22_1_2'], params['varat22_2_2'],
             params['varat22_3_2'])
 
-        pheff = pheff_metab
         decompose_mask = (
             ((aminrl_1 > 0.0000001) | (
                 (state_var['som1c_2'] / state_var['som1e_2_1']) <=
@@ -1200,7 +1198,7 @@ def decomposition_point(
         if decompose_mask:
             tcflow = (
                 state_var['som1c_2'] * defac * params['dec3_2'] *
-                pp_reg['eftext'] * anerb * 0.020833 * pheff)
+                pp_reg['eftext'] * anerb * 0.020833 * pheff_metab)
             co2los = tcflow * params['p1co2_2']
             d_som1c_2 -= tcflow
             # respiration, line 179 Somdec.f
@@ -1318,7 +1316,6 @@ def decomposition_point(
             d_som2e_2_2 += material_arriving_b
             d_minerl_1_2 += mineral_flow
         # Soil SOM2 decomposing to soil SOM1 and SOM3, line 269 Somdec.f
-        pheff = pheff_metab  # TODO rename pheff_metab?
         decompose_mask = (
             ((aminrl_1 > 0.0000001) | (
                 (state_var['som2c_2'] / state_var['som2e_2_1']) <=
@@ -1329,7 +1326,7 @@ def decomposition_point(
         if decompose_mask:
             tcflow = (
                 state_var['som2c_2'] * defac * params['dec5_2'] * anerb *
-                0.020833 * pheff)
+                0.020833 * pheff_metab)
             co2los = tcflow * params['p2co2_2']
             d_som2c_2 -= tcflow
             # respiration, line 304 Somdec.f
@@ -1425,7 +1422,6 @@ def decomposition_point(
             d_minerl_1_2 += mineral_flow
         # Surface SOM2 decomposes to surface SOM1
         # ratios of material decomposing to SOM1
-        pheff = pheff_struc  # TODO rename?
         decompose_mask = (
             ((aminrl_1 > 0.0000001) | (
                 (state_var['som2c_1'] / state_var['som2e_1_1']) <=
@@ -1436,7 +1432,7 @@ def decomposition_point(
         if decompose_mask:
             tcflow = (
                 state_var['som2c_1'] * defac * params['dec5_1'] * 0.020833 *
-                pheff)
+                pheff_struc)
             co2los = tcflow * params['p2co2_1']  # line 385
             d_som2c_1 -= tcflow
             # respiration, line 388
