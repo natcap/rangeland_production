@@ -728,7 +728,7 @@ def decomposition_point(
 
         # litdec.f
         # decomposition of strucc_1, surface structural material
-        tcflow_strucc_1 = (min(
+        tcflow = (min(
             state_var['strucc_1'], params['strmax_1']) * defac *
             params['dec1_1'] *
             math.exp(-params['pligst_1'] * state_var['strlig_1']) *
@@ -738,7 +738,7 @@ def decomposition_point(
             'd_strucc')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -747,7 +747,7 @@ def decomposition_point(
             'd_struce_1')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -756,7 +756,7 @@ def decomposition_point(
             'd_struce_2')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -765,7 +765,7 @@ def decomposition_point(
             'd_minerl_1_1')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -774,7 +774,7 @@ def decomposition_point(
             'd_minerl_1_2')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -783,7 +783,7 @@ def decomposition_point(
             'd_gromin_1')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -792,7 +792,7 @@ def decomposition_point(
             'd_som2c')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -801,7 +801,7 @@ def decomposition_point(
             'd_som2e_1')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -810,7 +810,7 @@ def decomposition_point(
             'd_som2e_2')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -819,7 +819,7 @@ def decomposition_point(
             'd_som1c')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -828,7 +828,7 @@ def decomposition_point(
             'd_som1e_1')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
@@ -837,14 +837,14 @@ def decomposition_point(
             'd_som1e_2')(
                 aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
                 params['ps1co2_1'], state_var['strucc_1'],
-                tcflow_strucc_1, state_var['struce_1_1'],
+                tcflow, state_var['struce_1_1'],
                 state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
                 rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
                 rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
                 state_var['minerl_1_2'])
 
         # decomposition of strucc_2, soil structural material: line 99 Litdec.f
-        tcflow_strucc_2 = (
+        tcflow = (
             min(state_var['strucc_2'], params['strmax_2']) * defac *
             params['dec1_2'] *
             math.exp(-params['pligst_2'] * state_var['strlig_2']) *
@@ -853,7 +853,7 @@ def decomposition_point(
         d_strucc_2 += declig_point(
             'd_strucc')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -861,7 +861,7 @@ def decomposition_point(
         d_struce_2_1 += declig_point(
             'd_struce_1')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -869,7 +869,7 @@ def decomposition_point(
         d_struce_2_2 += declig_point(
             'd_struce_2')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -877,7 +877,7 @@ def decomposition_point(
         d_minerl_1_1 += declig_point(
             'd_minerl_1_1')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -885,7 +885,7 @@ def decomposition_point(
         d_minerl_1_2 += declig_point(
             'd_minerl_1_2')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -893,7 +893,7 @@ def decomposition_point(
         gromin_1 += declig_point(
             'd_gromin_1')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -901,7 +901,7 @@ def decomposition_point(
         d_som2c_2 += declig_point(
             'd_som2c')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -909,7 +909,7 @@ def decomposition_point(
         d_som2e_2_1 += declig_point(
             'd_som2e_1')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -917,7 +917,7 @@ def decomposition_point(
         d_som2e_2_2 += declig_point(
             'd_som2e_2')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -925,7 +925,7 @@ def decomposition_point(
         d_som1c_2 += declig_point(
             'd_som1c')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -933,7 +933,7 @@ def decomposition_point(
         d_som1e_2_1 += declig_point(
             'd_som1e_1')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -941,7 +941,7 @@ def decomposition_point(
         d_som1e_2_2 += declig_point(
             'd_som1e_2')(
                 aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
-                params['ps1co2_2'], state_var['strucc_2'], tcflow_strucc_2,
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
                 state_var['struce_2_1'], state_var['struce_2_2'],
                 rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
                 rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
@@ -966,12 +966,12 @@ def decomposition_point(
                 (state_var['metabc_1'] / state_var['metabe_1_2']) <=
                 rceto1_2)))  # line 194 Litdec.f
         if decompose_mask:
-            tcflow_metabc_1 = numpy.clip(
+            tcflow = numpy.clip(
                 (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
                     pheff_metab), 0,
                 state_var['metabc_1'])
-            co2los = tcflow_metabc_1 * params['pmco2_1']
-            d_metabc_1 -= tcflow_metabc_1
+            co2los = tcflow * params['pmco2_1']
+            d_metabc_1 -= tcflow
             # respiration, line 201 Litdec.f
             mnrflo_1 = (
                 co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
@@ -983,7 +983,7 @@ def decomposition_point(
             d_metabe_1_2 -= mnrflo_2
             d_minerl_1_2 += mnrflo_2
 
-            net_tosom1 = tcflow_metabc_1 - co2los  # line 210 Litdec.f
+            net_tosom1 = tcflow - co2los  # line 210 Litdec.f
             d_som1c_1 += net_tosom1
             # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
             # N first
@@ -1041,12 +1041,12 @@ def decomposition_point(
                 (state_var['metabc_2'] / state_var['metabe_2_2']) <=
                 rceto1_2)))  # line 194 Litdec.f
         if decompose_mask:
-            tcflow_metabc_2 = numpy.clip(
+            tcflow = numpy.clip(
                 (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
                     pheff_metab * anerb),
                 0, state_var['metabc_2'])
-            co2los = tcflow_metabc_2 * params['pmco2_2']
-            d_metabc_2 -= tcflow_metabc_2
+            co2los = tcflow * params['pmco2_2']
+            d_metabc_2 -= tcflow
             # respiration, line 201 Litdec.f
             mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
             d_metabe_2_1 -= mnrflo_1
@@ -1056,7 +1056,7 @@ def decomposition_point(
             d_metabe_2_2 -= mnrflo_2
             d_minerl_1_2 += mnrflo_2
 
-            net_tosom1 = tcflow_metabc_2 - co2los  # line 210 Litdec.f
+            net_tosom1 = tcflow - co2los  # line 210 Litdec.f
             d_som1c_2 += net_tosom1
             # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
             # N first
@@ -1125,11 +1125,11 @@ def decomposition_point(
                 (state_var['som1c_1'] / state_var['som1e_1_2']) <=
                 rceto2_2)))  # line 92
         if decompose_mask:
-            tcflow_som1 = (
+            tcflow = (
                 state_var['som1c_1'] * defac * params['dec3_1'] * 0.020833 *
                 pheff)
-            co2los = tcflow_som1 * params['p1co2a_1']
-            d_som1c_1 -= tcflow_som1
+            co2los = tcflow * params['p1co2a_1']
+            d_som1c_1 -= tcflow
             # respiration, line 105 Somdec.f
             mnrflo_1 = co2los * state_var['som1e_1_1'] / state_var['som1c_1']
             d_som1e_1_1 -= mnrflo_1
@@ -1139,7 +1139,7 @@ def decomposition_point(
             d_som1e_1_2 -= mnrflo_2
             d_minerl_1_2 += mnrflo_2
 
-            net_tosom2 = tcflow_som1 - co2los
+            net_tosom2 = tcflow - co2los
             d_som2c_1 += net_tosom2
             # N and P flows from som1e_1 to som2e_1, line 123 Somdec.f
             # N first
@@ -1198,11 +1198,11 @@ def decomposition_point(
                 (state_var['som1c_2'] / state_var['som1e_2_2']) <=
                 rceto2_2)))  # line 171
         if decompose_mask:
-            tcflow_som1 = (
+            tcflow = (
                 state_var['som1c_2'] * defac * params['dec3_2'] *
                 pp_reg['eftext'] * anerb * 0.020833 * pheff)
-            co2los = tcflow_som1 * params['p1co2_2']
-            d_som1c_2 -= tcflow_som1
+            co2los = tcflow * params['p1co2_2']
+            d_som1c_2 -= tcflow
             # respiration, line 179 Somdec.f
             mnrflo_1 = co2los * state_var['som1e_2_1'] / state_var['som1c_2']
             d_som1e_2_1 -= mnrflo_1
@@ -1213,7 +1213,7 @@ def decomposition_point(
             d_minerl_1_2 += mnrflo_2
 
             tosom3 = (
-                tcflow_som1 * pp_reg['fps1s3'] *
+                tcflow * pp_reg['fps1s3'] *
                 (1. + params['animpt'] * (1. - anerb)))
             d_som3c += tosom3
             # C/<iel> ratios of material entering som3e
@@ -1266,7 +1266,7 @@ def decomposition_point(
                 linten = min(
                     (1. - (params['omlech_3'] - month_reg['amov_2']) /
                         params['omlech_3']), 1.)
-                cleach = tcflow_som1 * pp_reg['orglch'] * linten
+                cleach = tcflow * pp_reg['orglch'] * linten
                 # N leaching: line 230
                 rceof1_1 = (state_var['som1c_2'] / state_var['som1e_2_1']) * 2
                 orgflow_1 = cleach / rceof1_1
@@ -1278,7 +1278,7 @@ def decomposition_point(
             else:
                 cleach = 0
 
-            net_tosom2 = tcflow_som1 - co2los - tosom3 - cleach
+            net_tosom2 = tcflow - co2los - tosom3 - cleach
             d_som2c_2 += net_tosom2
             # N and P flows from som1e_2 to som2e_2, line 257
             # N first
@@ -1327,11 +1327,11 @@ def decomposition_point(
                 (state_var['som2c_2'] / state_var['som2e_2_2']) <=
                 rceto1_2)))  # line 298
         if decompose_mask:
-            tcflow_som2 = (
+            tcflow = (
                 state_var['som2c_2'] * defac * params['dec5_2'] * anerb *
                 0.020833 * pheff)
-            co2los = tcflow_som2 * params['p2co2_2']
-            d_som2c_2 -= tcflow_som2
+            co2los = tcflow * params['p2co2_2']
+            d_som2c_2 -= tcflow
             # respiration, line 304 Somdec.f
             mnrflo_1 = co2los * state_var['som2e_2_1'] / state_var['som2c_2']
             d_som2e_2_1 -= mnrflo_1
@@ -1342,7 +1342,7 @@ def decomposition_point(
             d_minerl_1_2 += mnrflo_2
 
             tosom3 = (
-                tcflow_som2 * pp_reg['fps2s3'] *
+                tcflow * pp_reg['fps2s3'] *
                 (1. + params['animpt'] * (1.0 - anerb)))
             d_som3c += tosom3
             # N and P flows from soil som2e to som3e
@@ -1384,7 +1384,7 @@ def decomposition_point(
             d_minerl_1_2 += mineral_flow
 
             # rest of the flow from SOM2 goes to SOM1
-            tosom1 = tcflow_som2 - co2los - tosom3  # line 333 Somdec.f
+            tosom1 = tcflow - co2los - tosom3  # line 333 Somdec.f
             d_som1c_2 += tosom1
             # N and P flows from som2e_2 to som1e_2, line 344
             # N first
