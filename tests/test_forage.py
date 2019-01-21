@@ -639,6 +639,8 @@ def decomposition_point(
             including annual precipitation and annual N deposition
         month_reg (dict): dictionary of values that are shared between
             submodels, including snowmelt
+        pp_reg (dict): dictionary of persistent parameters, calculated upon
+            model initialization
         rnew_dict (dict): dictionary of required ratios for aboveground
             decomposition, calculated during initialization
         evap (float): reference evapotranspiration
@@ -1018,7 +1020,7 @@ def decomposition_point(
             d_minerl_1_2 += mineral_flow
 
         # decomposition of soil metabolic material: line 136 Litdec.f
-        # C/N ratio for soil metabolic material
+        # C/N ratio for belowground material to som1
         rceto1_1 = bgdrat_point(
             aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
             params['varat1_3_1'])
@@ -1091,6 +1093,504 @@ def decomposition_point(
             d_minerl_1_2 += mineral_flow
 
         # somdec.f
+        # surface SOM1 to surface SOM2
+        # rceto2_iel: required ratio for flow from surface SOM1 to SOM2
+        radds1_1 = (
+            params['rad1p_1_1'] + params['rad1p_2_1'] *
+            ((state_var['som1c_1'] / state_var['som1e_1_1']) -
+                params['pcemic1_2_1']))
+        rceto2_1 = max(
+            (state_var['som1c_1'] / state_var['som1e_1_1'] + radds1_1),
+            params['rad1p_3_1'])
+
+        radds1_2 = (
+            params['rad1p_1_2'] + params['rad1p_2_2'] *
+            ((state_var['som1c_1'] / state_var['som1e_1_2']) -
+                params['pcemic1_2_2']))
+        rceto2_2 = max(
+            (state_var['som1c_1'] / state_var['som1e_1_2'] + radds1_2),
+            params['rad1p_3_2'])
+
+        pheff = pheff_struc
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som1c_1'] / state_var['som1e_1_1']) <=
+                rceto2_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som1c_1'] / state_var['som1e_1_2']) <=
+                rceto2_2)))  # line 92
+        if decompose_mask:
+            tcflow_som1 = (
+                state_var['som1c_1'] * defac * params['dec3_1'] * 0.020833 *
+                pheff)
+            co2los = tcflow_som1 * params['p1co2a_1']
+            d_som1c_1 -= tcflow_som1
+            # respiration, line 105 Somdec.f
+            mnrflo_1 = co2los * state_var['som1e_1_1'] / state_var['som1c_1']
+            d_som1e_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som1e_1_2'] / state_var['som1c_1']
+            d_som1e_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom2 = tcflow_som1 - co2los
+            d_som2c_1 += net_tosom2
+            # N and P flows from som1e_1 to som2e_1, line 123 Somdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_1'], rceto2_1,
+                    state_var['som1e_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_1'], rceto2_1,
+                    state_var['som1e_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_1'], rceto2_1,
+                    state_var['som1e_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som1e_1_1 -= material_leaving_a
+            d_som2e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_1'], rceto2_2,
+                    state_var['som1e_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_1'], rceto2_2,
+                    state_var['som1e_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_1'], rceto2_2,
+                    state_var['som1e_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som1e_1_2 -= material_leaving_a
+            d_som2e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        # soil SOM1 to soil SOM3 and SOM2
+        # required ratios are those pertaining to decomposition to SOM2
+        rceto2_1 = bgdrat_point(
+            aminrl_1, params['varat22_1_1'], params['varat22_2_1'],
+            params['varat22_3_1'])  # line 141 Somdec.f
+        rceto2_2 = bgdrat_point(
+            aminrl_2, params['varat22_1_2'], params['varat22_2_2'],
+            params['varat22_3_2'])
+
+        pheff = pheff_metab
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som1c_2'] / state_var['som1e_2_1']) <=
+                rceto2_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som1c_2'] / state_var['som1e_2_2']) <=
+                rceto2_2)))  # line 171
+        if decompose_mask:
+            tcflow_som1 = (
+                state_var['som1c_2'] * defac * params['dec3_2'] *
+                pp_reg['eftext'] * anerb * 0.020833 * pheff)
+            co2los = tcflow_som1 * params['p1co2_2']
+            d_som1c_2 -= tcflow_som1
+            # respiration, line 179 Somdec.f
+            mnrflo_1 = co2los * state_var['som1e_2_1'] / state_var['som1c_2']
+            d_som1e_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som1e_2_2'] / state_var['som1c_2']
+            d_som1e_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom3 = (
+                tcflow_som1 * pp_reg['fps1s3'] *
+                (1. + params['animpt'] * (1. - anerb)))
+            d_som3c += tosom3
+            # C/<iel> ratios of material entering som3e
+            rceto3_1 = bgdrat_point(
+                aminrl_1, params['varat3_1_1'], params['varat3_2_1'],
+                params['varat3_3_1'])
+            rceto3_2 = bgdrat_point(
+                aminrl_2, params['varat3_1_2'], params['varat3_2_2'],
+                params['varat3_3_2'])
+            # N and P flows from soil som1e to som3e, line 198
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som1c_2'], rceto3_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som1c_2'], rceto3_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som1c_2'], rceto3_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som1e_2_1 -= material_leaving_a
+            d_som3e_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som1c_2'], rceto3_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som1c_2'], rceto3_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som1c_2'], rceto3_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som1e_2_2 -= material_leaving_a
+            d_som3e_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+            # organic leaching: line 204 Somdec.f
+            if month_reg['amov_2'] > 0:
+                linten = min(
+                    (1. - (params['omlech_3'] - month_reg['amov_2']) /
+                        params['omlech_3']), 1.)
+                cleach = tcflow_som1 * pp_reg['orglch'] * linten
+                # N leaching
+                rceof1_1 = (som1c_2 / som1e_2_1) * 2  # line 230
+                orgflow_1 = cleach / rceof1_1
+                d_som1e_2_1 -= orgflow_1
+                # P leaching
+                rceof1_2 = (som1c_2 / som1e_2_2) * 35  # line 232
+                orgflow_2 = cleach / rceof1_2
+                d_som1e_2_2 -= orgflow_2
+            else:
+                cleach = 0
+
+            net_tosom2 = tcflow_som1 - co2los - tosom3 - cleach
+            d_som2c_2 += net_tosom2
+            # N and P flows from som1e_2 to som2e_2, line 257
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_2'], rceto2_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_2'], rceto2_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_2'], rceto2_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som1e_2_1 -= material_leaving_a
+            d_som2e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                d_gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_2'], rceto2_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_2'], rceto2_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_2'], rceto2_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som1e_2_2 -= material_leaving_a
+            d_som2e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # Soil SOM2 decomposing to soil SOM1 and SOM3, line 269 Somdec.f
+        pheff = pheff_metab  # TODO rename pheff_metab?
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som2c_2'] / state_var['som2e_2_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som2c_2'] / state_var['som2e_2_2']) <=
+                rceto1_2)))  # line 298
+        if decompose_mask:
+            tcflow_som2 = (
+                state_var['som2c_2'] * defac * params['dec5_2'] * anerb *
+                0.020833 * pheff)
+            co2los = tcflow_som2 * params['p2co2_2']
+            d_som2c_2 -= tcflow_som2
+            # respiration, line 304 Somdec.f
+            mnrflo_1 = co2los * state_var['som2e_2_1'] / state_var['som2c_2']
+            d_som2e_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som2e_2_2'] / state_var['som2c_2']
+            d_som2e_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom3 = (
+                tcflow_som2 * params['fps2s3'] *
+                (1. + params['animpt'] * (1.0 - anerb)))
+            d_som3c += tosom3
+            # C/<iel> ratios of material entering som3 - these are repeated
+            rcetob_1 = bgdrat_point(
+                aminrl_1, varat3_1_1, varat3_2_1, varat3_3_3)
+            rcetob_2 = bgdrat_point(
+                aminrl_2, varat3_1_2, varat3_2_2, varat3_3_2)
+            # N and P flows from soil som2e to som3e
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som2c_2'], rcetob_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som2c_2'], rcetob_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som2c_2'], rcetob_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som2e_2_1 -= material_leaving_a
+            d_som3e_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som2c_2'], rcetob_1,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som2c_2'], rcetob_1,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som2c_2'], rcetob_1,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som2e_2_2 -= material_leaving_a
+            d_som3e_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+            # rest of the flow from SOM2 goes to SOM1
+            tosom1 = tcflow_som2 - co2los - tosom3  # line 333 Somdec.f
+            d_som1c_2 += tosom1
+            # N and P flows from som2e_2 to som1e_2, line 344
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_2'], rceto1_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_2'], rceto1_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_2'], rceto1_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som2e_2_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                d_gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_2'], rceto1_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_2'], rceto1_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_2'], rceto1_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som2e_2_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # Surface SOM2 decomposes to surface SOM1
+        # ratios of material decomposing to SOM1
+        pheff = pheff_struc  # TODO rename?
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som2c_1'] / state_var['som2e_1_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som2c_1'] / state_var['som2e_1_2']) <=
+                rceto1_2)))  # line 171
+        if decompose_mask:
+            tcflow = (
+                state_var['som2c_1'] * defac * params['dec5_1'] * 0.020833 *
+                pheff)
+            co2los = tcflow * params['p2co2_1']  # line 385
+            d_som2c_1 -= tcflow
+            # respiration, line 388
+            mnrflo_1 = co2los * state_var['som2e_1_1'] / state_var['som2c_1']
+            d_som2e_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som2e_1_2'] / state_var['som2c_1']
+            d_som2e_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom1 = tcflow - co2los  # line 393
+            d_som1c_1 += tosom1
+            # N and P flows from surface som2e to surface som1e, line 404
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_1'], rceto1_1,
+                    state_var['som2e_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_1'], rceto1_1,
+                    state_var['som2e_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_1'], rceto1_1,
+                    state_var['som2e_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som2e_1_1 -= material_leaving_a
+            d_som1e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_1'], rceto1_2,
+                    state_var['som2e_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_1'], rceto1_2,
+                    state_var['som2e_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_1'], rceto1_2,
+                    state_var['som2e_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som2e_1_2 -= material_leaving_a
+            d_som1e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # SOM3 decomposes to soil SOM1
+        pheff_som3 = numpy.clip(
+            (0.5 + (1.1 / numpy.pi) *
+                numpy.arctan(numpy.pi * 0.7 * (pH - 3.))), 0, 1)
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som3c'] / state_var['som3e_1']) <= rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som3c'] / state_var['som3e_2']) <= rceto1_2)))
+        if decompose_mask:
+            tcflow = (
+                state_var['som3c'] * defac * params['dec4'] * anerb *
+                0.020833 * pheff_som3)
+            co2los = tcflow * params['p3co2'] * anerb  # line 442
+            d_som3c -= tcflow
+            # respiration, line 446
+            mnrflo_1 = co2los * state_var['som3e_1'] / state_var['som3c']
+            d_som3e_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som3e_2'] / state_var['som3c']
+            d_som3e_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom1 = tcflow - co2los
+            d_som1c_2 += tosom1
+            # N and P flows from som3e to som1e_2, line 461 Somdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som3c'], rceto1_1,
+                    state_var['som3e_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som3c'], rceto1_1,
+                    state_var['som3e_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som3c'], rceto1_1,
+                    state_var['som3e_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som3e_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som3c'], rceto1_2,
+                    state_var['som3e_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som3c'], rceto1_2,
+                    state_var['som3e_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som3c'], rceto1_2,
+                    state_var['som3e_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som3e_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # Surface SOM2 flows to soil SOM2 via mixing
+        tcflow = state_var['som2c_1'] * params['cmix'] * defac * 0.020833
+        d_som2c_1 -= tcflow
+        d_som2c_2 += tcflow
+        # N and P flows from som2e_1 to som2e_2, line 495 Somdec.f
+        # N first
+        mix_ratio_1 = state_var['som2c_1'] / state_var['som2e_1_1']  # line 495
+        material_leaving_a = esched_point(
+            'material_leaving_a')(
+                tcflow, state_var['som2c_1'], mix_ratio_1,
+                state_var['som2e_1_1'], state_var['minerl_1_1'])
+        material_arriving_b = esched_point(
+            'material_arriving_b')(
+                tcflow, state_var['som2c_1'], mix_ratio_1,
+                state_var['som2e_1_1'], state_var['minerl_1_1'])
+        mineral_flow = esched_point(
+            'mineral_flow')(
+                tcflow, state_var['som2c_1'], mix_ratio_1,
+                state_var['som2e_1_1'], state_var['minerl_1_1'])
+        # schedule flows
+        d_som2e_1_1 -= material_leaving_a
+        d_som2e_2_1 += material_arriving_b
+        d_minerl_1_1 += mineral_flow
+        # P second
+        mix_ratio_2 = state_var['som2c_1'] / state_var['som2e_1_2']  # line 495
+        material_leaving_a = esched_point(
+            'material_leaving_a')(
+                tcflow, state_var['som2c_1'], mix_ratio_2,
+                state_var['som2e_1_2'], state_var['minerl_1_2'])
+        material_arriving_b = esched_point(
+            'material_arriving_b')(
+                tcflow, state_var['som2c_1'], mix_ratio_2,
+                state_var['som2e_1_2'], state_var['minerl_1_2'])
+        mineral_flow = esched_point(
+            'mineral_flow')(
+                tcflow, state_var['som2c_1'], mix_ratio_2,
+                state_var['som2e_1_2'], state_var['minerl_1_2'])
+        # schedule flows
+        d_som2e_1_2 -= material_leaving_a
+        d_som2e_2_2 += material_arriving_b
+        d_minerl_1_2 += mineral_flow
 
         # pschem.f
 
