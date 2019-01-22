@@ -673,16 +673,11 @@ def decomposition_point(
     # during decomposition
     aminrl_1 = state_var['minerl_1_1']
 
-    # calculate aminerl_2, intermediate surface mineral P that is tracked
+    # calculate aminrl_2, intermediate surface mineral P that is tracked
     # during decomposition
-    if state_var['minerl_1_2'] == 0:
-        aminrl_2 = 0
-    else:
-        c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
-        b = params['sorpmx'] - state_var['minerl_1_2'] + c
-        labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
-        fsfunc = labile / state_var['minerl_1_2']
-        aminrl_2 = state_var['minerl_1_2'] * fsfunc
+    fsol = fsfunc_point(
+        state_var['minerl_1_2'], params['pslsrb'], params['sorpmx'])
+    aminrl_2 = state_var['minerl_1_2'] * fsol
 
     # monthly N fixation
     state_var['minerl_1_1'] = monthly_N_fixation_point(
@@ -725,6 +720,14 @@ def decomposition_point(
         d_som3c = 0  # change in passive organic C
         d_som3e_1 = 0  # change in passive organic N
         d_som3e_2 = 0  # change in passive organic P
+
+        d_parent_2 = 0  # change in parent P
+        d_secndy_2 = 0  # change in secondary P
+        d_occlud = 0  # change in occluded P
+
+        d_minerl_P_dict = {}
+        for lyr in xrange(1, params['nlayer'] + 1):
+            d_minerl_P_dict['d_minerl_{}_2'.format(lyr)] = 0
 
         # litdec.f
         # decomposition of strucc_1, surface structural material
@@ -1588,7 +1591,41 @@ def decomposition_point(
         d_som2e_2_2 += material_arriving_b
         d_minerl_1_2 += mineral_flow
 
-        # pschem.f
+        # P mineral flows: Pschem.f
+        # flow from parent to mineral: line 141
+        fparnt = params['pparmn_2'] * state_var['parent_2'] * defac * 0.020833
+        d_minerl_1_2 += fparnt
+        d_parent_2 -= fparnt
+
+        # flow from secondary to mineral: line 158
+        fsecnd = params['psecmn_2'] * state_var['secndy_2'] * defac * 0.020833
+        d_minerl_1_2 += fsecnd
+        d_secndy_2 -= fsecnd
+
+        fsol = fsfunc_point(
+            state_var['minerl_1_2'], params['pslsrb'], params['sorpmx'])
+        # flow from mineral to secondary: line 163
+        fmnsec = (
+            params['pmnsec_2'] * state_var['minerl_1_2'] * (1 - fsol) * defac *
+            0.020833)
+        d_minerl_1_2 -= fmnsec
+        d_secndy_2 += fmnsec
+        for lyr in xrange(2, params['nlayer'] + 1):
+            fmnsec = (
+                params['pmnsec_2'] * state_var['minerl_{}_2'.format(lyr)] *
+                (1 - fsol) * defac * 0.020833)
+            d_minerl_P_dict['d_minerl_{}_2'.format(lyr)] -= fmnsec
+            d_secndy_2 += fmnsec
+
+        # flow from secondary to occluded: line 171
+        fsecoc = params['psecoc1'] * state_var['secndy_2'] * defac * 0.020833
+        d_secndy_2 -= fsecoc
+        d_occlud += fsecoc
+
+        # flow from occluded to secondary
+        focsec = params['psecoc2'] * state_var['occlud'] * defac * 0.020833
+        d_occlud -= focsec
+        d_secndy_2 += focsec
 
         # update state variables: perform flows calculated in previous lines
         state_var['minerl_1_1'] += d_minerl_1_1
@@ -1622,23 +1659,25 @@ def decomposition_point(
         state_var['metabe_2_1'] += d_metabe_2_1
         state_var['metabe_2_2'] += d_metabe_2_2
 
+        state_var['parent_2'] += d_parent_2
+        state_var['secndy_2'] += d_secndy_2
+        state_var['occlud'] += d_occlud
+        for lyr in xrange(2, params['nlayer'] + 1):
+            state_var['minerl_{}_2'.format(lyr)] += (
+                d_minerl_P_dict['d_minerl_{}_2'.format(lyr)])
+
         # update aminrl_1
         aminrl_1 = aminrl_1 + state_var['minerl_1_1'] / 2.
 
         # update aminrl_2
-        c = params['sorpmx'] * (2.0 - params['pslsrb'])/2
-        b = params['sorpmx'] - state_var['minerl_1_2'] + c
-        labile = (-b + math.sqrt(b*b + 4 * c * state_var['minerl_1_2']))/2.
-        try:
-            fsfunc = labile / state_var['minerl_1_2']
-            aminrl_2 = aminrl_2 + (state_var['minerl_1_2'] * fsfunc) / 2.
-        except ZeroDivisionError:
-            aminrl_2 = aminrl_2
+        fsol = fsfunc_point(
+            state_var['minerl_1_2'], params['pslsrb'], params['sorpmx'])
+        aminrl_2 = aminrl_2 + (state_var['minerl_1_2'] * fsol) / 2.
 
     # Calculate volatilization loss of nitrogen as a function of
-    # gross mineralization
-    # volgm = vlossg * gromin_1
-    # minerl_1_1 = minerl_1_1 - volgm
+    # gross mineralization: line 323 Simsom.f
+    volgm = params['vlossg'] * gromin_1
+    state_var['minerl_1_1'] -= volgm
     return state_var
 
 
@@ -1669,6 +1708,29 @@ def agdrat_point(anps, tca, pcemic_1_iel, pcemic_2_iel, pcemic_3_iel):
     else:
         agdrat = pcemic_1_iel + econt * cemicb
     return agdrat
+
+
+def fsfunc_point(minerl_1_2, pslsrb, sorpmx):
+        """Calculate the fraction of mineral P that is in solution.
+
+        The fraction of P in solution is influenced by two soil properties:
+        the maximum sorption potential of the soil and sorption affinity.
+
+        Parameters:
+            minerl_1_2 (float): state variable, surface mineral P
+            pslsrb (float): parameter, P sorption affinity
+            sorpmx (float): parameter, maximum P sorption of the soil
+
+        Returns:
+            fsol, fraction of P in solution
+        """
+        if minerl_1_2 == 0:
+            return 0
+        c = sorpmx * (2. - pslsrb) / 2.
+        b = sorpmx - minerl_1_2 + c
+        labile = (-b + numpy.sqrt(b * b + 4 * c * minerl_1_2)) / 2.
+        fsol = labile / minerl_1_2
+        return fsol
 
 
 class foragetests(unittest.TestCase):
@@ -6427,6 +6489,13 @@ class foragetests(unittest.TestCase):
             'dec4': 0.0045,
             'p3co2': 0.55,
             'cmix': 0.5,
+            'pparmn_2': 0.0001,
+            'psecmn_2': 0.0022,
+            'nlayer': 5,
+            'pmnsec_2': 0,
+            'psecoc1': 0,
+            'psecoc2': 0,
+            'vlossg': 1,
         }
         state_var_dict = {
             'snow': 0.,
@@ -6462,7 +6531,13 @@ class foragetests(unittest.TestCase):
             'som3c': 544.8848,
             'som3e_1': 87.4508,
             'som3e_2': 79.917,
+            'parent_2': 100.,
+            'secndy_2': 50.,
+            'occlud': 50.,
         }
+        for lyr in xrange(1, params['nlayer'] + 1):
+            state_var_dict['minerl_{}_2'.format(lyr)] = 20.29
+
         year_reg_vals = {
             'annual_precip': 230.,
             'baseNdep': 24.,
