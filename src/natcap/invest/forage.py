@@ -6256,7 +6256,7 @@ def _decomposition(
             'd_statv_temp', 'operand_temp', 'shwave', 'pevap', 'rprpet',
             'defac', 'anerb', 'gromin_1', 'pheff_struc', 'pheff_metab',
             'aminrl_1', 'aminrl_2', 'fsol', 'tcflow', 'tosom2', 'net_tosom2',
-            'tosom1', 'net_tosom1', 'tosom3', 'cleach', 'pheff_som3']:
+            'tosom1', 'net_tosom1', 'tosom3', 'cleach', 'pheff_som3', 'pflow']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
         for iel in [1, 2]:
             for val in ['rceto1', 'rceto2', 'rceto3']:
@@ -6362,10 +6362,7 @@ def _decomposition(
         prev_sv_reg, sv_reg)
 
     # initialize current month state variables
-    for state_var in ['minerl_1_1', 'minerl_1_2']:
-        shutil.copyfile(
-            prev_sv_reg['{}_path'.format(state_var)],
-            sv_reg['{}_path'.format(state_var)])
+    shutil.copyfile(prev_sv_reg['minerl_1_2_path'], sv_reg['minerl_1_2_path'])
     for compartment in ['strlig']:
         for lyr in [1, 2]:
             state_var = '{}_{}'.format(compartment, lyr)
@@ -7083,20 +7080,10 @@ def _decomposition(
             sv_reg['minerl_1_2_path'], delta_sv_dict['som2e_1_2'],
             delta_sv_dict['som2e_2_2'], delta_sv_dict['minerl_1_2'])
 
-    # accumulate flows
-    for compartment in ['struc', 'metab', 'som1', 'som2']:
-        for lyr in [1, 2]:
-            state_var = '{}c_{}'.format(compartment, lyr)
-            shutil.copyfile(
-                sv_reg['{}_path'.format(state_var)],
-                temp_val_dict['operand_temp'])
-            raster_sum(
-                delta_sv_dict[state_var], _IC_NODATA,
-                temp_val_dict['operand_temp'], _SV_NODATA,
-                sv_reg['{}_path'.format(state_var)], _SV_NODATA,
-                nodata_remove=False)
-            for iel in [1, 2]:
-                state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+        # accumulate flows
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
                 shutil.copyfile(
                     sv_reg['{}_path'.format(state_var)],
                     temp_val_dict['operand_temp'])
@@ -7105,4 +7092,26 @@ def _decomposition(
                     temp_val_dict['operand_temp'], _SV_NODATA,
                     sv_reg['{}_path'.format(state_var)], _SV_NODATA,
                     nodata_remove=False)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    shutil.copyfile(
+                        sv_reg['{}_path'.format(state_var)],
+                        temp_val_dict['operand_temp'])
+                    raster_sum(
+                        delta_sv_dict[state_var], _IC_NODATA,
+                        temp_val_dict['operand_temp'], _SV_NODATA,
+                        sv_reg['{}_path'.format(state_var)], _SV_NODATA,
+                        nodata_remove=False)
+        for iel in [1, 2]:
+            state_var = 'minerl_1_{}'.format(iel)
+            shutil.copyfile(
+                sv_reg['{}_path'.format(state_var)],
+                temp_val_dict['operand_temp'])
+            raster_sum(
+                delta_sv_dict[state_var], _IC_NODATA,
+                temp_val_dict['operand_temp'], _SV_NODATA,
+                sv_reg['{}_path'.format(state_var)], _SV_NODATA,
+                nodata_remove=False)
+        # TODO update aminrl: Simsom.f line 301
+
     return sv_reg  # TODO remove after testing

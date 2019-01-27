@@ -1679,8 +1679,8 @@ def decomposition_point(
 
     # Calculate volatilization loss of nitrogen as a function of
     # gross mineralization: line 323 Simsom.f
-    volgm = params['vlossg'] * gromin_1
-    state_var['minerl_1_1'] -= volgm
+    # volgm = params['vlossg'] * gromin_1
+    # state_var['minerl_1_1'] -= volgm
     return state_var
 
 
@@ -6434,7 +6434,6 @@ class foragetests(unittest.TestCase):
             }
             return input_dict
         from natcap.invest import forage
-        tolerance = 0.0001
 
         # known inputs
         current_month = 4
@@ -6603,6 +6602,7 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg'], input_dict['pp_reg'])
 
         for compartment in ['struc', 'metab', 'som1', 'som2']:
+            tolerance = 0.0001
             for lyr in [1, 2]:
                 state_var = '{}c_{}'.format(compartment, lyr)
                 point_value = sv_mod_point[state_var]
@@ -6617,6 +6617,35 @@ class foragetests(unittest.TestCase):
                     self.assert_all_values_in_raster_within_range(
                         model_res_path, point_value - tolerance,
                         point_value + tolerance, _SV_NODATA)
+        for compartment in ['som3']:
+            state_var = '{}c'.format(compartment)
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+            for iel in [1, 2]:
+                state_var = '{}e_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for compartment in ['minerl_1']:
+            tolerance = 0.001
+            for iel in [1, 2]:
+                state_var = '{}_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
 
         # no decomposition, mineral ratios are insufficient
         rnew_dict = {
@@ -6647,6 +6676,7 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg'], input_dict['pp_reg'])
 
         for compartment in ['struc', 'metab', 'som1', 'som2']:
+            tolerance = 0.0001
             for lyr in [1, 2]:
                 state_var = '{}c_{}'.format(compartment, lyr)
                 point_value = sv_mod_point[state_var]
@@ -6661,6 +6691,35 @@ class foragetests(unittest.TestCase):
                     self.assert_all_values_in_raster_within_range(
                         model_res_path, point_value - tolerance,
                         point_value + tolerance, _SV_NODATA)
+        for compartment in ['som3']:
+            state_var = '{}c'.format(compartment)
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+            for iel in [1, 2]:
+                state_var = '{}e_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for compartment in ['minerl_1']:
+            tolerance = 0.001
+            for iel in [1, 2]:
+                state_var = '{}_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
 
         # decomposition occurs, subsidized by mineral N and P
         rnew_dict = {
@@ -6694,6 +6753,7 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg'], input_dict['pp_reg'])
 
         for compartment in ['struc', 'metab', 'som1', 'som2']:
+            tolerance = 0.0001
             for lyr in [1, 2]:
                 state_var = '{}c_{}'.format(compartment, lyr)
                 point_value = sv_mod_point[state_var]
@@ -6708,6 +6768,35 @@ class foragetests(unittest.TestCase):
                     self.assert_all_values_in_raster_within_range(
                         model_res_path, point_value - tolerance,
                         point_value + tolerance, _SV_NODATA)
+        for compartment in ['som3']:
+            state_var = '{}c'.format(compartment)
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+            for iel in [1, 2]:
+                state_var = '{}e_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for compartment in ['minerl_1']:
+            tolerance = 0.001
+            for iel in [1, 2]:
+                state_var = '{}_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
 
     def test_esched(self):
         """Test `esched`.
