@@ -793,7 +793,7 @@ def raster_list_sum(
 
 def raster_sum(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
-        target_nodata, nodata_remove):
+        target_nodata, nodata_remove=False):
     """Add raster 1 and raster2.
 
     Add raster1 and raster2, allowing nodata values in the rasters to
@@ -847,7 +847,7 @@ def raster_sum(
 
 def raster_difference(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
-        target_nodata, nodata_remove):
+        target_nodata, nodata_remove=False):
     """Subtract raster2 from raster1.
 
     Subtract raster2 from raster1 element-wise, allowing nodata values in the
@@ -4829,14 +4829,14 @@ def _soil_water(
     raster_difference(
         temp_val_dict['asmos_interim_1'], _TARGET_NODATA,
         temp_val_dict['evlos'], _TARGET_NODATA, sv_reg['asmos_1_path'],
-        _TARGET_NODATA, nodata_remove=False)
+        _TARGET_NODATA)
 
     # remove evaporation from moisture available to plants in soil layer 1
     shutil.copyfile(temp_val_dict['avinj_1'], temp_val_dict['avinj_interim_1'])
     raster_difference(
         temp_val_dict['avinj_interim_1'], _TARGET_NODATA,
         temp_val_dict['evlos'], _TARGET_NODATA, temp_val_dict['avinj_1'],
-        _TARGET_NODATA, nodata_remove=False)
+        _TARGET_NODATA)
 
     # calculate avh2o_1, soil water available for growth, for each PFT
     for pft_i in pft_id_set:
@@ -5815,12 +5815,12 @@ def respiration(
     shutil.copyfile(delta_estatv_path, d_statv_temp_path)
     raster_difference(
         d_statv_temp_path, _IC_NODATA, operand_temp_path, _IC_NODATA,
-        delta_estatv_path, _IC_NODATA, nodata_remove=False)
+        delta_estatv_path, _IC_NODATA)
     # mineral flow is added to surface mineral iel
     shutil.copyfile(delta_minerl_1_iel_path, d_statv_temp_path)
     raster_sum(
         d_statv_temp_path, _IC_NODATA, operand_temp_path, _IC_NODATA,
-        delta_minerl_1_iel_path, _IC_NODATA, nodata_remove=False)
+        delta_minerl_1_iel_path, _IC_NODATA)
     if gromin_1_path:
         shutil.copyfile(gromin_1_path, d_statv_temp_path)
         pygeoprocessing.raster_calculator(
@@ -5892,7 +5892,7 @@ def nutrient_flow(
     shutil.copyfile(d_estatv_donating_path, d_statv_temp_path)
     raster_difference(
         d_statv_temp_path, _IC_NODATA, operand_temp_path, _IC_NODATA,
-        d_estatv_donating_path, _IC_NODATA, nodata_remove=False)
+        d_estatv_donating_path, _IC_NODATA)
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
@@ -5903,7 +5903,7 @@ def nutrient_flow(
     shutil.copyfile(d_estatv_receiving_path, d_statv_temp_path)
     raster_sum(
         d_statv_temp_path, _IC_NODATA, operand_temp_path, _IC_NODATA,
-        d_estatv_receiving_path, _IC_NODATA, nodata_remove=False)
+        d_estatv_receiving_path, _IC_NODATA)
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
@@ -5914,7 +5914,7 @@ def nutrient_flow(
     shutil.copyfile(d_minerl_path, d_statv_temp_path)
     raster_sum(
         d_statv_temp_path, _IC_NODATA, operand_temp_path, _IC_NODATA,
-        d_minerl_path, _IC_NODATA, nodata_remove=False)
+        d_minerl_path, _IC_NODATA)
     if gromin_path:
         shutil.copyfile(gromin_path, d_statv_temp_path)
         pygeoprocessing.raster_calculator(
@@ -6048,7 +6048,7 @@ def remove_leached_iel(
     raster_difference(
         d_statv_temp_path, _IC_NODATA,
         operand_temp_path, _IC_NODATA,
-        d_som1e_2_iel_path, _IC_NODATA, nodata_remove=False)
+        d_som1e_2_iel_path, _IC_NODATA)
 
     # clean up
     os.remove(operand_temp_path)
@@ -6112,6 +6112,90 @@ def calc_pflow_to_secndy(minerl_lyr_2, pmnsec_2, fsol, defac):
     return fmnsec
 
 
+def update_aminrl(
+        aminrl_1_path, minerl_1_1_path, aminrl_2_path, minerl_1_2_path,
+        fsol_path):
+    """Update aminrl_1 and aminrl_2, average mineral N and P in surface soil.
+
+    Aminrl_1, average mineral N, and aminrl_2, average mineral P, represent
+    labile N or P available for decomposition. They are kept as a running
+    average of the minerl_1_1 (for N) or minerl_1_2 (for P) state variable
+    across decomposition time steps.
+
+    Parameters:
+        aminrl_1_path (string): path to raster containing average mineral N
+        minerl_1_1_path (string): path to raster giving current mineral N
+            in soil layer 1
+        aminrl_2_path (string): path to raster containing average mineral P
+        minerl_1_2_path (string): path to raster giving current mineral N
+            in soil layer 2
+        fsol_path (string): path to raster giving fraction of mineral P in
+            solution
+
+    Modifies:
+        the raster indicated by `aminrl_1_path`
+        the raster indicated by `aminrl_2_path
+    Returns:
+        None
+    """
+    def update_aminrl_1(aminrl_1_prev, minerl_1_1):
+        """Update average mineral N."""
+        valid_mask = (
+            (~numpy.isclose(aminrl_1_prev, _SV_NODATA)) &
+            (~numpy.isclose(minerl_1_1, _SV_NODATA)))
+        aminrl_1 = numpy.empty(aminrl_1_prev.shape, dtype=numpy.float32)
+        aminrl_1[:] = _IC_NODATA
+        aminrl_1[valid_mask] = (
+            aminrl_1_prev[valid_mask] + minerl_1_1[valid_mask] / 2.)
+        return aminrl_1
+
+    def update_aminrl_2(aminrl_2_prev, minerl_1_2, fsol):
+        """Update average mineral P.
+
+        Average mineral P is calculated from the fraction of mineral P in
+        soil layer 1 that is in solution.
+
+        Parameters:
+            aminrl_2_prev (numpy.ndarray): derived, previous average surface
+                mineral P
+            minerl_1_2 (numpy.ndarray): state variable, current mineral P in
+                soil layer 1
+            fsol (numpy.ndarray): derived, fraction of labile P in solution
+
+        Returns:
+            aminrl_2, updated average mineral P
+        """
+        valid_mask = (
+            (~numpy.isclose(aminrl_2_prev, _SV_NODATA)) &
+            (~numpy.isclose(minerl_1_2, _SV_NODATA)) &
+            (fsol != _TARGET_NODATA))
+        aminrl_2 = numpy.empty(aminrl_2_prev.shape, dtype=numpy.float32)
+        aminrl_2[:] = _IC_NODATA
+        aminrl_2[valid_mask] = (
+            aminrl_2_prev[valid_mask] +
+            (minerl_1_2[valid_mask] * fsol[valid_mask]) / 2.)
+        return aminrl_2
+
+    with tempfile.NamedTemporaryFile(
+            prefix='aminrl_prev', delete=False,
+            dir=PROCESSING_DIR) as aminrl_prev_file:
+        aminrl_prev_path = aminrl_prev_file.name
+
+    shutil.copyfile(aminrl_1_path, aminrl_prev_path)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [aminrl_prev_path, minerl_1_1_path]],
+        update_aminrl_1, aminrl_1_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+    shutil.copyfile(aminrl_2_path, aminrl_prev_path)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            aminrl_prev_path, minerl_1_2_path, fsol_path]],
+        update_aminrl_2, aminrl_2_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up
+    os.remove(aminrl_prev_path)
+
+
 def _decomposition(
         aligned_inputs, current_month, month_index, site_param_table,
         year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg):
@@ -6141,10 +6225,14 @@ def _decomposition(
         sv_reg (dict): map of key, path pairs giving paths to state variables
             for the current month
         pp_reg (dict): map of key, path pairs giving persistent parameters
-            including required ratios for aboveground decomposition AND??
+            including required ratios for decomposition, the effect of soil
+            texture on decomposition rate, and the effect of soil texture on
+            the rate of organic leaching
 
     Modifies:
-        the raster indicated by `sv_reg[??]`  TODO complete
+        all rasters in sv_reg pertaining to structural, metabolic, som1, som2,
+            and som3 C, N, and P; mineral N and P; and parent, secondary, and
+            occluded mineral P
 
     Returns:
         None
@@ -6437,19 +6525,27 @@ def _decomposition(
         aligned_inputs, month_index, site_param_table, year_reg,
         prev_sv_reg, sv_reg)
 
-    # initialize current month state variables
-    shutil.copyfile(prev_sv_reg['minerl_1_2_path'], sv_reg['minerl_1_2_path'])
+    # initialize current month state variables and delta state variable dict
+    nlayer_max = get_nlayer_max(site_param_table)
+    delta_sv_dict = {
+        'minerl_1_1': os.path.join(temp_dir, 'minerl_1_1.tif'),
+        'parent_2': os.path.join(temp_dir, 'parent_2.tif'),
+        'secndy_2': os.path.join(temp_dir, 'secndy_2.tif'),
+        'occlud': os.path.join(temp_dir, 'occlud.tif'),
+    }
+    for lyr in xrange(1, nlayer_max + 1):
+        state_var = 'minerl_{}_2'.format(lyr)
+        shutil.copyfile(
+            prev_sv_reg['{}_path'.format(state_var)],
+            sv_reg['{}_path'.format(state_var)])
+        delta_sv_dict[state_var] = os.path.join(
+            temp_dir, '{}.tif'.format(state_var))
     for compartment in ['strlig']:
         for lyr in [1, 2]:
             state_var = '{}_{}'.format(compartment, lyr)
             shutil.copyfile(
                 prev_sv_reg['{}_path'.format(state_var)],
                 sv_reg['{}_path'.format(state_var)])
-
-    delta_sv_dict = {
-        'minerl_1_1': os.path.join(temp_dir, 'minerl_1_1.tif'),
-        'minerl_1_2': os.path.join(temp_dir, 'minerl_1_2.tif'),
-    }
     for compartment in ['som3']:
         state_var = '{}c'.format(compartment)
         delta_sv_dict[state_var] = os.path.join(
@@ -6480,7 +6576,7 @@ def _decomposition(
                     prev_sv_reg['{}_path'.format(state_var)],
                     sv_reg['{}_path'.format(state_var)])
 
-    for _ in xrange(1):  # TODO after testing, should be xrange(4)
+    for _ in xrange(4):
         # initialize change (delta, d) in state variables for this decomp step
         for state_var in delta_sv_dict.iterkeys():
             pygeoprocessing.new_raster_from_base(
@@ -6520,8 +6616,7 @@ def _decomposition(
             raster_difference(
                 temp_val_dict['d_statv_temp'], _IC_NODATA,
                 temp_val_dict['tcflow'], _IC_NODATA,
-                delta_sv_dict['strucc_{}'.format(lyr)], _IC_NODATA,
-                nodata_remove=False)
+                delta_sv_dict['strucc_{}'.format(lyr)], _IC_NODATA)
 
             # structural material decomposes first to SOM2
             raster_multiplication(
@@ -6554,8 +6649,7 @@ def _decomposition(
             raster_sum(
                 temp_val_dict['d_statv_temp'], _IC_NODATA,
                 temp_val_dict['net_tosom2'], _IC_NODATA,
-                delta_sv_dict['som2c_{}'.format(lyr)], _IC_NODATA,
-                nodata_remove=False)
+                delta_sv_dict['som2c_{}'.format(lyr)], _IC_NODATA)
 
             if lyr == 1:
                 rcetob = 'rnewas'
@@ -6583,8 +6677,7 @@ def _decomposition(
             # structural material decomposes next to SOM1
             raster_difference(
                 temp_val_dict['tcflow'], _IC_NODATA, temp_val_dict['tosom2'],
-                _IC_NODATA, temp_val_dict['tosom1'], _IC_NODATA,
-                nodata_remove=False)
+                _IC_NODATA, temp_val_dict['tosom1'], _IC_NODATA)
             # microbial respiration with decomposition to SOM1
             respiration(
                 temp_val_dict['tosom1'],
@@ -6614,8 +6707,7 @@ def _decomposition(
             raster_sum(
                 temp_val_dict['d_statv_temp'], _IC_NODATA,
                 temp_val_dict['net_tosom1'], _IC_NODATA,
-                delta_sv_dict['som1c_{}'.format(lyr)], _IC_NODATA,
-                nodata_remove=False)
+                delta_sv_dict['som1c_{}'.format(lyr)], _IC_NODATA)
 
             if lyr == 1:
                 rcetob = 'rnewas'
@@ -6695,8 +6787,7 @@ def _decomposition(
             raster_difference(
                 temp_val_dict['d_statv_temp'], _IC_NODATA,
                 temp_val_dict['tcflow'], _IC_NODATA,
-                delta_sv_dict['metabc_{}'.format(lyr)], _IC_NODATA,
-                nodata_remove=False)
+                delta_sv_dict['metabc_{}'.format(lyr)], _IC_NODATA)
             # microbial respiration with decomposition to SOM1
             respiration(
                 temp_val_dict['tcflow'],
@@ -6726,8 +6817,7 @@ def _decomposition(
             raster_sum(
                 temp_val_dict['d_statv_temp'], _IC_NODATA,
                 temp_val_dict['net_tosom1'], _IC_NODATA,
-                delta_sv_dict['som1c_{}'.format(lyr)], _IC_NODATA,
-                nodata_remove=False)
+                delta_sv_dict['som1c_{}'.format(lyr)], _IC_NODATA)
 
             nutrient_flow(
                 temp_val_dict['net_tosom1'],
@@ -6775,7 +6865,7 @@ def _decomposition(
         raster_difference(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som1c_1'], _IC_NODATA, nodata_remove=False)
+            delta_sv_dict['som1c_1'], _IC_NODATA)
         # microbial respiration with decomposition to SOM2
         respiration(
             temp_val_dict['tcflow'], param_val_dict['p1co2a_1'],
@@ -6797,7 +6887,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['net_tosom2'], _IC_NODATA,
-            delta_sv_dict['som2c_1'], _IC_NODATA, nodata_remove=False)
+            delta_sv_dict['som2c_1'], _IC_NODATA)
 
         # N and P flows from som1e_1 to som2e_1, line 123 Somdec.f
         nutrient_flow(
@@ -6839,8 +6929,7 @@ def _decomposition(
         raster_difference(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som1c_2'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som1c_2'], _IC_NODATA)
         # microbial respiration with decomposition to SOM3, line 179
         respiration(
             temp_val_dict['tcflow'], param_val_dict['p1co2_2'],
@@ -6862,7 +6951,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tosom3'], _IC_NODATA,
-            delta_sv_dict['som3c'], _IC_NODATA, nodata_remove=False)
+            delta_sv_dict['som3c'], _IC_NODATA)
         for iel in [1, 2]:
             # required ratio for soil SOM1 decomposing to SOM3, line 198
             pygeoprocessing.raster_calculator(
@@ -6911,8 +7000,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['net_tosom2'], _IC_NODATA,
-            delta_sv_dict['som2c_2'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som2c_2'], _IC_NODATA)
         # N and P flows from soil SOM1 to soil SOM2, line 257
         nutrient_flow(
             temp_val_dict['net_tosom2'],
@@ -6944,8 +7032,7 @@ def _decomposition(
         raster_difference(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som2c_2'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som2c_2'], _IC_NODATA)
         respiration(
             temp_val_dict['tcflow'], param_val_dict['pmco2_2'],
             sv_reg['som2c_2_path'], sv_reg['som2e_2_1_path'],
@@ -6967,7 +7054,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tosom3'], _IC_NODATA,
-            delta_sv_dict['som3c'], _IC_NODATA, nodata_remove=False)
+            delta_sv_dict['som3c'], _IC_NODATA)
         nutrient_flow(
             temp_val_dict['tosom3'], sv_reg['som2c_2_path'],
             sv_reg['som2e_2_1_path'], temp_val_dict['rceto3_1'],
@@ -6992,8 +7079,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['net_tosom1'], _IC_NODATA,
-            delta_sv_dict['som1c_2'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som1c_2'], _IC_NODATA)
         nutrient_flow(
             temp_val_dict['net_tosom1'], sv_reg['som2c_2_path'],
             sv_reg['som2e_2_1_path'], temp_val_dict['rceto1_1'],
@@ -7021,8 +7107,7 @@ def _decomposition(
         raster_difference(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som2c_1'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som2c_1'], _IC_NODATA)
         respiration(
             temp_val_dict['tcflow'], param_val_dict['p2co2_1'],
             sv_reg['som2c_1_path'], sv_reg['som2e_1_1_path'],
@@ -7043,8 +7128,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tosom1'], _IC_NODATA,
-            delta_sv_dict['som1c_1'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som1c_1'], _IC_NODATA)
         nutrient_flow(
             temp_val_dict['tosom1'], sv_reg['som2c_1_path'],
             sv_reg['som2e_1_1_path'], temp_val_dict['rceto1_1'],
@@ -7078,8 +7162,7 @@ def _decomposition(
         raster_difference(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som3c'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som3c'], _IC_NODATA)
         respiration(
             temp_val_dict['tcflow'], param_val_dict['p3co2'],
             sv_reg['som3c_path'], sv_reg['som3e_1_path'],
@@ -7099,8 +7182,7 @@ def _decomposition(
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tosom1'], _IC_NODATA,
-            delta_sv_dict['som1c_2'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som1c_2'], _IC_NODATA)
 
         nutrient_flow(
             temp_val_dict['tosom1'], sv_reg['som3c_path'],
@@ -7126,15 +7208,13 @@ def _decomposition(
         raster_difference(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som2c_1'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som2c_1'], _IC_NODATA)
         shutil.copyfile(
             delta_sv_dict['som2c_2'], temp_val_dict['d_statv_temp'])
         raster_sum(
             temp_val_dict['d_statv_temp'], _IC_NODATA,
             temp_val_dict['tcflow'], _IC_NODATA,
-            delta_sv_dict['som2c_2'], _IC_NODATA,
-            nodata_remove=False)
+            delta_sv_dict['som2c_2'], _IC_NODATA)
         # ratios for N and P entering soil som2 via mixing
         raster_division(
             sv_reg['som2c_1_path'], _SV_NODATA,
@@ -7197,11 +7277,10 @@ def _decomposition(
             delta_sv_dict['minerl_1_2'], _IC_NODATA)
 
         # P flow from mineral to secondary
-        nlayer_max = get_nlayer_max(site_param_table)
         for lyr in xrange(1, nlayer_max + 1):
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
-                    sv_reg['minerl_{}_2'.format(lyr)],
+                    sv_reg['minerl_{}_2_path'.format(lyr)],
                     param_val_dict['pmnsec_2'], temp_val_dict['fsol'],
                     temp_val_dict['defac']]],
                 calc_pflow_to_secndy, temp_val_dict['pflow'], gdal.GDT_Float32,
@@ -7270,8 +7349,7 @@ def _decomposition(
                 raster_sum(
                     delta_sv_dict[state_var], _IC_NODATA,
                     temp_val_dict['operand_temp'], _SV_NODATA,
-                    sv_reg['{}_path'.format(state_var)], _SV_NODATA,
-                    nodata_remove=False)
+                    sv_reg['{}_path'.format(state_var)], _SV_NODATA)
                 for iel in [1, 2]:
                     state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
                     shutil.copyfile(
@@ -7280,8 +7358,7 @@ def _decomposition(
                     raster_sum(
                         delta_sv_dict[state_var], _IC_NODATA,
                         temp_val_dict['operand_temp'], _SV_NODATA,
-                        sv_reg['{}_path'.format(state_var)], _SV_NODATA,
-                        nodata_remove=False)
+                        sv_reg['{}_path'.format(state_var)], _SV_NODATA)
         for iel in [1, 2]:
             state_var = 'minerl_1_{}'.format(iel)
             shutil.copyfile(
@@ -7290,8 +7367,7 @@ def _decomposition(
             raster_sum(
                 delta_sv_dict[state_var], _IC_NODATA,
                 temp_val_dict['operand_temp'], _SV_NODATA,
-                sv_reg['{}_path'.format(state_var)], _SV_NODATA,
-                nodata_remove=False)
+                sv_reg['{}_path'.format(state_var)], _SV_NODATA)
         for state_var in ['parent_2', 'secndy_2', 'occlud']:
             shutil.copyfile(
                 sv_reg['{}_path'.format(state_var)],
@@ -7299,9 +7375,27 @@ def _decomposition(
             raster_sum(
                 delta_sv_dict[state_var], _IC_NODATA,
                 temp_val_dict['operand_temp'], _SV_NODATA,
-                sv_reg['{}_path'.format(state_var)], _SV_NODATA,
-                nodata_remove=False)
+                sv_reg['{}_path'.format(state_var)], _SV_NODATA)
 
-        # TODO update aminrl: Simsom.f line 301
+        # update aminrl: Simsom.f line 301
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['minerl_1_2_path'], param_val_dict['sorpmx'],
+                param_val_dict['pslsrb']]],
+            fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32, _TARGET_NODATA)
+        update_aminrl(
+            temp_val_dict['aminrl_1'], sv_reg['minerl_1_1_path'],
+            temp_val_dict['aminrl_2'], sv_reg['minerl_1_2_path'],
+            temp_val_dict['fsol'])
 
-    return sv_reg  # TODO remove after testing
+    # volatilization loss of N: line 323 Simsom.f
+    raster_multiplication(
+        temp_val_dict['gromin_1'], _TARGET_NODATA,
+        param_val_dict['vlossg'], _IC_NODATA,
+        temp_val_dict['operand_temp'], _TARGET_NODATA)
+    shutil.copyfile(
+        sv_reg['minerl_1_1_path'], temp_val_dict['d_statv_temp'])
+    raster_difference(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['operand_temp'], _TARGET_NODATA,
+        sv_reg['minerl_1_1_path'], _SV_NODATA)
