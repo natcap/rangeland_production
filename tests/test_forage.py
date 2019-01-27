@@ -1596,39 +1596,37 @@ def decomposition_point(
 
         # P mineral flows: Pschem.f
         # flow from parent to mineral: line 141
-        # fparnt = params['pparmn_2'] * state_var['parent_2'] * defac * 0.020833
-        # d_minerl_1_2 += fparnt
-        # d_parent_2 -= fparnt
+        fparnt = params['pparmn_2'] * state_var['parent_2'] * defac * 0.020833
+        d_minerl_1_2 += fparnt
+        d_parent_2 -= fparnt
 
-        # # flow from secondary to mineral: line 158
-        # fsecnd = params['psecmn_2'] * state_var['secndy_2'] * defac * 0.020833
-        # d_minerl_1_2 += fsecnd
-        # d_secndy_2 -= fsecnd
+        # flow from secondary to mineral: line 158
+        fsecnd = params['psecmn_2'] * state_var['secndy_2'] * defac * 0.020833
+        d_minerl_1_2 += fsecnd
+        d_secndy_2 -= fsecnd
 
-        # fsol = fsfunc_point(
-        #     state_var['minerl_1_2'], params['pslsrb'], params['sorpmx'])
-        # # flow from mineral to secondary: line 163
-        # fmnsec = (
-        #     params['pmnsec_2'] * state_var['minerl_1_2'] * (1 - fsol) * defac *
-        #     0.020833)
-        # d_minerl_1_2 -= fmnsec
-        # d_secndy_2 += fmnsec
-        # for lyr in xrange(2, params['nlayer'] + 1):
-        #     fmnsec = (
-        #         params['pmnsec_2'] * state_var['minerl_{}_2'.format(lyr)] *
-        #         (1 - fsol) * defac * 0.020833)
-        #     d_minerl_P_dict['d_minerl_{}_2'.format(lyr)] -= fmnsec
-        #     d_secndy_2 += fmnsec
+        # flow from mineral to secondary: line 163
+        fmnsec = (
+            params['pmnsec_2'] * state_var['minerl_1_2'] * (1 - fsol) * defac *
+            0.020833)
+        d_minerl_1_2 -= fmnsec
+        d_secndy_2 += fmnsec
+        for lyr in xrange(2, params['nlayer'] + 1):
+            fmnsec = (
+                params['pmnsec_2'] * state_var['minerl_{}_2'.format(lyr)] *
+                (1 - fsol) * defac * 0.020833)
+            d_minerl_P_dict['d_minerl_{}_2'.format(lyr)] -= fmnsec
+            d_secndy_2 += fmnsec
 
-        # # flow from secondary to occluded: line 171
-        # fsecoc = params['psecoc1'] * state_var['secndy_2'] * defac * 0.020833
-        # d_secndy_2 -= fsecoc
-        # d_occlud += fsecoc
+        # flow from secondary to occluded: line 171
+        fsecoc = params['psecoc1'] * state_var['secndy_2'] * defac * 0.020833
+        d_secndy_2 -= fsecoc
+        d_occlud += fsecoc
 
-        # # flow from occluded to secondary
-        # focsec = params['psecoc2'] * state_var['occlud'] * defac * 0.020833
-        # d_occlud -= focsec
-        # d_secndy_2 += focsec
+        # flow from occluded to secondary
+        focsec = params['psecoc2'] * state_var['occlud'] * defac * 0.020833
+        d_occlud -= focsec
+        d_secndy_2 += focsec
 
         # update state variables: perform flows calculated in previous lines
         state_var['minerl_1_1'] += d_minerl_1_1

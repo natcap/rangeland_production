@@ -1006,6 +1006,25 @@ def get_nlaypg_max(veg_trait_table):
             veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys())
 
 
+def get_nlayer_max(site_param_table):
+        """Get the maximum of nlayer across site parameter sets.
+
+        The site-level parameter nlayer gives the total number of soil layers
+        for the site. It is only necessary to track movement of mineral N and P
+        among the maximum number of soil layers specified in the site parameter
+        table.
+
+        Parameters:
+            site_param_table (dict): map of site spatial indices to
+                dictionaries containing site parameters
+
+        Returns:
+            nlayer_max, maximum nlayer across site parameter sets
+        """
+        return max(
+            site_param_table[i]['nlayer'] for i in site_param_table.iterkeys())
+
+
 def _calc_ompc(
         som1c_2_path, som2c_2_path, som3c_path, bulkd_path, edepth_path,
         ompc_path):
@@ -6036,6 +6055,63 @@ def remove_leached_iel(
     os.remove(d_statv_temp_path)
 
 
+def calc_pflow(pstatv, rate_param, defac):
+    """Calculate the flow of mineral P flowing from one pool to another.
+
+    Mineral P contains multiple pools, including parent material, labile P,
+    sorbed and strongly sorbed P, and occluded P. Calculate the flow from one
+    mineral P pool to another.
+
+    Parameters:
+        pstatv (numpy.ndarray): state variable, P in donating mineral pool
+        rate_param (numpy.ndarray): parameter, base rate of flow
+        defac (numpy.ndarray): derived, decomposition rate
+
+    Returns:
+        pflow, mineral P flowing from donating to receiving pool
+    """
+    valid_mask = (
+        (~numpy.isclose(pstatv, _SV_NODATA)) &
+        (rate_param != _IC_NODATA) &
+        (defac != _TARGET_NODATA))
+    pflow = numpy.empty(pstatv.shape, dtype=numpy.float32)
+    pflow[:] = _IC_NODATA
+    pflow[valid_mask] = (
+        pstatv[valid_mask] * rate_param[valid_mask] * defac[valid_mask] *
+        0.020833)
+    return pflow
+
+
+def calc_pflow_to_secndy(minerl_lyr_2, pmnsec_2, fsol, defac):
+    """Calculate the flow of mineral to secondary P in one soil layer.
+
+    P flows from the mineral pool of each soil layer into secondary P (strongly
+    sorbed P) according to the amount in the mineral pool and the amount of P
+    in solution.
+
+    Parameters:
+        minerl_lyr_2 (numpy.ndarray): state variable, mineral P in soil layer
+            lyr
+        pmnsec_2 (numpy.ndarray): parameter, base flow rate
+        fsol (numpy.ndarray): derived, fraction of P in solution
+        defac (numpy.ndarray): derived, decomposition factor
+
+    Returns:
+        fmnsec, flow of mineral P to secondary in one soil layer
+    """
+    valid_mask = (
+        (~numpy.isclose(minerl_lyr_2, _SV_NODATA)) &
+        (pmnsec_2 != _IC_NODATA) &
+        (fsol != _TARGET_NODATA) &
+        (defac != _TARGET_NODATA))
+    fmnsec = numpy.empty(minerl_lyr_2.shape, dtype=numpy.float32)
+    fmnsec[:] = _IC_NODATA
+    fmnsec[valid_mask] = (
+        pmnsec_2[valid_mask] * minerl_lyr_2[valid_mask] *
+        (1. - fsol[valid_mask]) * defac[valid_mask] * 0.020833)
+    return fmnsec
+
+
 def _decomposition(
         aligned_inputs, current_month, month_index, site_param_table,
         year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg):
@@ -7080,6 +7156,110 @@ def _decomposition(
             sv_reg['minerl_1_2_path'], delta_sv_dict['som2e_1_2'],
             delta_sv_dict['som2e_2_2'], delta_sv_dict['minerl_1_2'])
 
+        # P flow from parent to mineral: Pschem.f
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['parent_2_path'], param_val_dict['pparmn_2'],
+                temp_val_dict['defac']]],
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['parent_2'], temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['parent_2'], _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['minerl_1_2'], temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['minerl_1_2'], _IC_NODATA)
+
+        # P flow from secondary to mineral
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['secndy_2_path'], param_val_dict['psecmn_2'],
+                temp_val_dict['defac']]],
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['secndy_2'], temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['secndy_2'], _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['minerl_1_2'], temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['minerl_1_2'], _IC_NODATA)
+
+        # P flow from mineral to secondary
+        nlayer_max = get_nlayer_max(site_param_table)
+        for lyr in xrange(1, nlayer_max + 1):
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    sv_reg['minerl_{}_2'.format(lyr)],
+                    param_val_dict['pmnsec_2'], temp_val_dict['fsol'],
+                    temp_val_dict['defac']]],
+                calc_pflow_to_secndy, temp_val_dict['pflow'], gdal.GDT_Float32,
+                _IC_NODATA)
+            shutil.copyfile(
+                delta_sv_dict['minerl_{}_2'.format(lyr)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _IC_NODATA,
+                temp_val_dict['pflow'], _IC_NODATA,
+                delta_sv_dict['minerl_{}_2'.format(lyr)], _IC_NODATA)
+            shutil.copyfile(
+                delta_sv_dict['secndy_2'], temp_val_dict['d_statv_temp'])
+            raster_sum(
+                temp_val_dict['d_statv_temp'], _IC_NODATA,
+                temp_val_dict['pflow'], _IC_NODATA,
+                delta_sv_dict['secndy_2'], _IC_NODATA)
+
+        # P flow from secondary to occluded
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['secndy_2_path'], param_val_dict['psecoc1'],
+                temp_val_dict['defac']]],
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['secndy_2'], temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['secndy_2'], _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['occlud'], temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['occlud'], _IC_NODATA)
+
+        # P flow from occluded to secondary
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['occlud_path'], param_val_dict['psecoc2'],
+                temp_val_dict['defac']]],
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['occlud'], temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['occlud'], _IC_NODATA)
+        shutil.copyfile(
+            delta_sv_dict['secndy_2'], temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _IC_NODATA,
+            temp_val_dict['pflow'], _IC_NODATA,
+            delta_sv_dict['secndy_2'], _IC_NODATA)
+
         # accumulate flows
         for compartment in ['struc', 'metab', 'som1', 'som2']:
             for lyr in [1, 2]:
@@ -7112,6 +7292,16 @@ def _decomposition(
                 temp_val_dict['operand_temp'], _SV_NODATA,
                 sv_reg['{}_path'.format(state_var)], _SV_NODATA,
                 nodata_remove=False)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            shutil.copyfile(
+                sv_reg['{}_path'.format(state_var)],
+                temp_val_dict['operand_temp'])
+            raster_sum(
+                delta_sv_dict[state_var], _IC_NODATA,
+                temp_val_dict['operand_temp'], _SV_NODATA,
+                sv_reg['{}_path'.format(state_var)], _SV_NODATA,
+                nodata_remove=False)
+
         # TODO update aminrl: Simsom.f line 301
 
     return sv_reg  # TODO remove after testing
