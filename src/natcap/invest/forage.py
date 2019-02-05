@@ -60,11 +60,13 @@ _SITE_STATE_VARIABLE_FILES = {
     'metabe_2_2_path': 'metabe_2_2.tif',
     'plabil_path': 'plabil.tif',
     'secndy_2_path': 'secndy_2.tif',
+    'parent_2_path': 'parent_2.tif',
+    'occlud_path': 'occlud.tif',
     'som1e_1_2_path': 'som1e_1_2.tif',
     'som1e_2_2_path': 'som1e_2_2.tif',
     'som2e_1_2_path': 'som2e_1_2.tif',
     'som2e_2_2_path': 'som2e_2_2.tif',
-    'som3e_1_path': 'som3e_1.tif',
+    'som3e_2_path': 'som3e_2.tif',
     'struce_1_2_path': 'struce_1_2.tif',
     'struce_2_2_path': 'struce_2_2.tif',
     'asmos_1_path': 'asmos_1.tif',
@@ -499,6 +501,8 @@ def execute(args):
 
     # temporary directory for intermediate files
     PROCESSING_DIR = os.path.join(args['workspace_dir'], "temporary_files")
+    if not os.path.exists(PROCESSING_DIR):
+        os.makedirs(PROCESSING_DIR)
 
     # set up a dictionary that uses the same keys as
     # 'base_align_raster_path_id_map' to point to the clipped/resampled
@@ -727,8 +731,8 @@ def raster_division(
     Returns:
         None
     """
-    def raster_multiply_op(raster1, raster2):
-        """Multiply two rasters."""
+    def raster_divide_op(raster1, raster2):
+        """Divide raster1 by raster2."""
         valid_mask = (
             (~numpy.isclose(raster1, raster1_nodata)) &
             (~numpy.isclose(raster2, raster2_nodata)))
@@ -738,7 +742,7 @@ def raster_division(
         return result
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [raster1, raster2]],
-        raster_multiply_op, target_path, gdal.GDT_Float32,
+        raster_divide_op, target_path, gdal.GDT_Float32,
         target_path_nodata)
 
 
@@ -985,44 +989,6 @@ def weighted_state_variable_sum(
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
-
-
-def get_nlaypg_max(veg_trait_table):
-        """Get the maximum of nlaypg across plant functional types.
-
-        The plant functional type (PFT)-level parameter nlaypg gives the number
-        of soil layers accessible by roots of the PFT. Any soil layers beyond
-        the maximum value of nlaypg across PFTs are not necessary to track.
-
-        Parameters:
-            veg_trait_table (dict): map of pft id to dictionaries containing
-                plant functional type parameters, including nlaypg, number of
-                soil layers access by plant roots
-
-        Returns:
-            nlaypg_max, maximum nlaypg across PFTs
-        """
-        return max(
-            veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys())
-
-
-def get_nlayer_max(site_param_table):
-        """Get the maximum of nlayer across site parameter sets.
-
-        The site-level parameter nlayer gives the total number of soil layers
-        for the site. It is only necessary to track movement of mineral N and P
-        among the maximum number of soil layers specified in the site parameter
-        table.
-
-        Parameters:
-            site_param_table (dict): map of site spatial indices to
-                dictionaries containing site parameters
-
-        Returns:
-            nlayer_max, maximum nlayer across site parameter sets
-        """
-        return max(
-            site_param_table[i]['nlayer'] for i in site_param_table.iterkeys())
 
 
 def _calc_ompc(
@@ -4537,7 +4503,8 @@ def _soil_water(
         aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
 
     # get max number of soil layers to track
-    nlaypg_max = get_nlaypg_max(veg_trait_table)
+    nlaypg_max = int(max(
+        veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys()))
 
     # temporary intermediate rasters for soil water submodel
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -4844,7 +4811,7 @@ def _soil_water(
             aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         soil_layers_accessible = [
             temp_val_dict['avinj_{}'.format(lyr)] for lyr in
-            xrange(1, veg_trait_table[pft_i]['nlaypg'] + 1)]
+            xrange(1, int(veg_trait_table[pft_i]['nlaypg']) + 1)]
         raster_list_sum(
             soil_layers_accessible, _TARGET_NODATA,
             temp_val_dict['sum_avinj_{}'.format(pft_i)],
@@ -6438,8 +6405,8 @@ def _decomposition(
             'rad1p_1_1', 'rad1p_2_1', 'rad1p_3_1', 'rad1p_1_2', 'rad1p_2_2',
             'rad1p_3_2', 'dec3_1', 'p1co2a_1', 'varat22_1_1', 'varat22_2_1',
             'varat22_3_1', 'varat22_1_2', 'varat22_2_2', 'varat22_3_2',
-            'dec3_2', 'p1co2_2', 'animpt', 'varat3_1_1', 'varat3_2_1',
-            'varat3_3_1', 'varat3_1_2', 'varat3_2_2', 'varat3_3_2', 'omlech_3',
+            'dec3_2', 'animpt', 'varat3_1_1', 'varat3_2_1', 'varat3_3_1',
+            'varat3_1_2', 'varat3_2_2', 'varat3_3_2', 'omlech_3',
             'dec5_2', 'p2co2_2', 'dec5_1', 'p2co2_1', 'dec4', 'p3co2', 'cmix',
             'pparmn_2', 'psecmn_2', 'nlayer', 'pmnsec_2', 'psecoc1', 'psecoc2',
             'vlossg']:
@@ -6526,7 +6493,8 @@ def _decomposition(
         prev_sv_reg, sv_reg)
 
     # initialize current month state variables and delta state variable dict
-    nlayer_max = get_nlayer_max(site_param_table)
+    nlayer_max = int(max(
+        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
     delta_sv_dict = {
         'minerl_1_1': os.path.join(temp_dir, 'minerl_1_1.tif'),
         'parent_2': os.path.join(temp_dir, 'parent_2.tif'),
@@ -6575,6 +6543,10 @@ def _decomposition(
                 shutil.copyfile(
                     prev_sv_reg['{}_path'.format(state_var)],
                     sv_reg['{}_path'.format(state_var)])
+    for state_var in ['parent_2', 'secndy_2', 'occlud']:
+        shutil.copyfile(
+            prev_sv_reg['{}_path'.format(state_var)],
+            sv_reg['{}_path'.format(state_var)])
 
     for _ in xrange(4):
         # initialize change (delta, d) in state variables for this decomp step
@@ -6590,8 +6562,8 @@ def _decomposition(
                     [(path, 1) for path in [
                         temp_val_dict['aminrl_1'], temp_val_dict['aminrl_2'],
                         sv_reg['strucc_1_path'], sv_reg['struce_1_1_path'],
-                        sv_reg['struce_1_2_path'], pp_reg['rnewas_1_1'],
-                        pp_reg['rnewas_2_1'], param_val_dict['strmax_1'],
+                        sv_reg['struce_1_2_path'], pp_reg['rnewas_1_1_path'],
+                        pp_reg['rnewas_2_1_path'], param_val_dict['strmax_1'],
                         temp_val_dict['defac'], param_val_dict['dec1_1'],
                         param_val_dict['pligst_1'], sv_reg['strlig_1_path'],
                         temp_val_dict['pheff_struc']]],
@@ -6602,8 +6574,8 @@ def _decomposition(
                     [(path, 1) for path in [
                         temp_val_dict['aminrl_1'], temp_val_dict['aminrl_2'],
                         sv_reg['strucc_2_path'], sv_reg['struce_2_1_path'],
-                        sv_reg['struce_2_2_path'], pp_reg['rnewbs_1_1'],
-                        pp_reg['rnewbs_2_1'], param_val_dict['strmax_2'],
+                        sv_reg['struce_2_2_path'], pp_reg['rnewbs_1_1_path'],
+                        pp_reg['rnewbs_2_1_path'], param_val_dict['strmax_2'],
                         temp_val_dict['defac'], param_val_dict['dec1_2'],
                         param_val_dict['pligst_2'], sv_reg['strlig_2_path'],
                         temp_val_dict['pheff_struc'], temp_val_dict['anerb']]],
@@ -6660,7 +6632,8 @@ def _decomposition(
                 temp_val_dict['net_tosom2'],
                 sv_reg['strucc_{}_path'.format(lyr)],
                 sv_reg['struce_{}_1_path'.format(lyr)],
-                pp_reg['{}_1_2'.format(rcetob)], sv_reg['minerl_1_1_path'],
+                pp_reg['{}_1_2_path'.format(rcetob)],
+                sv_reg['minerl_1_1_path'],
                 delta_sv_dict['struce_{}_1'.format(lyr)],
                 delta_sv_dict['som2e_{}_1'.format(lyr)],
                 delta_sv_dict['minerl_1_1'],
@@ -6669,7 +6642,8 @@ def _decomposition(
                 temp_val_dict['net_tosom2'],
                 sv_reg['strucc_{}_path'.format(lyr)],
                 sv_reg['struce_{}_2_path'.format(lyr)],
-                pp_reg['{}_1_2'.format(rcetob)], sv_reg['minerl_1_2_path'],
+                pp_reg['{}_1_2_path'.format(rcetob)],
+                sv_reg['minerl_1_2_path'],
                 delta_sv_dict['struce_{}_2'.format(lyr)],
                 delta_sv_dict['som2e_{}_2'.format(lyr)],
                 delta_sv_dict['minerl_1_2'])
@@ -6718,7 +6692,7 @@ def _decomposition(
                 temp_val_dict['net_tosom1'],
                 sv_reg['strucc_{}_path'.format(lyr)],
                 sv_reg['struce_{}_1_path'.format(lyr)],
-                pp_reg['{}_1_1'.format(rcetob)],
+                pp_reg['{}_1_1_path'.format(rcetob)],
                 sv_reg['minerl_1_1_path'],
                 delta_sv_dict['struce_{}_1'.format(lyr)],
                 delta_sv_dict['som1e_{}_1'.format(lyr)],
@@ -6728,7 +6702,7 @@ def _decomposition(
                 temp_val_dict['net_tosom1'],
                 sv_reg['strucc_{}_path'.format(lyr)],
                 sv_reg['struce_{}_2_path'.format(lyr)],
-                pp_reg['{}_2_1'.format(rcetob)],
+                pp_reg['{}_2_1_path'.format(rcetob)],
                 sv_reg['minerl_1_2_path'],
                 delta_sv_dict['struce_{}_2'.format(lyr)],
                 delta_sv_dict['som1e_{}_2'.format(lyr)],
@@ -6932,12 +6906,12 @@ def _decomposition(
             delta_sv_dict['som1c_2'], _IC_NODATA)
         # microbial respiration with decomposition to SOM3, line 179
         respiration(
-            temp_val_dict['tcflow'], param_val_dict['p1co2_2'],
+            temp_val_dict['tcflow'], pp_reg['p1co2_2_path'],
             sv_reg['som1c_2_path'], sv_reg['som1e_2_1_path'],
             delta_sv_dict['som1e_2_1'], delta_sv_dict['minerl_1_1'],
             gromin_1_path=temp_val_dict['gromin_1'])
         respiration(
-            temp_val_dict['tcflow'], param_val_dict['p1co2_2'],
+            temp_val_dict['tcflow'], pp_reg['p1co2_2_path'],
             sv_reg['som1c_2_path'], sv_reg['som1e_2_2_path'],
             delta_sv_dict['som1e_2_2'], delta_sv_dict['minerl_1_2'])
 
@@ -6991,7 +6965,7 @@ def _decomposition(
         # rest of flow from soil SOM1 goes to SOM2
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
-                temp_val_dict['tcflow'], param_val_dict['p1co2_2'],
+                temp_val_dict['tcflow'], pp_reg['p1co2_2_path'],
                 temp_val_dict['tosom3'], temp_val_dict['cleach']]],
             calc_net_cflow_tosom2, temp_val_dict['net_tosom2'],
             gdal.GDT_Float32, _IC_NODATA)

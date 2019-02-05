@@ -1755,7 +1755,7 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 22,
+            'n_months': 1,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'Manlai_soum_WGS84.shp'),
             'bulk_density_path': os.path.join(
@@ -1858,7 +1858,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -6391,21 +6391,21 @@ class foragetests(unittest.TestCase):
                     state_var_dict[state_var],
                     nrows=nrows, ncols=ncols)
             pp_reg = {
-                'rnewas_1_1': os.path.join(
+                'rnewas_1_1_path': os.path.join(
                     self.workspace_dir, 'rnewas_1_1.tif'),
-                'rnewas_1_2': os.path.join(
+                'rnewas_1__path': os.path.join(
                     self.workspace_dir, 'rnewas_1_2.tif'),
-                'rnewas_2_1': os.path.join(
+                'rnewas_2_1_path': os.path.join(
                     self.workspace_dir, 'rnewas_2_1.tif'),
-                'rnewas_2_2': os.path.join(
+                'rnewas_2_2_path': os.path.join(
                     self.workspace_dir, 'rnewas_2_2.tif'),
-                'rnewbs_1_1': os.path.join(
+                'rnewbs_1_1_path': os.path.join(
                     self.workspace_dir, 'rnewbs_1_1.tif'),
-                'rnewbs_1_2': os.path.join(
+                'rnewbs_1_2_path': os.path.join(
                     self.workspace_dir, 'rnewbs_1_2.tif'),
-                'rnewbs_2_1': os.path.join(
+                'rnewbs_2_1_path': os.path.join(
                     self.workspace_dir, 'rnewbs_2_1.tif'),
-                'rnewbs_2_2': os.path.join(
+                'rnewbs_2_2_path': os.path.join(
                     self.workspace_dir, 'rnewbs_2_2.tif'),
             }
             for key in rnew_dict.iterkeys():
@@ -6507,7 +6507,6 @@ class foragetests(unittest.TestCase):
             'varat22_2_2': 100,
             'varat22_3_2': 2,
             'dec3_2': 7.3,
-            'p1co2_2': 0.55,
             'animpt': 5,
             'varat3_1_1': 8,
             'varat3_2_1': 6,
@@ -6585,6 +6584,7 @@ class foragetests(unittest.TestCase):
             'orglch': 0.01,
             'fps1s3': 0.58,
             'fps2s3': 0.58,
+            'p1co2_2': 0.55,
         }
         rnew_dict = {
             'rnewas_1_1': 210.8,
