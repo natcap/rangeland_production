@@ -4803,31 +4803,6 @@ class foragetests(unittest.TestCase):
             result_dict['modified_moisture_inputs'] + tolerance,
             _TARGET_NODATA)
 
-    def test_get_nlaypg_max(self):
-        """Test `_get_nlaypg_max`.
-
-        Use the function `get_nlaypg_max` to retrieve the maximum value of
-        nlaypg across plant functional types.
-
-        Raises:
-            AssertionError if `get_nlaypg_max` does not match results
-            calculated by hand
-
-        Returns:
-            None
-        """
-        from natcap.invest import forage
-
-        veg_trait_table = {
-            1: {'nlaypg': 4},
-            2: {'nlaypg': 6},
-            3: {'nlaypg': 2},
-        }
-
-        known_nlaypg_max = 6
-        nlaypg_max = forage.get_nlaypg_max(veg_trait_table)
-        self.assertEqual(nlaypg_max, known_nlaypg_max)
-
     def test_distribute_water_to_soil_layer(self):
         """Test `distribute_water_to_soil_layer`.
 
