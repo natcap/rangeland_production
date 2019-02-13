@@ -1,13 +1,17 @@
+# coding=UTF-8
 """Carbon Storage and Sequestration."""
 from __future__ import absolute_import
+import codecs
 import collections
 import logging
 import os
 import time
 
 from osgeo import gdal
+from osgeo import ogr
 import numpy
-import natcap.invest.pygeoprocessing_0_3_3
+import pygeoprocessing
+import taskgraph
 
 from . import validation
 from . import utils
@@ -49,7 +53,7 @@ _TMP_BASE_FILES = {
 # -1.0 since carbon stocks are 0 or greater
 _CARBON_NODATA = -1.0
 # use min float32 which is unlikely value to see in a NPV raster
-_VALUE_NODATA = numpy.finfo(numpy.float32).min
+_VALUE_NODATA = float(numpy.finfo(numpy.float32).min)
 
 
 def execute(args):
@@ -102,6 +106,9 @@ def execute(args):
         args['rate_change'] (float): Annual rate of change in price of carbon
             as a percentage.  Used if `args['do_valuation']` is  present and
             True.
+        args['n_workers'] (int): (optional) The number of worker processes to
+            use for processing this model.  If omitted, computation will take
+            place in the current process.
     Returns:
         None.
     """
@@ -109,7 +116,7 @@ def execute(args):
     intermediate_output_dir = os.path.join(
         args['workspace_dir'], 'intermediate_outputs')
     output_dir = args['workspace_dir']
-    natcap.invest.pygeoprocessing_0_3_3.create_directories([intermediate_output_dir, output_dir])
+    utils.make_directories([intermediate_output_dir, output_dir])
 
     LOGGER.info('Building file registry')
     file_registry = utils.build_file_registry(
@@ -117,80 +124,106 @@ def execute(args):
          (_INTERMEDIATE_BASE_FILES, intermediate_output_dir),
          (_TMP_BASE_FILES, output_dir)], file_suffix)
 
-    carbon_pool_table = natcap.invest.pygeoprocessing_0_3_3.get_lookup_from_table(
+    carbon_pool_table = utils.build_lookup_from_csv(
         args['carbon_pools_path'], 'lucode')
 
-    cell_sizes = []
+    work_token_dir = os.path.join(intermediate_output_dir, '_tmp_work_tokens')
+    try:
+        n_workers = int(args['n_workers'])
+    except (KeyError, ValueError, TypeError):
+        # KeyError when n_workers is not present in args
+        # ValueError when n_workers is an empty string.
+        # TypeError when n_workers is None.
+        n_workers = 0  # Threaded queue management, but same process.
+    graph = taskgraph.TaskGraph(work_token_dir, n_workers)
+
+    cell_size_set = set()
+    raster_size_set = set()
     valid_lulc_keys = []
     valid_scenarios = []
+    tifs_to_summarize = set()  # passed to _generate_report()
+
     for scenario_type in ['cur', 'fut', 'redd']:
         lulc_key = "lulc_%s_path" % (scenario_type)
-        if lulc_key in args and len(args[lulc_key]) > 0:
-            cell_sizes.append(
-                natcap.invest.pygeoprocessing_0_3_3.geoprocessing.get_cell_size_from_uri(
-                    args[lulc_key]))
+        if lulc_key in args and args[lulc_key]:
+            raster_info = pygeoprocessing.get_raster_info(args[lulc_key])
+            cell_size_set.add(raster_info['pixel_size'])
+            raster_size_set.add(raster_info['raster_size'])
             valid_lulc_keys.append(lulc_key)
             valid_scenarios.append(scenario_type)
-    pixel_size_out = min(cell_sizes)
+    if len(cell_size_set) > 1:
+        raise ValueError(
+            "the pixel sizes of %s are not equivalent. Here are the "
+            "different sets that were found in processing: %s" % (
+                valid_lulc_keys, cell_size_set))
+    if len(raster_size_set) > 1:
+        raise ValueError(
+            "the raster dimensions of %s are not equivalent. Here are the "
+            "different sizes that were found in processing: %s" % (
+                valid_lulc_keys, raster_size_set))
 
-    # align the input datasets
-    natcap.invest.pygeoprocessing_0_3_3.align_dataset_list(
-        [args[_] for _ in valid_lulc_keys],
-        [file_registry['aligned_' + _] for _ in valid_lulc_keys],
-        ['nearest'] * len(valid_lulc_keys),
-        pixel_size_out, 'intersection', 0, assert_datasets_projected=True)
-
+    # calculate total carbon storage
     LOGGER.info('Map all carbon pools to carbon storage rasters.')
-    aligned_lulc_key = None
-    pool_storage_path_lookup = collections.defaultdict(list)
-    summary_stats = []  # use to aggregate storage, value, and more
-    for pool_type in ['c_above', 'c_below', 'c_soil', 'c_dead']:
-        carbon_pool_by_type = dict([
-            (lucode, float(carbon_pool_table[lucode][pool_type]))
-            for lucode in carbon_pool_table])
-        for scenario_type in valid_scenarios:
-            aligned_lulc_key = 'aligned_lulc_%s_path' % scenario_type
+    carbon_map_task_lookup = {}
+    sum_rasters_task_lookup = {}
+    for scenario_type in valid_scenarios:
+        carbon_map_task_lookup[scenario_type] = []
+        storage_path_list = []
+        for pool_type in ['c_above', 'c_below', 'c_soil', 'c_dead']:
+            carbon_pool_by_type = dict([
+                (lucode, float(carbon_pool_table[lucode][pool_type]))
+                for lucode in carbon_pool_table])
+
+            lulc_key = 'lulc_%s_path' % scenario_type
             storage_key = '%s_%s' % (pool_type, scenario_type)
             LOGGER.info(
                 "Mapping carbon from '%s' to '%s' scenario.",
-                aligned_lulc_key, storage_key)
-            _generate_carbon_map(
-                file_registry[aligned_lulc_key], carbon_pool_by_type,
-                file_registry[storage_key])
-            # store the pool storage path so they can be easily added later
-            pool_storage_path_lookup[scenario_type].append(
-                file_registry[storage_key])
+                lulc_key, storage_key)
 
-    # Sum the individual carbon storage pool paths per scenario
-    for scenario_type, storage_path_list in (
-            pool_storage_path_lookup.iteritems()):
+            carbon_map_task = graph.add_task(
+                _generate_carbon_map,
+                args=(args[lulc_key], carbon_pool_by_type,
+                      file_registry[storage_key]),
+                target_path_list=[file_registry[storage_key]],
+                task_name='carbon_map_%s' % storage_key)
+            storage_path_list.append(file_registry[storage_key])
+            carbon_map_task_lookup[scenario_type].append(carbon_map_task)
+
         output_key = 'tot_c_' + scenario_type
         LOGGER.info(
             "Calculate carbon storage for '%s'", output_key)
-        _sum_rasters(storage_path_list, file_registry[output_key])
 
-        # Tuple below is (sort_priority, description, value, unit, path)
-        summary_stats.append((
-            0, "Total %s" % scenario_type,
-            _accumulate_totals(file_registry[output_key]), 'Mg of C',
-            file_registry[output_key]))
+        sum_rasters_task = graph.add_task(
+            _sum_rasters,
+            args=(storage_path_list, file_registry[output_key]),
+            target_path_list=[file_registry[output_key]],
+            dependent_task_list=carbon_map_task_lookup[scenario_type],
+            task_name='sum_rasters_for_total_c_%s' % output_key)
+        sum_rasters_task_lookup[scenario_type] = sum_rasters_task
+        tifs_to_summarize.add(file_registry[output_key])
 
     # calculate sequestration
-    for fut_type in ['fut', 'redd']:
-        if fut_type not in valid_scenarios:
+    diff_rasters_task_lookup = {}
+    for scenario_type in ['fut', 'redd']:
+        if scenario_type not in valid_scenarios:
             continue
-        output_key = 'delta_cur_' + fut_type
+        output_key = 'delta_cur_' + scenario_type
         LOGGER.info("Calculate sequestration scenario '%s'", output_key)
         storage_path_list = [
-            file_registry['tot_c_cur'], file_registry['tot_c_' + fut_type]]
-        _diff_rasters(storage_path_list, file_registry[output_key])
+            file_registry['tot_c_cur'], file_registry['tot_c_' + scenario_type]]
 
-        # Tuple below is (sort_priority, description, value, unit, path)
-        summary_stats.append((
-            1, "Change in C for %s" % fut_type,
-            _accumulate_totals(file_registry[output_key]), 'Mg of C',
-            file_registry[output_key]))
+        diff_rasters_task = graph.add_task(
+            _diff_rasters,
+            args=(storage_path_list, file_registry[output_key]),
+            target_path_list=[file_registry[output_key]],
+            dependent_task_list=[sum_rasters_task_lookup['cur'],
+                sum_rasters_task_lookup[scenario_type]],
+            task_name='diff_rasters_for_%s' % output_key)
+        diff_rasters_task_lookup[scenario_type] = diff_rasters_task
+        tifs_to_summarize.add(file_registry[output_key])
 
+    # calculate net present value
+    calculate_npv_tasks = []
     if 'do_valuation' in args and args['do_valuation']:
         LOGGER.info('Constructing valuation formula.')
         valuation_constant = _calculate_valuation_constant(
@@ -203,17 +236,28 @@ def execute(args):
                 continue
             output_key = 'npv_%s' % scenario_type
             LOGGER.info("Calculating NPV for scenario '%s'", output_key)
-            _calculate_npv(
-                file_registry['delta_cur_%s' % scenario_type],
-                valuation_constant, file_registry[output_key])
 
-            # Tuple below is (sort_priority, description, value, unit, path)
-            summary_stats.append((
-                2, "Net present value from cur to %s" % scenario_type,
-                _accumulate_totals(file_registry[output_key]),
-                "currency units", file_registry[output_key]))
+            calculate_npv_task = graph.add_task(
+                _calculate_npv,
+                args=(file_registry['delta_cur_%s' % scenario_type],
+                      valuation_constant, file_registry[output_key]),
+                target_path_list=[file_registry[output_key]],
+                dependent_task_list=[diff_rasters_task_lookup[scenario_type]],
+                task_name='calculate_%s' % output_key)
+            calculate_npv_tasks.append(calculate_npv_task)
+            tifs_to_summarize.add(file_registry[output_key])
 
-    _generate_report(summary_stats, args, file_registry['html_report'])
+    # Report aggregate results
+    tasks_to_report = (sum_rasters_task_lookup.values()
+                       + diff_rasters_task_lookup.values()
+                       + calculate_npv_tasks)
+    generate_report_task = graph.add_task(
+        _generate_report,
+        args=(tifs_to_summarize, args, file_registry),
+        target_path_list=[file_registry['html_report']],
+        dependent_task_list=tasks_to_report,
+        task_name='generate_report')
+    graph.join()
 
     for tmp_filename_key in _TMP_BASE_FILES:
         try:
@@ -228,9 +272,9 @@ def execute(args):
 
 def _accumulate_totals(raster_path):
     """Sum all non-nodata pixels in `raster_path` and return result."""
-    nodata = natcap.invest.pygeoprocessing_0_3_3.get_nodata_from_uri(raster_path)
+    nodata = pygeoprocessing.get_raster_info(raster_path)['nodata'][0]
     raster_sum = 0.0
-    for _, block in natcap.invest.pygeoprocessing_0_3_3.iterblocks(raster_path):
+    for _, block in pygeoprocessing.iterblocks((raster_path, 1)):
         raster_sum += numpy.sum(block[block != nodata])
     return raster_sum
 
@@ -249,18 +293,18 @@ def _generate_carbon_map(
     Returns:
         None.
     """
-    nodata = natcap.invest.pygeoprocessing_0_3_3.get_nodata_from_uri(lulc_path)
-    pixel_size_out = natcap.invest.pygeoprocessing_0_3_3.get_cell_size_from_uri(lulc_path)
+    lulc_info = pygeoprocessing.get_raster_info(lulc_path)
+    nodata = lulc_info['nodata'][0]
+    pixel_area = abs(numpy.prod(lulc_info['pixel_size']))
     carbon_stock_by_type = dict([
-        (lulcid, stock * pixel_size_out ** 2 / 10**4)
+        (lulcid, stock * pixel_area / 10**4)
         for lulcid, stock in carbon_pool_by_type.iteritems()])
 
     carbon_stock_by_type[nodata] = _CARBON_NODATA
 
-    natcap.invest.pygeoprocessing_0_3_3.reclassify_dataset_uri(
-        lulc_path, carbon_stock_by_type, out_carbon_stock_path,
-        gdal.GDT_Float32, _CARBON_NODATA, exception_flag='values_required',
-        assert_dataset_projected=True)
+    pygeoprocessing.reclassify_raster(
+        (lulc_path, 1), carbon_stock_by_type, out_carbon_stock_path,
+        gdal.GDT_Float32, _CARBON_NODATA, values_required=True)
 
 
 def _sum_rasters(storage_path_list, output_sum_path):
@@ -276,12 +320,9 @@ def _sum_rasters(storage_path_list, output_sum_path):
             _[valid_mask] for _ in storage_arrays], axis=0)
         return result
 
-    pixel_size_out = natcap.invest.pygeoprocessing_0_3_3.get_cell_size_from_uri(
-        storage_path_list[0])
-    natcap.invest.pygeoprocessing_0_3_3.vectorize_datasets(
-        storage_path_list, _sum_op, output_sum_path,
-        gdal.GDT_Float32, _CARBON_NODATA, pixel_size_out, "intersection",
-        vectorize_op=False, datasets_are_pre_aligned=True)
+    pygeoprocessing.raster_calculator(
+        [(x, 1) for x in storage_path_list], _sum_op, output_sum_path,
+        gdal.GDT_Float32, _CARBON_NODATA)
 
 
 def _diff_rasters(storage_path_list, output_diff_path):
@@ -297,12 +338,9 @@ def _diff_rasters(storage_path_list, output_diff_path):
             future_array[valid_mask] - base_array[valid_mask])
         return result
 
-    pixel_size_out = natcap.invest.pygeoprocessing_0_3_3.get_cell_size_from_uri(
-        storage_path_list[0])
-    natcap.invest.pygeoprocessing_0_3_3.vectorize_datasets(
-        storage_path_list, _diff_op, output_diff_path,
-        gdal.GDT_Float32, _CARBON_NODATA, pixel_size_out, "intersection",
-        vectorize_op=False, datasets_are_pre_aligned=True)
+    pygeoprocessing.raster_calculator(
+        [(x, 1) for x in storage_path_list], _diff_op, output_diff_path,
+        gdal.GDT_Float32, _CARBON_NODATA)
 
 
 def _calculate_valuation_constant(
@@ -327,8 +365,9 @@ def _calculate_valuation_constant(
                (1 + float(rate_change) / 100.0)))
     valuation_constant = (
         float(price_per_metric_ton_of_c) /
-        (float(lulc_fut_year) - float(lulc_cur_year)) *
-        (1.0 - ratio ** (n_years + 1)) / (1.0 - ratio))
+        (float(lulc_fut_year) - float(lulc_cur_year)))
+    if ratio != 1.0:
+        valuation_constant *= (1.0 - ratio ** (n_years + 1)) / (1.0 - ratio)
     return valuation_constant
 
 
@@ -352,39 +391,37 @@ def _calculate_npv(delta_carbon_path, valuation_constant, npv_out_path):
         result[valid_mask] = carbon_array[valid_mask] * valuation_constant
         return result
 
-    pixel_size_out = natcap.invest.pygeoprocessing_0_3_3.get_cell_size_from_uri(delta_carbon_path)
-    natcap.invest.pygeoprocessing_0_3_3.geoprocessing.vectorize_datasets(
-        [delta_carbon_path], _npv_value_op, npv_out_path, gdal.GDT_Float32,
-        _VALUE_NODATA, pixel_size_out, "intersection",
-        vectorize_op=False, datasets_are_pre_aligned=True)
+    pygeoprocessing.raster_calculator(
+        [(delta_carbon_path, 1)], _npv_value_op, npv_out_path,
+        gdal.GDT_Float32, _VALUE_NODATA)
 
 
-def _generate_report(summary_stats, model_args, html_report_path):
+def _generate_report(raster_file_set, model_args, file_registry):
     """Generate a human readable HTML report of summary stats of model run.
 
     Paramters:
-        summary_stats (list of tuple): a list of tuples of the form
-            (display_sort_priority, description, value, unit, file_path)
+        raster_file_set (set): paths to rasters that need summary stats.
         model_args (dict): InVEST argument dictionary.
-        html_report_path (string): path to output report file.
+        file_registry (dict): file path dictionary for InVEST workspace.
     Returns:
         None.
     """
-    with open(html_report_path, 'w') as report_doc:
+    html_report_path = file_registry['html_report']
+    with codecs.open(html_report_path, 'w', encoding='utf-8') as report_doc:
         # Boilerplate header that defines style and intro header.
         header = (
-            '<!DOCTYPE html><html><head><title>Carbon Results</title><style t'
-            'ype="text/css">body { background-color: #EFECCA; color: #002F2F '
-            '} h1 { text-align: center } h1, h2, h3, h4, strong, th { color: '
-            '#046380; } h2 { border-bottom: 1px solid #A7A37E; } table { bord'
-            'er: 5px solid #A7A37E; margin-bottom: 50px; background-color: #E'
-            '6E2AF; } td, th { margin-left: 0px; margin-right: 0px; padding-l'
-            'eft: 8px; padding-right: 8px; padding-bottom: 2px; padding-top: '
-            '2px; text-align:left; } td { border-top: 5px solid #EFECCA; } .n'
-            'umber {text-align: right; font-family: monospace;} img { margin:'
-            ' 20px; }</style></head><body><h1>InVEST Carbon Model Results</h1'
-            '><p>This document summarizes the results from running the InVEST'
-            ' carbon model with the following data.</p>')
+            '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Carbon R'
+            'esults</title><style type="text/css">body { background-color: #E'
+            'FECCA; color: #002F2F} h1 { text-align: center } h1, h2, h3, h4,'
+            'strong, th { color: #046380; } h2 { border-bottom: 1px solid #A7'
+            'A37E; } table { border: 5px solid #A7A37E; margin-bottom: 50px; '
+            'background-color: #E6E2AF; } td, th { margin-left: 0px; margin-r'
+            'ight: 0px; padding-left: 8px; padding-right: 8px; padding-bottom'
+            ': 2px; padding-top: 2px; text-align:left; } td { border-top: 5px'
+            'solid #EFECCA; } .number {text-align: right; font-family: monosp'
+            'ace;} img { margin: 20px; }</style></head><body><h1>InVEST Carbo'
+            'n Model Results</h1><p>This document summarizes the results from'
+            'running the InVEST carbon model with the following data.</p>')
 
         report_doc.write(header)
         report_doc.write('<p>Report generated at %s</p>' % (
@@ -393,7 +430,7 @@ def _generate_report(summary_stats, model_args, html_report_path):
         # Report input arguments
         report_doc.write('<table><tr><th>arg id</th><th>arg value</th></tr>')
         for key, value in model_args.iteritems():
-            report_doc.write('<tr><td>%s</td><td>%s</td></tr>' % (key, value))
+            report_doc.write(u'<tr><td>%s</td><td>%s</td></tr>' % (key, value))
         report_doc.write('</table>')
 
         # Report aggregate results
@@ -401,12 +438,25 @@ def _generate_report(summary_stats, model_args, html_report_path):
         report_doc.write(
             '<table><tr><th>Description</th><th>Value</th><th>Units</th><th>R'
             'aw File</th></tr>')
-        for _, result_description, units, value, raw_file_path in sorted(
-                summary_stats):
-            report_doc.write(
-                '<tr><td>%s</td><td class="number">%.2f</td><td>%s</td>'
-                '<td>%s</td></tr>' % (
-                    result_description, units, value, raw_file_path))
+
+        # value lists are [sort priority, description, statistic, units]
+        report = [
+            (file_registry['tot_c_cur'], 'Total cur', 'Mg of C'),
+            (file_registry['tot_c_fut'], 'Total fut', 'Mg of C'),
+            (file_registry['tot_c_redd'], 'Total redd', 'Mg of C'),
+            (file_registry['delta_cur_fut'], 'Change in C for fut', 'Mg of C'),
+            (file_registry['delta_cur_redd'], 'Change in C for redd', 'Mg of C'),
+            (file_registry['npv_fut'], 'Net present value from cur to fut', 'currency units'),
+            (file_registry['npv_redd'], 'Net present value from cur to redd', 'currency units'),
+        ]
+
+        for raster_uri, description, units in report:
+            if raster_uri in raster_file_set:
+                summary_stat = _accumulate_totals(raster_uri)
+                report_doc.write(
+                    '<tr><td>%s</td><td class="number">%.2f</td><td>%s</td>'
+                    '<td>%s</td></tr>' % (
+                        description, summary_stat, units, raster_uri))
         report_doc.write('</body></html>')
 
 
@@ -436,7 +486,6 @@ def validate(args, limit_to=None):
         'workspace_dir',
         'lulc_cur_path',
         'carbon_pools_path',
-        'calc_sequestration',
         'do_valuation']
 
     if 'calc_sequestration' in args and args['calc_sequestration']:
@@ -460,7 +509,7 @@ def validate(args, limit_to=None):
     if len(missing_key_list) > 0:
         # if there are missing keys, we have raise KeyError to stop hard
         raise KeyError(
-            "The following keys were expected in `args` but were missing " +
+            "The following keys were expected in `args` but were missing: " +
             ', '.join(missing_key_list))
 
     if len(no_value_list) > 0:
@@ -476,19 +525,20 @@ def validate(args, limit_to=None):
     # check that existing/optional files are the correct types
     with utils.capture_gdal_logging():
         for key, key_type in file_type_list:
-            if (limit_to is None or limit_to == key) and key in args:
+            if ((limit_to is None or limit_to == key) and
+                    key in args and key in required_keys):
                 if not os.path.exists(args[key]):
                     validation_error_list.append(
                         ([key], 'not found on disk'))
                     continue
                 if key_type == 'raster':
-                    raster = gdal.OpenEx(args[key])
+                    raster = gdal.Open(args[key])
                     if raster is None:
                         validation_error_list.append(
                             ([key], 'not a raster'))
                     del raster
                 elif key_type == 'vector':
-                    vector = gdal.OpenEx(args[key])
+                    vector = ogr.Open(args[key])
                     if vector is None:
                         validation_error_list.append(
                             ([key], 'not a vector'))

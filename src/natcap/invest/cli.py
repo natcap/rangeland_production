@@ -91,14 +91,6 @@ _MODEL_UIS = {
         pyname='natcap.invest.ndr.ndr',
         gui='ndr.Nutrient',
         aliases=()),
-    'overlap_analysis': _UIMETA(
-        pyname='natcap.invest.overlap_analysis.overlap_analysis',
-        gui='overlap_analysis.OverlapAnalysis',
-        aliases=('oa',)),
-    'overlap_analysis_mz': _UIMETA(
-        pyname='natcap.invest.overlap_analysis.overlap_analysis_mz',
-        gui='overlap_analysis.OverlapAnalysisMZ',
-        aliases=('oa_mz',)),
     'pollination': _UIMETA(
         pyname='natcap.invest.pollination',
         gui='pollination.Pollination',
@@ -108,13 +100,9 @@ _MODEL_UIS = {
         gui='recreation.Recreation',
         aliases=()),
     'routedem': _UIMETA(
-        pyname='natcap.invest.routing.routedem',
-        gui='routing.RouteDEM',
+        pyname='natcap.invest.routedem',
+        gui='routedem.RouteDEM',
         aliases=()),
-    'scenario_generator': _UIMETA(
-        pyname='natcap.invest.scenario_generator.scenario_generator',
-        gui='scenario_gen.ScenarioGenerator',
-        aliases=('sg',)),
     'scenario_generator_proximity': _UIMETA(
         pyname='natcap.invest.scenario_gen_proximity',
         gui='scenario_gen.ScenarioGenProximity',
@@ -132,17 +120,13 @@ _MODEL_UIS = {
         gui='seasonal_water_yield.SeasonalWaterYield',
         aliases=('swy',)),
     'wind_energy': _UIMETA(
-        pyname='natcap.invest.wind_energy.wind_energy',
+        pyname='natcap.invest.wind_energy',
         gui='wind_energy.WindEnergy',
         aliases=()),
     'wave_energy': _UIMETA(
-        pyname='natcap.invest.wave_energy.wave_energy',
+        pyname='natcap.invest.wave_energy',
         gui='wave_energy.WaveEnergy',
         aliases=()),
-    'habitat_suitability': _UIMETA(
-        pyname='natcap.invest.habitat_suitability',
-        gui=None,
-        aliases=('hs',)),
 }
 
 # Build up an index mapping aliase to modelname.
@@ -399,10 +383,12 @@ def main():
         sip.setapi('QString', 2)
 
         from natcap.invest.ui import inputs
-    except ImportError:
+    except ImportError as error:
         # Can't import UI, exit with nonzero exit code
-        parser.error('UI not installed:\n'
-                     '    pip install natcap.invest[ui]')
+        LOGGER.exception('Unable to import the UI')
+        parser.error(('Unable to import the UI (failed with "%s")\n'
+                      'Is the UI installed?\n'
+                      '    pip install natcap.invest[ui]') % error)
 
     if args.model == 'launcher':
         from natcap.invest.ui import launcher
@@ -443,7 +429,7 @@ def main():
                 model_warnings = []
                 try:
                     model_warnings = getattr(
-                        target_mod, 'validate')(paramset.args)
+                        model_module, 'validate')(paramset.args)
                 except AttributeError:
                     LOGGER.warn(
                         '%s does not have a defined validation function.',
