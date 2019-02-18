@@ -18,7 +18,7 @@ REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 PROCESSING_DIR = None
 
 _TARGET_NODATA = -1.0
-_IC_NODATA = numpy.finfo('float32').min
+_IC_NODATA = float(numpy.finfo('float32').min)
 _SV_NODATA = -1.0
 
 NROWS = 3
@@ -1757,7 +1757,7 @@ class foragetests(unittest.TestCase):
             'starting_year': 2016,
             'n_months': 1,
             'aoi_path': os.path.join(
-                SAMPLE_DATA, 'Manlai_soum_WGS84.shp'),
+                SAMPLE_DATA, 'aoi_small.shp'),
             'bulk_density_path': os.path.join(
                 SAMPLE_DATA, 'soil', 'bulkd.tif'),
             'ph_path': os.path.join(
@@ -1785,8 +1785,7 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_mgmt_layer_path': os.path.join(
-                SAMPLE_DATA,
-                'sheep_units_density_2016_monitoring_area_WGS84.shp'),
+                SAMPLE_DATA, 'sheep_units_density_2016_monitoring_area.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
         }
@@ -1808,7 +1807,7 @@ class foragetests(unittest.TestCase):
             None
         """
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                raster_to_test):
+                (raster_to_test, 1)):
             if len(raster_block[raster_block != nodata_value]) == 0:
                 continue
             min_val = numpy.amin(
@@ -1901,7 +1900,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                shwave_path):
+                (shwave_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -1950,7 +1949,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                ompc_path):
+                (ompc_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -1998,7 +1997,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                afiel_path):
+                (afiel_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -2046,7 +2045,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                awilt_path):
+                (awilt_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -3031,7 +3030,7 @@ class foragetests(unittest.TestCase):
 
         # assert that minimum value in target_path is num_rasters - 1
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                target_path):
+                (target_path, 1)):
             if len(raster_block[raster_block != target_nodata]) == 0:
                 continue
             min_val = numpy.amin(
@@ -7459,13 +7458,13 @@ class foragetests(unittest.TestCase):
         # check unique values inside raster
         raster_values = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                target_path):
+                (target_path, 1)):
             raster_values.update(numpy.unique(raster_block))
         self.assertEqual(
             raster_values, set([fill_value, float(new_nodata_value)]),
             msg="Raster contains extraneous values")
 
-        new_nodata_value = numpy.finfo('float32').min
+        new_nodata_value = float(numpy.finfo('float32').min)
         forage.reclassify_nodata(target_path, new_nodata_value)
         result_nodata_value = pygeoprocessing.get_raster_info(
             target_path)['nodata'][0]
@@ -7474,7 +7473,7 @@ class foragetests(unittest.TestCase):
             msg="New nodata value does not match specified nodata value")
         raster_values = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                target_path):
+                (target_path, 1)):
             raster_values.update(numpy.unique(raster_block))
         self.assertEqual(
             raster_values, set([fill_value, float(new_nodata_value)]),
@@ -7490,7 +7489,7 @@ class foragetests(unittest.TestCase):
             msg="New nodata value does not match specified nodata value")
         raster_values = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                target_path):
+                (target_path, 1)):
             raster_values.update(numpy.unique(raster_block))
         self.assertEqual(
             raster_values, set([fill_value, float(new_nodata_value)]),

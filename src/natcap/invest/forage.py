@@ -183,7 +183,7 @@ _SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt']
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
 _TARGET_NODATA = -1.0
-_IC_NODATA = numpy.finfo('float32').min
+_IC_NODATA = float(numpy.finfo('float32').min)
 # SV_NODATA is for state variables
 _SV_NODATA = -1.0
 
@@ -424,7 +424,7 @@ def execute(args):
     # get unique values in site param raster
     site_index_set = set()
     for offset_map, raster_block in pygeoprocessing.iterblocks(
-            args['site_param_spatial_index_path']):
+            (args['site_param_spatial_index_path'], 1)):
         site_index_set.update(numpy.unique(raster_block))
     site_nodata = pygeoprocessing.get_raster_info(
         args['site_param_spatial_index_path'])['nodata'][0]
@@ -509,6 +509,7 @@ def execute(args):
     # rasters to be used in raster calculations for the model.
     aligned_raster_dir = os.path.join(
         args['workspace_dir'], 'aligned_inputs')
+    os.makedirs(aligned_raster_dir)
     aligned_inputs = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
         for key, path in base_align_raster_path_id_map.iteritems()])
@@ -568,6 +569,7 @@ def execute(args):
 
         # align and resample initialization rasters with inputs
         sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
+        os.makedirs(sv_dir)
         aligned_initial_path_map = dict(
             [(key, os.path.join(sv_dir, os.path.basename(path)))
                 for key, path in resample_initial_path_map.iteritems()])
@@ -581,15 +583,16 @@ def execute(args):
             aligned_input_path_list)
         pygeoprocessing.align_and_resize_raster_stack(
             initial_path_list, aligned_initial_path_list,
-            ['nearest'] * len(initial_path_list),
-            target_pixel_size, 'intersection', raster_align_index=0)
+            ['near'] * len(initial_path_list),
+            target_pixel_size, 'intersection',
+            base_vector_path_list=[args['aoi_path']])
         sv_reg = aligned_initial_path_map
     else:
         LOGGER.info("initial conditions not supplied")
         LOGGER.info("aligning base raster inputs")
         pygeoprocessing.align_and_resize_raster_stack(
             source_input_path_list, aligned_input_path_list,
-            ['nearest'] * len(aligned_inputs),
+            ['near'] * len(aligned_inputs),
             target_pixel_size, 'intersection',
             base_vector_path_list=[args['aoi_path']])
         # TODO add spin-up or initialization with Burke's equations
@@ -1937,7 +1940,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
     base_raster_info = pygeoprocessing.get_raster_info(template_raster)
     geotransform = base_raster_info['geotransform']
     for offset_map, raster_block in pygeoprocessing.iterblocks(
-            template_raster):
+            (template_raster, 1)):
         n_y_block = raster_block.shape[0]
         n_x_block = raster_block.shape[1]
 
