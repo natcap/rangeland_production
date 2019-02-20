@@ -18,7 +18,8 @@ REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 PROCESSING_DIR = None
 
 _TARGET_NODATA = -1.0
-_IC_NODATA = numpy.finfo('float32').min
+_IC_NODATA = float(numpy.finfo('float32').min)
+_SV_NODATA = -1.0
 
 NROWS = 3
 NCOLS = 3
@@ -105,8 +106,11 @@ def insert_nodata_values_into_raster(target_raster, nodata_value):
     """Insert nodata at arbitrary locations in `target_raster`."""
     def insert_op(prior_copy):
         modified_copy = prior_copy
-        n_vals = numpy.random.randint(
-            0, (prior_copy.shape[0] * prior_copy.shape[1]))
+        if (prior_copy.shape[0] * prior_copy.shape[1]) == 1:
+            n_vals = 1
+        else:
+            n_vals = numpy.random.randint(
+                1, (prior_copy.shape[0] * prior_copy.shape[1]))
         insertions = 0
         while insertions < n_vals:
             row = numpy.random.randint(0, prior_copy.shape[0])
@@ -162,6 +166,1574 @@ def insert_nodata_values_into_array(target_array, nodata_value):
     return modified_array
 
 
+def monthly_N_fixation_point(
+        precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1):
+    """Add monthly N fixation to surface mineral N pool.
+
+    Monthly N fixation is calculated from annual N deposition according to
+    the ratio of monthly precipitation to annual precipitation.
+
+    Parameters:
+        precip (float): input, monthly precipitation
+        annual_precip (float): derived, annual precipitation
+        baseNdep (float): derived, annual atmospheric N deposition
+        epnfs_2 (float): parameter, intercept of regression
+            predicting N deposition from annual precipitation
+        prev_minerl_1_1 (float): state variable, mineral N in the
+            surface layer in previous month
+
+    Returns:
+        minerl_1_1, updated mineral N in the surface layer
+    """
+    wdfxm = (
+        baseNdep * (precip / annual_precip) + epnfs_2 *
+        min(annual_precip, 100.) * (precip / annual_precip))
+    minerl_1_1 = prev_minerl_1_1 + wdfxm
+    return minerl_1_1
+
+
+def rprpet_point(pet, snowmelt, avh2o_3, precip):
+    """Calculate the ratio of precipitation to ref evapotranspiration.
+
+    The ratio of precipitation or snowmelt to reference
+    evapotranspiration influences agdefac and bgdefac, the above- and
+    belowground decomposition factors.
+
+    Parameters:
+        pet (float): derived, reference evapotranspiration
+        snowmelt (float): derived, snowmelt occuring this month
+        avh2o_3 (float): derived, moisture in top two soil layers
+        precip (float): input, precipitation for this month
+
+    Returns:
+        rprpet, the ratio of precipitation or snowmelt to reference
+            evapotranspiration
+    """
+    if snowmelt > 0:
+        rprpet = snowmelt / pet
+    else:
+        rprpet = (avh2o_3 + precip) / pet
+    return rprpet
+
+
+def defac_point(
+        snow, min_temp, max_temp, rprpet, teff_1, teff_2, teff_3, teff_4):
+    """Point-based version of `calc_defac`.
+
+    The decomposition factor reflects the influence of soil temperature and
+    moisture on decomposition. Lines 151-200, Cycle.f.
+
+    Parameters:
+        snow (float): standing snowpack
+        min_temp (float): average minimum temperature for the month
+        max_temp (float): average maximum temperature for the month
+        rprpet (float): ratio of precipitation or snowmelt to
+            reference evapotranspiration
+        teff_1 (float): x location of inflection point for
+            calculating the effect of soil temperature on decomposition
+            factor
+        teff_2 (float): y location of inflection point for
+            calculating the effect of soil temperature on decomposition
+            factor
+        teff_3 (float): step size for calculating the effect
+            of soil temperature on decomposition factor
+        teff_4 (float): lope of the line at the inflection
+            point, for calculating the effect of soil temperature on
+            decomposition factor
+
+    Returns:
+        defac, aboveground and belowground decomposition factor
+    """
+    if rprpet > 9:
+        agwfunc = 1
+    else:
+        agwfunc = 1. / (1 + 30 * math.exp(-8.5 * rprpet))
+    if snow > 0:
+        stemp = 0
+    else:
+        stemp = (min_temp + max_temp) / 2.
+    tfunc = max(
+        0.01, (teff_2 + (teff_3 / math.pi) * numpy.arctan(math.pi *
+            teff_4 * (stemp - teff_1))) /
+        (teff_2 + (teff_3 / math.pi) * numpy.arctan(math.pi *
+            teff_4 * (30.0 - teff_1))))
+    defac = max(0, tfunc * agwfunc)
+    return defac
+
+
+def calc_anerb_point(
+        rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
+    """Calculate effect of soil anaerobic conditions on decomposition.
+
+    The impact of soil anaerobic conditions on decomposition is
+    calculated from soil moisture and reference evapotranspiration.
+    Anerob.f.
+
+    Parameters:
+        rprpet (float): ratio of precipitation or snowmelt to
+            reference evapotranspiration
+        pevap (float): reference evapotranspiration
+        drain (float): the fraction of excess water lost by
+            drainage. Indicates whether a soil is sensitive for
+            anaerobiosis (drain = 0) or not (drain = 1)
+        aneref_1 (float): value of rprpet below which there
+            is no negative impact of soil anaerobic conditions on
+            decomposition
+        aneref_2 (float): value of rprpet above which there
+            is maximum negative impact of soil anaerobic conditions on
+            decomposition
+        aneref_3 (float): minimum value of the impact of
+            soil anaerobic conditions on decomposition
+
+    Returns:
+        anerb, the effect of soil anaerobic conditions on decomposition
+    """
+    anerb = 1
+    if rprpet > aneref_1:
+        xh2o = (rprpet - aneref_1) * pevap * (1. - drain)
+        if xh2o > 0:
+            newrat = aneref_1 + (xh2o / pevap)
+            slope = (1. - aneref_3) / (aneref_1 - aneref_2)
+            anerb = 1. + slope * (newrat - aneref_1)
+        anerb = max(anerb, aneref_3)
+    return anerb
+
+
+def bgdrat_point(aminrl, varat_1_iel, varat_2_iel, varat_3_iel):
+    """Calculate required C/iel ratio for belowground decomposition.
+
+    When belowground material decomposes, its nutrient content is
+    compared to this ratio to check whether nutrient content is
+    sufficiently high to allow decomposition. This ratio is calculated at
+    each decomposition time step.
+
+    Parameters:
+        aminrl (float): mineral <iel> (N or P) in top soil layer, averaged
+            across decomposition time steps
+        varat_1_iel (float): parameter, maximum C/iel ratio
+        varat_2_iel (float): parameter, minimum C/iel ratio
+        varat_3_iel (float): parameter, amount of iel present when minimum
+            ratio applies
+
+    Returns:
+        bgdrat, the required C/iel ratio for decomposition
+    """
+    if aminrl <= 0:
+        bgdrat = varat_1_iel
+    elif aminrl > varat_3_iel:
+        bgdrat = varat_2_iel
+    else:
+        bgdrat = (
+            (1. - aminrl / varat_3_iel) * (varat_1_iel - varat_2_iel) +
+            varat_2_iel)
+    return bgdrat
+
+
+def esched_point(return_type):
+    """Calculate flow of an element accompanying decomposition of C.
+
+    Calculate the movement of one element (N or P) as C decomposes from one
+    state variable (the donating stock, or box A) to another state variable
+    (the receiving stock, or box B).  Esched.f
+
+    Parameters:
+        return_type (string): flag indicating whether to return material
+            leaving box A, material arriving in box B, or material flowing
+            into or out of the mineral pool
+
+    Returns:
+        the function `_esched`
+    """
+    def _esched(cflow, tca, rcetob, anps, labile):
+        """Calculate the flow of one element to accompany decomp of C.
+
+        This is a transcription of Esched.f: "Schedule N, P, or S flow and
+        associated mineralization or immobilization flow for decomposition
+        from Box A to Box B."
+        If there is enough of iel (N or P) in the donating stock to satisfy
+        the required ratio, that material flows from the donating stock to
+        the receiving stock and whatever iel is leftover goes to mineral
+        pool. If there is not enough iel to satisfy the required ratio, iel
+        is drawn from the mineral pool to satisfy the ratio; if there is
+        not enough iel in the mineral pool, the material does not leave the
+        donating stock.
+
+        Parameters:
+            cflow: total C that is decomposing from box A to box B
+            tca: C in donating stock, i.e. box A
+            rcetob: required ratio of C/iel in the receiving stock
+            anps: iel (N or P) in the donating stock
+            labile: mineral iel (N or P)
+
+        Returns:
+            material_leaving_a, the amount of material leaving box A, if
+                return_type is 'material_leaving_a'
+            material_arriving_b, the amount of material arriving in box B,
+                if return_type is 'material_arriving_b'
+            mnrflo, flow in or out of mineral pool, if return_type is
+                'mineral_flow'
+        """
+        outofa = anps * (cflow/tca)
+        if (cflow/outofa > rcetob):
+            # immobilization occurs
+            immflo = cflow/rcetob - outofa
+            if ((labile - immflo) > 0):
+                material_leaving_a = outofa  # outofa flows from anps to bnps
+                material_arriving_b = outofa + immflo
+                mnrflo = -immflo  # immflo flows from mineral to bnps
+            else:
+                mnrflo = 0  # no flow from box A to B, nothing moves
+                material_leaving_a = 0
+                material_arriving_b = 0
+        else:
+            # mineralization
+            atob = cflow/rcetob
+            material_leaving_a = outofa
+            material_arriving_b = atob  # atob flows from anps to bnps
+            mnrflo = outofa - atob  # the rest of material leaving box A
+                                    # goes to mineral
+        if return_type == 'material_leaving_a':
+            return material_leaving_a
+        elif return_type == 'material_arriving_b':
+            return material_arriving_b
+        elif return_type == 'mineral_flow':
+            return mnrflo
+    return _esched
+
+
+def declig_point(return_type):
+    """Point implementation of decomposition of structural material.
+
+    Track the decomposition of structural material (i.e., material containing
+    lignin) into SOM2 and SOM1.
+
+    Returns:
+        the function `_declig`
+    """
+    def _declig(
+            aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr, tcflow,
+            struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+            rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2):
+        """Decomposition of material containing lignin into SOM2 and SOM1.
+
+        This function is called when surface structural C (STRUCC_1)
+        decomposes, and again when soil structural C (STRUCC_2) decomposes.
+        Declig.f
+
+        Parameters:
+            aminrl_1: mineral N averaged across the 4-times-per-monthly
+                decomposition timesteps
+            aminrl_2: mineral P averaged across the 4-times-per-monthly
+                decomposition timesteps
+            ligcon: lignin content of the decomposing material
+            rsplig: co2 loss with decomposition to SOM2
+            ps1co2_lyr: co2 loss with decomposition to SOM1
+            strucc_lyr: structural C in lyr that is decomposing
+            tcflow: the total amount of C flowing out of strucc_lyr
+            struce_lyr_1: N in structural material in the layer that is
+                decomposing
+            struce_lyr_2: P in structural material in the layer that is
+                decomposing
+            rnew_lyr_1_1: required C/N ratio of material decomposing to SOM1
+            rnew_lyr_2_1: required C/P ratio of material decomposing to SOM1
+            rnew_lyr_1_2: required C/N ratio of material decomposing to SOM2
+            rnew_lyr_2_2: required C/P ratio of material decomposing to SOM2
+            minerl_1_1: surface mineral N
+            minerl_1_2: surface mineral P
+
+        Returns:
+            The change in one state variable, where the state variable is
+                specified by return_type:
+                d_strucc_lyr, change in C in the decomposing layer, if
+                    return_type is 'd_strucc'
+                d_struce_lyr_1, change in N in the decomposing lyr, if
+                    return_type is 'd_struce_1'
+                d_struce_lyr_2, change in P in the decomposing lyr, if
+                    return_type is 'd_struce_2'
+                d_minerl_1_1, change in surface mineral N, if return_type is
+                    'd_minerl_1_1'
+                d_minerl_1_2, change in surface mineral P, if return_type is
+                    'd_minerl_1_2'
+                d_gromin_1, change in gross N mineralization, if return_type is
+                    'd_gromin_1'
+                d_som2c_lyr, change in C in SOM2, if return_type is 'd_som2c'
+                d_som2e_lyr_1, change in N in SOM2, if return_type is
+                    'd_som2e_1'
+                d_som2e_lyr_2, change in P in SOM2, if return_type is
+                    'd_som2e_2'
+                d_som1c_lyr, change in C in SOM1, if return_type is 'd_som1c'
+                d_som1e_lyr_1, change in N in SOM1, if return_type is
+                    'd_som1e_1'
+                d_som1e_lyr_2, change in P in SOM1, if return_type is
+                    'd_som1e_2'
+        """
+        # initialize change (delta, d) in state variables
+        d_strucc_lyr = 0  # change in structural C in decomposing lyr
+        d_struce_lyr_1 = 0  # change in structural N in decomposing lyr
+        d_struce_lyr_2 = 0  # change in structural P in decomposing lyr
+        d_minerl_1_1 = 0  # change in surface mineral N
+        d_minerl_1_2 = 0  # change in surface mineral P
+        d_gromin_1 = 0  # change in gross N mineralization
+        d_som2c_lyr = 0  # change in C in SOM2 in lyr
+        d_som2e_lyr_1 = 0  # change in N in SOM2 in lyr
+        d_som2e_lyr_2 = 0  # change in P in SOM2 in lyr
+        d_som1c_lyr = 0  # change in C in SOM1 in lyr
+        d_som1e_lyr_1 = 0  # change in N in SOM1 in lyr
+        d_som1e_lyr_2 = 0  # change in P in SOM1 in lyr
+
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (strucc_lyr / struce_lyr_1) <= rnew_lyr_1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (strucc_lyr / struce_lyr_2) <= rnew_lyr_2_1)))
+
+        if decompose_mask:
+            d_strucc_lyr = -tcflow
+            # material decomposes first to som2
+            tosom2 = tcflow * ligcon  # line 127 Declig.f
+
+            # respiration associated with decomposition to som2
+            co2los = tosom2 * rsplig  # line 130 Declig.f
+            mnrflo_1 = co2los * struce_lyr_1 / strucc_lyr  # line 132
+            d_struce_lyr_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            if mnrflo_1 > 0:
+                d_gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * struce_lyr_2 / strucc_lyr
+            d_struce_lyr_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom2 = tosom2 - co2los  # line 136 Declig.f
+            d_som2c_lyr += net_tosom2  # line 140 Declig.f
+
+            # N and P flows from struce_lyr to som2e_lyr, line 145 Declig.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, strucc_lyr, rnew_lyr_1_2, struce_lyr_1,
+                    minerl_1_1)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, strucc_lyr, rnew_lyr_1_2, struce_lyr_1,
+                    minerl_1_1)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, strucc_lyr, rnew_lyr_1_2, struce_lyr_1,
+                    minerl_1_1)
+            # schedule flows
+            d_struce_lyr_1 -= material_leaving_a
+            d_som2e_lyr_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                d_gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, strucc_lyr, rnew_lyr_2_2, struce_lyr_2,
+                    minerl_1_2)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, strucc_lyr, rnew_lyr_2_2, struce_lyr_2,
+                    minerl_1_2)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, strucc_lyr, rnew_lyr_2_2, struce_lyr_2,
+                    minerl_1_2)
+            # schedule flows
+            d_struce_lyr_2 -= material_leaving_a
+            d_som2e_lyr_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+            # what's left decomposes to som1
+            tosom1 = tcflow - tosom2  # line 160 Declig.f
+            co2los = tosom1 * ps1co2_lyr  # line 163 Declig.f
+
+            # respiration associated with decomposition to som1
+            mnrflo_1 = co2los * struce_lyr_1 / strucc_lyr  # line 165
+            d_struce_lyr_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            if mnrflo_1 > 0:
+                d_gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * struce_lyr_2 / strucc_lyr
+            d_struce_lyr_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom1 = tosom1 - co2los  # line 169 Declig.f
+            d_som1c_lyr += net_tosom1  # line 173 Declig.f
+
+            # N and P flows from struce_lyr to som1e_lyr, line 178 Declig.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, strucc_lyr, rnew_lyr_1_1, struce_lyr_1,
+                    minerl_1_1)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, strucc_lyr, rnew_lyr_1_1, struce_lyr_1,
+                    minerl_1_1)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, strucc_lyr, rnew_lyr_1_1, struce_lyr_1,
+                    minerl_1_1)
+            # schedule flows
+            d_struce_lyr_1 -= material_leaving_a
+            d_som1e_lyr_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                d_gromin_1 += mineral_flow
+
+            # P
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, strucc_lyr, rnew_lyr_2_1, struce_lyr_2,
+                    minerl_1_2)
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, strucc_lyr, rnew_lyr_2_1, struce_lyr_2,
+                    minerl_1_2)
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, strucc_lyr, rnew_lyr_2_1, struce_lyr_2,
+                    minerl_1_2)
+            # schedule flows
+            d_struce_lyr_2 -= material_leaving_a
+            d_som1e_lyr_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        if return_type == 'd_strucc':
+            return d_strucc_lyr
+        elif return_type == 'd_struce_1':
+            return d_struce_lyr_1
+        elif return_type == 'd_struce_2':
+            return d_struce_lyr_2
+        elif return_type == 'd_minerl_1_1':
+            return d_minerl_1_1
+        elif return_type == 'd_minerl_1_2':
+            return d_minerl_1_2
+        elif return_type == 'd_gromin_1':
+            return d_gromin_1
+        elif return_type == 'd_som2c':
+            return d_som2c_lyr
+        elif return_type == 'd_som2e_1':
+            return d_som2e_lyr_1
+        elif return_type == 'd_som2e_2':
+            return d_som2e_lyr_2
+        elif return_type == 'd_som1c':
+            return d_som1c_lyr
+        elif return_type == 'd_som1e_1':
+            return d_som1e_lyr_1
+        elif return_type == 'd_som1e_2':
+            return d_som1e_lyr_2
+    return _declig
+
+
+def decomposition_point(
+        inputs, params, state_var, year_reg, month_reg, pp_reg, rnew_dict,
+        pevap):
+    """Point implementation of decomposition.
+
+    Parameters:
+        inputs (dict): dictionary of input values, including precipitation,
+            temperature, and soil pH
+        params (dict): dictionary of parameter values
+        state_var (dict): dictionary of state variables prior to
+            decomposition
+        year_reg (dict): dictionary of values that are updated once per year,
+            including annual precipitation and annual N deposition
+        month_reg (dict): dictionary of values that are shared between
+            submodels, including snowmelt
+        pp_reg (dict): dictionary of persistent parameters, calculated upon
+            model initialization
+        rnew_dict (dict): dictionary of required ratios for aboveground
+            decomposition, calculated during initialization
+        evap (float): reference evapotranspiration
+
+    Returns
+        dictionary of modified state variables following decomposition
+    """
+    gromin_1 = 0  # gross mineralization of N, used outside decomposition
+    rprpet = rprpet_point(
+        pevap, month_reg['snowmelt'], state_var['avh2o_3'], inputs['precip'])
+    defac = defac_point(
+        state_var['snow'], inputs['min_temp'], inputs['max_temp'], rprpet,
+        params['teff_1'], params['teff_2'], params['teff_3'], params['teff_4'])
+    anerb = calc_anerb_point(
+        rprpet, pevap, params['drain'], params['aneref_1'], params['aneref_2'],
+        params['aneref_3'])
+
+    # pH effect on decomposition for structural material, line 45
+    pheff_struc = numpy.clip(
+        (0.5 + (1.1 / numpy.pi) *
+            numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 4.))), 0, 1)
+
+    # pH effect on decomposition for metabolic material, line 158
+    pheff_metab = numpy.clip(
+        (0.5 + (1.14 / numpy.pi) *
+            numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 4.8))), 0, 1)
+
+    # calculate aminrl_1, intermediate surface mineral N that is tracked
+    # during decomposition
+    aminrl_1 = state_var['minerl_1_1']
+
+    # calculate aminrl_2, intermediate surface mineral P that is tracked
+    # during decomposition
+    fsol = fsfunc_point(
+        state_var['minerl_1_2'], params['pslsrb'], params['sorpmx'])
+    aminrl_2 = state_var['minerl_1_2'] * fsol
+
+    # monthly N fixation
+    state_var['minerl_1_1'] = monthly_N_fixation_point(
+        inputs['precip'], year_reg['annual_precip'], year_reg['baseNdep'],
+        params['epnfs_2'], state_var['minerl_1_1'])
+
+    for _ in xrange(1):
+        # initialize change (delta, d) in state variables for this decomp step
+        d_minerl_1_1 = 0  # change in surface mineral N
+        d_minerl_1_2 = 0  # change in surface mineral P
+
+        d_strucc_1 = 0  # change in surface structural C
+        d_struce_1_1 = 0  # change in surface structural N
+        d_struce_1_2 = 0  # change in surface strctural P
+        d_som2c_1 = 0  # change in surface SOM2 C
+        d_som2e_1_1 = 0  # change in surface SOM2 N
+        d_som2e_1_2 = 0  # change in surface SOM2 P
+        d_som1c_1 = 0  # change in surface SOM1 C
+        d_som1e_1_1 = 0  # change in surface SOM1 N
+        d_som1e_1_2 = 0  # change in surface SOM1 P
+
+        d_strucc_2 = 0  # change in soil structural C
+        d_struce_2_1 = 0  # change in soil structural N
+        d_struce_2_2 = 0  # change in soil structural P
+        d_som2c_2 = 0  # change in soil SOM2 C
+        d_som2e_2_1 = 0  # change in soil SOM2 N
+        d_som2e_2_2 = 0  # change in soil SOM2 P
+        d_som1c_2 = 0  # change in soil SOM1 C
+        d_som1e_2_1 = 0  # change in soil SOM1 N
+        d_som1e_2_2 = 0  # change in soil SOM1 P
+
+        d_metabc_1 = 0  # change in surface metabolic C
+        d_metabe_1_1 = 0  # change in surface metabolic N
+        d_metabe_1_2 = 0  # change in surface metabolic P
+
+        d_metabc_2 = 0  # change in soil metabolic C
+        d_metabe_2_1 = 0  # change in soil metabolic N
+        d_metabe_2_2 = 0  # change in soil metabolic P
+
+        d_som3c = 0  # change in passive organic C
+        d_som3e_1 = 0  # change in passive organic N
+        d_som3e_2 = 0  # change in passive organic P
+
+        d_parent_2 = 0  # change in parent P
+        d_secndy_2 = 0  # change in secondary P
+        d_occlud = 0  # change in occluded P
+
+        d_minerl_P_dict = {}
+        for lyr in xrange(1, params['nlayer'] + 1):
+            d_minerl_P_dict['d_minerl_{}_2'.format(lyr)] = 0
+
+        # litdec.f
+        # decomposition of strucc_1, surface structural material
+        tcflow = (min(
+            state_var['strucc_1'], params['strmax_1']) * defac *
+            params['dec1_1'] *
+            math.exp(-params['pligst_1'] * state_var['strlig_1']) *
+            0.020833 * pheff_struc)
+
+        d_strucc_1 += declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_struce_1_1 += declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_struce_1_2 += declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_minerl_1_1 += declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_minerl_1_2 += declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        gromin_1 += declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som2c_1 += declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som2e_1_1 += declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som2e_1_2 += declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som1c_1 += declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som1e_1_1 += declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+        d_som1e_1_2 += declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_1'], params['rsplig'],
+                params['ps1co2_1'], state_var['strucc_1'],
+                tcflow, state_var['struce_1_1'],
+                state_var['struce_1_2'], rnew_dict['rnewas_1_1'],
+                rnew_dict['rnewas_2_1'], rnew_dict['rnewas_1_2'],
+                rnew_dict['rnewas_2_2'], state_var['minerl_1_1'],
+                state_var['minerl_1_2'])
+
+        # decomposition of strucc_2, soil structural material: line 99 Litdec.f
+        tcflow = (
+            min(state_var['strucc_2'], params['strmax_2']) * defac *
+            params['dec1_2'] *
+            math.exp(-params['pligst_2'] * state_var['strlig_2']) *
+            anerb * 0.020833 * pheff_struc)
+
+        d_strucc_2 += declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_struce_2_1 += declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_struce_2_2 += declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_minerl_1_1 += declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_minerl_1_2 += declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        gromin_1 += declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som2c_2 += declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som2e_2_1 += declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som2e_2_2 += declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som1c_2 += declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som1e_2_1 += declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+        d_som1e_2_2 += declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, state_var['strlig_2'], params['rsplig'],
+                params['ps1co2_2'], state_var['strucc_2'], tcflow,
+                state_var['struce_2_1'], state_var['struce_2_2'],
+                rnew_dict['rnewbs_1_1'], rnew_dict['rnewbs_2_1'],
+                rnew_dict['rnewbs_1_2'], rnew_dict['rnewbs_2_2'],
+                state_var['minerl_1_1'], state_var['minerl_1_2'])
+
+        # decomposition of surface metabolic material: line 136 Litdec.f
+        # C/N ratio for surface metabolic residue
+        rceto1_1 = agdrat_point(
+            state_var['metabe_1_1'], state_var['metabc_1'],
+            params['pcemic1_1_1'], params['pcemic1_2_1'],
+            params['pcemic1_3_1'])
+        # C/P ratio for surface metabolic residue
+        rceto1_2 = agdrat_point(
+            state_var['metabe_1_2'], state_var['metabc_1'],
+            params['pcemic1_1_2'], params['pcemic1_2_2'],
+            params['pcemic1_3_2'])
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['metabc_1'] / state_var['metabe_1_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['metabc_1'] / state_var['metabe_1_2']) <=
+                rceto1_2)))  # line 194 Litdec.f
+        if decompose_mask:
+            tcflow = numpy.clip(
+                (state_var['metabc_1'] * defac * params['dec2_1'] * 0.020833 *
+                    pheff_metab), 0,
+                state_var['metabc_1'])
+            co2los = tcflow * params['pmco2_1']
+            d_metabc_1 -= tcflow
+            # respiration, line 201 Litdec.f
+            mnrflo_1 = (
+                co2los * state_var['metabe_1_1'] / state_var['metabc_1'])
+            d_metabe_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = (
+                co2los * state_var['metabe_1_2'] / state_var['metabc_1'])
+            d_metabe_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom1 = tcflow - co2los  # line 210 Litdec.f
+            d_som1c_1 += net_tosom1
+            # N and P flows from metabe_1 to som1e_1, line 222 Litdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_1'], rceto1_1,
+                    state_var['metabe_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_metabe_1_1 -= material_leaving_a
+            d_som1e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_1'], rceto1_2,
+                    state_var['metabe_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_metabe_1_2 -= material_leaving_a
+            d_som1e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        # decomposition of soil metabolic material: line 136 Litdec.f
+        # C/N ratio for belowground material to som1
+        rceto1_1 = bgdrat_point(
+            aminrl_1, params['varat1_1_1'], params['varat1_2_1'],
+            params['varat1_3_1'])
+        # C/P ratio for soil metabolic material
+        rceto1_2 = bgdrat_point(
+            aminrl_2, params['varat1_1_2'], params['varat1_2_2'],
+            params['varat1_3_2'])
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['metabc_2'] / state_var['metabe_2_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['metabc_2'] / state_var['metabe_2_2']) <=
+                rceto1_2)))  # line 194 Litdec.f
+        if decompose_mask:
+            tcflow = numpy.clip(
+                (state_var['metabc_2'] * defac * params['dec2_2'] * 0.020833 *
+                    pheff_metab * anerb),
+                0, state_var['metabc_2'])
+            co2los = tcflow * params['pmco2_2']
+            d_metabc_2 -= tcflow
+            # respiration, line 201 Litdec.f
+            mnrflo_1 = co2los * state_var['metabe_2_1'] / state_var['metabc_2']
+            d_metabe_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['metabe_2_2'] / state_var['metabc_2']
+            d_metabe_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom1 = tcflow - co2los  # line 210 Litdec.f
+            d_som1c_2 += net_tosom1
+            # N and P flows from metabe_2 to som1e_2, line 222 Litdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_2'], rceto1_1,
+                    state_var['metabe_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_metabe_2_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom1, state_var['metabc_2'], rceto1_2,
+                    state_var['metabe_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_metabe_2_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        # somdec.f
+        # surface SOM1 to surface SOM2
+        # rceto2_iel: required ratio for flow from surface SOM1 to SOM2
+        radds1_1 = (
+            params['rad1p_1_1'] + params['rad1p_2_1'] *
+            ((state_var['som1c_1'] / state_var['som1e_1_1']) -
+                params['pcemic1_2_1']))
+        rceto2_1_surface = max(
+            (state_var['som1c_1'] / state_var['som1e_1_1'] + radds1_1),
+            params['rad1p_3_1'])
+
+        radds1_2 = (
+            params['rad1p_1_2'] + params['rad1p_2_2'] *
+            ((state_var['som1c_1'] / state_var['som1e_1_2']) -
+                params['pcemic1_2_2']))
+        rceto2_2_surface = max(
+            (state_var['som1c_1'] / state_var['som1e_1_2'] + radds1_2),
+            params['rad1p_3_2'])
+
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som1c_1'] / state_var['som1e_1_1']) <=
+                rceto2_1_surface)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som1c_1'] / state_var['som1e_1_2']) <=
+                rceto2_2_surface)))  # line 92
+        if decompose_mask:
+            tcflow = (
+                state_var['som1c_1'] * defac * params['dec3_1'] * 0.020833 *
+                pheff_struc)
+            co2los = tcflow * params['p1co2a_1']
+            d_som1c_1 -= tcflow
+            # respiration, line 105 Somdec.f
+            mnrflo_1 = co2los * state_var['som1e_1_1'] / state_var['som1c_1']
+            d_som1e_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som1e_1_2'] / state_var['som1c_1']
+            d_som1e_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            net_tosom2 = tcflow - co2los
+            d_som2c_1 += net_tosom2
+            # N and P flows from som1e_1 to som2e_1, line 123 Somdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_1'], rceto2_1_surface,
+                    state_var['som1e_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_1'], rceto2_1_surface,
+                    state_var['som1e_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_1'], rceto2_1_surface,
+                    state_var['som1e_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som1e_1_1 -= material_leaving_a
+            d_som2e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_1'], rceto2_2_surface,
+                    state_var['som1e_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_1'], rceto2_2_surface,
+                    state_var['som1e_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_1'], rceto2_2_surface,
+                    state_var['som1e_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som1e_1_2 -= material_leaving_a
+            d_som2e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+        # soil SOM1 to soil SOM3 and SOM2
+        # required ratios are those pertaining to decomposition to SOM2
+        rceto2_1 = bgdrat_point(
+            aminrl_1, params['varat22_1_1'], params['varat22_2_1'],
+            params['varat22_3_1'])  # line 141 Somdec.f
+        rceto2_2 = bgdrat_point(
+            aminrl_2, params['varat22_1_2'], params['varat22_2_2'],
+            params['varat22_3_2'])
+
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som1c_2'] / state_var['som1e_2_1']) <=
+                rceto2_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som1c_2'] / state_var['som1e_2_2']) <=
+                rceto2_2)))  # line 171
+        if decompose_mask:
+            tcflow = (
+                state_var['som1c_2'] * defac * params['dec3_2'] *
+                pp_reg['eftext'] * anerb * 0.020833 * pheff_metab)
+            co2los = tcflow * params['p1co2_2']
+            d_som1c_2 -= tcflow
+            # respiration, line 179 Somdec.f
+            mnrflo_1 = co2los * state_var['som1e_2_1'] / state_var['som1c_2']
+            d_som1e_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som1e_2_2'] / state_var['som1c_2']
+            d_som1e_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom3 = (
+                tcflow * pp_reg['fps1s3'] *
+                (1. + params['animpt'] * (1. - anerb)))
+            d_som3c += tosom3
+            # C/<iel> ratios of material entering som3e
+            rceto3_1 = bgdrat_point(
+                aminrl_1, params['varat3_1_1'], params['varat3_2_1'],
+                params['varat3_3_1'])
+            rceto3_2 = bgdrat_point(
+                aminrl_2, params['varat3_1_2'], params['varat3_2_2'],
+                params['varat3_3_2'])
+            # N and P flows from soil som1e to som3e, line 198
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som1c_2'], rceto3_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som1c_2'], rceto3_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som1c_2'], rceto3_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som1e_2_1 -= material_leaving_a
+            d_som3e_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som1c_2'], rceto3_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som1c_2'], rceto3_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som1c_2'], rceto3_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som1e_2_2 -= material_leaving_a
+            d_som3e_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+            # organic leaching: line 204 Somdec.f
+            if month_reg['amov_2'] > 0:
+                linten = min(
+                    (1. - (params['omlech_3'] - month_reg['amov_2']) /
+                        params['omlech_3']), 1.)
+                cleach = tcflow * pp_reg['orglch'] * linten
+                # N leaching: line 230
+                rceof1_1 = (state_var['som1c_2'] / state_var['som1e_2_1']) * 2
+                orgflow_1 = cleach / rceof1_1
+                d_som1e_2_1 -= orgflow_1
+                # P leaching: line 232
+                rceof1_2 = (state_var['som1c_2'] / state_var['som1e_2_2']) * 35
+                orgflow_2 = cleach / rceof1_2
+                d_som1e_2_2 -= orgflow_2
+            else:
+                cleach = 0
+
+            net_tosom2 = tcflow - co2los - tosom3 - cleach
+            d_som2c_2 += net_tosom2
+            # N and P flows from som1e_2 to som2e_2, line 257
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_2'], rceto2_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_2'], rceto2_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_2'], rceto2_1,
+                    state_var['som1e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som1e_2_1 -= material_leaving_a
+            d_som2e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    net_tosom2, state_var['som1c_2'], rceto2_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    net_tosom2, state_var['som1c_2'], rceto2_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    net_tosom2, state_var['som1c_2'], rceto2_2,
+                    state_var['som1e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som1e_2_2 -= material_leaving_a
+            d_som2e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # Soil SOM2 decomposing to soil SOM1 and SOM3, line 269 Somdec.f
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som2c_2'] / state_var['som2e_2_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som2c_2'] / state_var['som2e_2_2']) <=
+                rceto1_2)))  # line 298
+        if decompose_mask:
+            tcflow = (
+                state_var['som2c_2'] * defac * params['dec5_2'] * anerb *
+                0.020833 * pheff_metab)
+            co2los = tcflow * params['p2co2_2']
+            d_som2c_2 -= tcflow
+            # respiration, line 304 Somdec.f
+            mnrflo_1 = co2los * state_var['som2e_2_1'] / state_var['som2c_2']
+            d_som2e_2_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som2e_2_2'] / state_var['som2c_2']
+            d_som2e_2_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom3 = (
+                tcflow * pp_reg['fps2s3'] *
+                (1. + params['animpt'] * (1.0 - anerb)))
+            d_som3c += tosom3
+            # N and P flows from soil som2e to som3e
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som2c_2'], rceto3_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som2c_2'], rceto3_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som2c_2'], rceto3_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som2e_2_1 -= material_leaving_a
+            d_som3e_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom3, state_var['som2c_2'], rceto3_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom3, state_var['som2c_2'], rceto3_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom3, state_var['som2c_2'], rceto3_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som2e_2_2 -= material_leaving_a
+            d_som3e_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+
+            # rest of the flow from SOM2 goes to SOM1
+            tosom1 = tcflow - co2los - tosom3  # line 333 Somdec.f
+            d_som1c_2 += tosom1
+            # N and P flows from som2e_2 to som1e_2, line 344
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_2'], rceto1_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_2'], rceto1_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_2'], rceto1_1,
+                    state_var['som2e_2_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som2e_2_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_2'], rceto1_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_2'], rceto1_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_2'], rceto1_2,
+                    state_var['som2e_2_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som2e_2_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # Surface SOM2 decomposes to surface SOM1
+        # ratios of material decomposing to SOM1
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som2c_1'] / state_var['som2e_1_1']) <=
+                rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som2c_1'] / state_var['som2e_1_2']) <=
+                rceto1_2)))  # line 171
+        if decompose_mask:
+            tcflow = (
+                state_var['som2c_1'] * defac * params['dec5_1'] * 0.020833 *
+                pheff_struc)
+            co2los = tcflow * params['p2co2_1']  # line 385
+            d_som2c_1 -= tcflow
+            # respiration, line 388
+            mnrflo_1 = co2los * state_var['som2e_1_1'] / state_var['som2c_1']
+            d_som2e_1_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som2e_1_2'] / state_var['som2c_1']
+            d_som2e_1_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom1 = tcflow - co2los  # line 393
+            d_som1c_1 += tosom1
+            # N and P flows from surface som2e to surface som1e, line 404
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_1'], rceto1_1,
+                    state_var['som2e_1_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_1'], rceto1_1,
+                    state_var['som2e_1_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_1'], rceto1_1,
+                    state_var['som2e_1_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som2e_1_1 -= material_leaving_a
+            d_som1e_1_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som2c_1'], rceto1_2,
+                    state_var['som2e_1_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som2c_1'], rceto1_2,
+                    state_var['som2e_1_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som2c_1'], rceto1_2,
+                    state_var['som2e_1_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som2e_1_2 -= material_leaving_a
+            d_som1e_1_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # SOM3 decomposes to soil SOM1
+        pheff_som3 = numpy.clip(
+            (0.5 + (1.1 / numpy.pi) *
+                numpy.arctan(numpy.pi * 0.7 * (inputs['pH'] - 3.))), 0, 1)
+        decompose_mask = (
+            ((aminrl_1 > 0.0000001) | (
+                (state_var['som3c'] / state_var['som3e_1']) <= rceto1_1)) &
+            ((aminrl_2 > 0.0000001) | (
+                (state_var['som3c'] / state_var['som3e_2']) <= rceto1_2)))
+        if decompose_mask:
+            tcflow = (
+                state_var['som3c'] * defac * params['dec4'] * anerb *
+                0.020833 * pheff_som3)
+            co2los = tcflow * params['p3co2'] * anerb  # line 442
+            d_som3c -= tcflow
+            # respiration, line 446
+            mnrflo_1 = co2los * state_var['som3e_1'] / state_var['som3c']
+            d_som3e_1 -= mnrflo_1
+            d_minerl_1_1 += mnrflo_1
+            gromin_1 += mnrflo_1
+            mnrflo_2 = co2los * state_var['som3e_2'] / state_var['som3c']
+            d_som3e_2 -= mnrflo_2
+            d_minerl_1_2 += mnrflo_2
+
+            tosom1 = tcflow - co2los
+            d_som1c_2 += tosom1
+            # N and P flows from som3e to som1e_2, line 461 Somdec.f
+            # N first
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som3c'], rceto1_1,
+                    state_var['som3e_1'], state_var['minerl_1_1'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som3c'], rceto1_1,
+                    state_var['som3e_1'], state_var['minerl_1_1'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som3c'], rceto1_1,
+                    state_var['som3e_1'], state_var['minerl_1_1'])
+            # schedule flows
+            d_som3e_1 -= material_leaving_a
+            d_som1e_2_1 += material_arriving_b
+            d_minerl_1_1 += mineral_flow
+            if mineral_flow > 0:
+                gromin_1 += mineral_flow
+            # P second
+            material_leaving_a = esched_point(
+                'material_leaving_a')(
+                    tosom1, state_var['som3c'], rceto1_2,
+                    state_var['som3e_2'], state_var['minerl_1_2'])
+            material_arriving_b = esched_point(
+                'material_arriving_b')(
+                    tosom1, state_var['som3c'], rceto1_2,
+                    state_var['som3e_2'], state_var['minerl_1_2'])
+            mineral_flow = esched_point(
+                'mineral_flow')(
+                    tosom1, state_var['som3c'], rceto1_2,
+                    state_var['som3e_2'], state_var['minerl_1_2'])
+            # schedule flows
+            d_som3e_2 -= material_leaving_a
+            d_som1e_2_2 += material_arriving_b
+            d_minerl_1_2 += mineral_flow
+        # Surface SOM2 flows to soil SOM2 via mixing
+        tcflow = state_var['som2c_1'] * params['cmix'] * defac * 0.020833
+        d_som2c_1 -= tcflow
+        d_som2c_2 += tcflow
+        # N and P flows from som2e_1 to som2e_2, line 495 Somdec.f
+        # N first
+        mix_ratio_1 = state_var['som2c_1'] / state_var['som2e_1_1']  # line 495
+        material_leaving_a = esched_point(
+            'material_leaving_a')(
+                tcflow, state_var['som2c_1'], mix_ratio_1,
+                state_var['som2e_1_1'], state_var['minerl_1_1'])
+        material_arriving_b = esched_point(
+            'material_arriving_b')(
+                tcflow, state_var['som2c_1'], mix_ratio_1,
+                state_var['som2e_1_1'], state_var['minerl_1_1'])
+        mineral_flow = esched_point(
+            'mineral_flow')(
+                tcflow, state_var['som2c_1'], mix_ratio_1,
+                state_var['som2e_1_1'], state_var['minerl_1_1'])
+        # schedule flows
+        d_som2e_1_1 -= material_leaving_a
+        d_som2e_2_1 += material_arriving_b
+        d_minerl_1_1 += mineral_flow
+        # P second
+        mix_ratio_2 = state_var['som2c_1'] / state_var['som2e_1_2']  # line 495
+        material_leaving_a = esched_point(
+            'material_leaving_a')(
+                tcflow, state_var['som2c_1'], mix_ratio_2,
+                state_var['som2e_1_2'], state_var['minerl_1_2'])
+        material_arriving_b = esched_point(
+            'material_arriving_b')(
+                tcflow, state_var['som2c_1'], mix_ratio_2,
+                state_var['som2e_1_2'], state_var['minerl_1_2'])
+        mineral_flow = esched_point(
+            'mineral_flow')(
+                tcflow, state_var['som2c_1'], mix_ratio_2,
+                state_var['som2e_1_2'], state_var['minerl_1_2'])
+        # schedule flows
+        d_som2e_1_2 -= material_leaving_a
+        d_som2e_2_2 += material_arriving_b
+        d_minerl_1_2 += mineral_flow
+
+        # P mineral flows: Pschem.f
+        # flow from parent to mineral: line 141
+        fparnt = params['pparmn_2'] * state_var['parent_2'] * defac * 0.020833
+        d_minerl_1_2 += fparnt
+        d_parent_2 -= fparnt
+
+        # flow from secondary to mineral: line 158
+        fsecnd = params['psecmn_2'] * state_var['secndy_2'] * defac * 0.020833
+        d_minerl_1_2 += fsecnd
+        d_secndy_2 -= fsecnd
+
+        # flow from mineral to secondary: line 163
+        fmnsec = (
+            params['pmnsec_2'] * state_var['minerl_1_2'] * (1 - fsol) * defac *
+            0.020833)
+        d_minerl_1_2 -= fmnsec
+        d_secndy_2 += fmnsec
+        for lyr in xrange(2, params['nlayer'] + 1):
+            fmnsec = (
+                params['pmnsec_2'] * state_var['minerl_{}_2'.format(lyr)] *
+                (1 - fsol) * defac * 0.020833)
+            d_minerl_P_dict['d_minerl_{}_2'.format(lyr)] -= fmnsec
+            d_secndy_2 += fmnsec
+
+        # flow from secondary to occluded: line 171
+        fsecoc = params['psecoc1'] * state_var['secndy_2'] * defac * 0.020833
+        d_secndy_2 -= fsecoc
+        d_occlud += fsecoc
+
+        # flow from occluded to secondary
+        focsec = params['psecoc2'] * state_var['occlud'] * defac * 0.020833
+        d_occlud -= focsec
+        d_secndy_2 += focsec
+
+        # update state variables: perform flows calculated in previous lines
+        state_var['minerl_1_1'] += d_minerl_1_1
+        state_var['minerl_1_2'] += d_minerl_1_2
+
+        state_var['strucc_1'] += d_strucc_1
+        state_var['struce_1_1'] += d_struce_1_1
+        state_var['struce_1_2'] += d_struce_1_2
+        state_var['som2c_1'] += d_som2c_1
+        state_var['som2e_1_1'] += d_som2e_1_1
+        state_var['som2e_1_2'] += d_som2e_1_2
+        state_var['som1c_1'] += d_som1c_1
+        state_var['som1e_1_1'] += d_som1e_1_1
+        state_var['som1e_1_2'] += d_som1e_1_2
+
+        state_var['strucc_2'] += d_strucc_2
+        state_var['struce_2_1'] += d_struce_2_1
+        state_var['struce_2_2'] += d_struce_2_2
+        state_var['som2c_2'] += d_som2c_2
+        state_var['som2e_2_1'] += d_som2e_2_1
+        state_var['som2e_2_2'] += d_som2e_2_2
+        state_var['som1c_2'] += d_som1c_2
+        state_var['som1e_2_1'] += d_som1e_2_1
+        state_var['som1e_2_2'] += d_som1e_2_2
+
+        state_var['metabc_1'] += d_metabc_1
+        state_var['metabe_1_1'] += d_metabe_1_1
+        state_var['metabe_1_2'] += d_metabe_1_2
+
+        state_var['metabc_2'] += d_metabc_2
+        state_var['metabe_2_1'] += d_metabe_2_1
+        state_var['metabe_2_2'] += d_metabe_2_2
+
+        state_var['parent_2'] += d_parent_2
+        state_var['secndy_2'] += d_secndy_2
+        state_var['occlud'] += d_occlud
+        for lyr in xrange(2, params['nlayer'] + 1):
+            state_var['minerl_{}_2'.format(lyr)] += (
+                d_minerl_P_dict['d_minerl_{}_2'.format(lyr)])
+
+        # update aminrl_1
+        aminrl_1 = aminrl_1 + state_var['minerl_1_1'] / 2.
+
+        # update aminrl_2
+        fsol = fsfunc_point(
+            state_var['minerl_1_2'], params['pslsrb'], params['sorpmx'])
+        aminrl_2 = aminrl_2 + (state_var['minerl_1_2'] * fsol) / 2.
+
+    # Calculate volatilization loss of nitrogen as a function of
+    # gross mineralization: line 323 Simsom.f
+    volgm = params['vlossg'] * gromin_1
+    state_var['minerl_1_1'] -= volgm
+    return state_var
+
+
+def agdrat_point(anps, tca, pcemic_1_iel, pcemic_2_iel, pcemic_3_iel):
+    """Point implementation of `Agdrat.f`.
+
+    Calculate the C/<iel> ratio of new material that is the result of
+    decomposition into "box B".
+
+    Parameters:
+        anps: <iel> (N or P) in the decomposing stock
+        tca: total C in the decomposing stock
+        pcemic_1_iel: maximum C/<iel> of new SOM1
+        pcemic_2_iel: minimum C/<iel> of new SOM1
+        pcemic_3_iel: minimum <iel> content of decomposing material that gives
+            minimum C/<iel> of new material
+
+    Returns:
+        agdrat, the C/<iel> ratio of new material
+    """
+    cemicb = (pcemic_2_iel - pcemic_1_iel) / pcemic_3_iel
+    if ((tca * 2.5) <= 0.0000000001):
+        econt = 0
+    else:
+        econt = anps / (tca * 2.5)
+    if econt > pcemic_3_iel:
+        agdrat = pcemic_2_iel
+    else:
+        agdrat = pcemic_1_iel + econt * cemicb
+    return agdrat
+
+
+def fsfunc_point(minerl_1_2, pslsrb, sorpmx):
+        """Calculate the fraction of mineral P that is in solution.
+
+        The fraction of P in solution is influenced by two soil properties:
+        the maximum sorption potential of the soil and sorption affinity.
+
+        Parameters:
+            minerl_1_2 (float): state variable, surface mineral P
+            pslsrb (float): parameter, P sorption affinity
+            sorpmx (float): parameter, maximum P sorption of the soil
+
+        Returns:
+            fsol, fraction of P in solution
+        """
+        if minerl_1_2 == 0:
+            return 0
+        c = sorpmx * (2. - pslsrb) / 2.
+        b = sorpmx - minerl_1_2 + c
+        labile = (-b + numpy.sqrt(b * b + 4 * c * minerl_1_2)) / 2.
+        fsol = labile / minerl_1_2
+        return fsol
+
+
 class foragetests(unittest.TestCase):
     """Regression tests for InVEST forage model."""
 
@@ -183,9 +1755,9 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 22,
+            'n_months': 1,
             'aoi_path': os.path.join(
-                SAMPLE_DATA, 'Manlai_soum_WGS84.shp'),
+                SAMPLE_DATA, 'aoi_small.shp'),
             'bulk_density_path': os.path.join(
                 SAMPLE_DATA, 'soil', 'bulkd.tif'),
             'ph_path': os.path.join(
@@ -213,8 +1785,7 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_mgmt_layer_path': os.path.join(
-                SAMPLE_DATA,
-                'sheep_units_density_2016_monitoring_area_WGS84.shp'),
+                SAMPLE_DATA, 'sheep_units_density_2016_monitoring_area.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
         }
@@ -236,7 +1807,7 @@ class foragetests(unittest.TestCase):
             None
         """
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                raster_to_test):
+                (raster_to_test, 1)):
             if len(raster_block[raster_block != nodata_value]) == 0:
                 continue
             min_val = numpy.amin(
@@ -286,7 +1857,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -329,7 +1900,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                shwave_path):
+                (shwave_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -378,7 +1949,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                ompc_path):
+                (ompc_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -426,7 +1997,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                afiel_path):
+                (afiel_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -474,7 +2045,7 @@ class foragetests(unittest.TestCase):
         # calculated by hand
         result_set = set()
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                awilt_path):
+                (awilt_path, 1)):
             result_set.update(numpy.unique(raster_block))
         self.assertEqual(
             len(result_set), 1,
@@ -793,20 +2364,20 @@ class foragetests(unittest.TestCase):
         from natcap.invest import forage
 
         array_shape = (10, 10)
+        tolerance = 0.0001
 
         tca = numpy.random.uniform(300, 700, array_shape)
         anps = numpy.random.uniform(1, numpy.amin(tca), array_shape)
         pcemic_1 = numpy.random.uniform(12, 20, array_shape)
         pcemic_2 = numpy.random.uniform(3, 11, array_shape)
         pcemic_3 = numpy.random.uniform(0.001, 0.1, array_shape)
-        cemicb = (pcemic_2 - pcemic_1) / pcemic_3
 
         minimum_acceptable_agdrat = 2.285
         maximum_acceptable_agdrat = numpy.amax(pcemic_1)
         agdrat_nodata = _TARGET_NODATA
 
         agdrat = forage._aboveground_ratio(
-            anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+            anps, tca, pcemic_1, pcemic_2, pcemic_3)
 
         self.assert_all_values_in_array_within_range(
             agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
@@ -815,36 +2386,61 @@ class foragetests(unittest.TestCase):
         for input_array in [anps, tca]:
             insert_nodata_values_into_array(input_array, _TARGET_NODATA)
             agdrat = forage._aboveground_ratio(
-                anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+                anps, tca, pcemic_1, pcemic_2, pcemic_3)
 
             self.assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
-        for input_array in [pcemic_1, pcemic_2, pcemic_3, cemicb]:
+        for input_array in [pcemic_1, pcemic_2, pcemic_3]:
             insert_nodata_values_into_array(input_array, _IC_NODATA)
             agdrat = forage._aboveground_ratio(
-                anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
+                anps, tca, pcemic_1, pcemic_2, pcemic_3)
 
             self.assert_all_values_in_array_within_range(
                 agdrat, minimum_acceptable_agdrat, maximum_acceptable_agdrat,
                 agdrat_nodata)
 
-        # known inputs
-        tca = numpy.full(array_shape, 413)
-        anps = numpy.full(array_shape, 229)
-        pcemic_1 = numpy.full(array_shape, 17.4)
-        pcemic_2 = numpy.full(array_shape, 3.2)
-        pcemic_3 = numpy.full(array_shape, 0.04)
-        cemicb = numpy.full(array_shape, -20)
+        # known inputs: econt > pcemic_3
+        tca = 413
+        anps = 229
+        pcemic_1 = 17.4
+        pcemic_2 = 3.2
+        pcemic_3 = 0.04
 
         known_agdrat = 3.2
-        tolerance = 0.0001
+        point_agdrat = agdrat_point(anps, tca, pcemic_1, pcemic_2, pcemic_3)
+        self.assertAlmostEqual(known_agdrat, point_agdrat)
+
+        tca_ar = numpy.full(array_shape, tca)
+        anps_ar = numpy.full(array_shape, anps)
+        pcemic_1_ar = numpy.full(array_shape, pcemic_1)
+        pcemic_2_ar = numpy.full(array_shape, pcemic_2)
+        pcemic_3_ar = numpy.full(array_shape, pcemic_3)
 
         agdrat = forage._aboveground_ratio(
-            anps, tca, pcemic_1, pcemic_2, pcemic_3, cemicb)
-
+            anps_ar, tca_ar, pcemic_1_ar, pcemic_2_ar, pcemic_3_ar)
         self.assert_all_values_in_array_within_range(
-            agdrat, known_agdrat - tolerance, known_agdrat + tolerance,
+            agdrat, point_agdrat - tolerance, point_agdrat + tolerance,
+            agdrat_nodata)
+
+        # known inputs: econt < pcemic_3
+        tca = 413.
+        anps = 100.
+        pcemic_1 = 17.4
+        pcemic_2 = 3.2
+        pcemic_3 = 0.11
+        point_agdrat = agdrat_point(anps, tca, pcemic_1, pcemic_2, pcemic_3)
+
+        tca_ar = numpy.full(array_shape, tca)
+        anps_ar = numpy.full(array_shape, anps)
+        pcemic_1_ar = numpy.full(array_shape, pcemic_1)
+        pcemic_2_ar = numpy.full(array_shape, pcemic_2)
+        pcemic_3_ar = numpy.full(array_shape, pcemic_3)
+
+        agdrat = forage._aboveground_ratio(
+            anps_ar, tca_ar, pcemic_1_ar, pcemic_2_ar, pcemic_3_ar)
+        self.assert_all_values_in_array_within_range(
+            agdrat, point_agdrat - tolerance, point_agdrat + tolerance,
             agdrat_nodata)
 
     def test_structural_ratios(self):
@@ -909,9 +2505,9 @@ class foragetests(unittest.TestCase):
         }
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         create_random_raster(site_index_path, 1, 1)
-        create_random_raster(sv_reg['strucc_1_path'], 120, 180)
-        create_random_raster(sv_reg['struce_1_1_path'], 0.5, 1)
-        create_random_raster(sv_reg['struce_1_2_path'], 0.1, 0.5)
+        create_random_raster(sv_reg['strucc_1_path'], 120, 1800)
+        create_random_raster(sv_reg['struce_1_1_path'], 0.5, 10)
+        create_random_raster(sv_reg['struce_1_2_path'], 0.1, 0.50)
 
         pp_reg = {
             'rnewas_1_1_path': os.path.join(
@@ -1210,12 +2806,10 @@ class foragetests(unittest.TestCase):
         for pft_i in pft_id_set:
             sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
                 self.workspace_dir, 'aglivc_{}.tif'.format(pft_i))
-            create_random_raster(
-                sv_reg['aglivc_{}_path'.format(pft_i)], 0, 50)
+            create_random_raster(sv_reg['aglivc_{}_path'.format(pft_i)], 0, 50)
             sv_reg['stdedc_{}_path'.format(pft_i)] = os.path.join(
                 self.workspace_dir, 'stdedc_{}.tif'.format(pft_i))
-            create_random_raster(
-                sv_reg['stdedc_{}_path'.format(pft_i)], 0, 50)
+            create_random_raster(sv_reg['stdedc_{}_path'.format(pft_i)], 0, 50)
             sv_reg['avh2o_1_{}_path'.format(pft_i)] = os.path.join(
                 self.workspace_dir, 'avh2o_1_{}.tif'.format(pft_i))
             create_random_raster(
@@ -1265,7 +2859,7 @@ class foragetests(unittest.TestCase):
             aligned_inputs['pft_{}'.format(list(pft_id_set)[0])],
             _TARGET_NODATA)
         insert_nodata_values_into_raster(
-            sv_reg['aglivc_{}_path'.format(list(pft_id_set)[0])], _IC_NODATA)
+            sv_reg['aglivc_{}_path'.format(list(pft_id_set)[0])], _SV_NODATA)
         insert_nodata_values_into_raster(
             sv_reg['avh2o_1_{}_path'.format(list(pft_id_set)[1])],
             _TARGET_NODATA)
@@ -1331,9 +2925,10 @@ class foragetests(unittest.TestCase):
             minimum_acceptable_favail_P,
             maximum_acceptable_favail_P, _IC_NODATA)
 
+        insert_nodata_values_into_raster(sv_reg['minerl_1_1_path'], _SV_NODATA)
         for input_raster in [
-                sv_reg['minerl_1_1_path'], param_val_dict['favail_4'],
-                param_val_dict['favail_5'], param_val_dict['favail_6']]:
+                param_val_dict['favail_4'], param_val_dict['favail_5'],
+                param_val_dict['favail_6']]:
             insert_nodata_values_into_raster(input_raster, _IC_NODATA)
             forage._calc_favail_P(sv_reg, param_val_dict)
             self.assert_all_values_in_raster_within_range(
@@ -1356,10 +2951,10 @@ class foragetests(unittest.TestCase):
             known_favail_2 - tolerance, known_favail_2 + tolerance,
             _IC_NODATA)
 
-    def test_raster_sum(self):
-        """Test `raster_sum`.
+    def test_raster_list_sum(self):
+        """Test `raster_list_sum`.
 
-        Use the function `raster_sum` to calculate the sum across pixels
+        Use the function `raster_list_sum` to calculate the sum across pixels
         in three rasters containing nodata.  Test that when
         nodata_remove=False, the result also contains nodata values. Test
         that when nodata_remove=True, nodata pixels are treated as zero.
@@ -1386,13 +2981,13 @@ class foragetests(unittest.TestCase):
         target_nodata = -9.99
 
         # input rasters include no nodata values
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=False)
         self.assert_all_values_in_raster_within_range(
             target_path, num_rasters, num_rasters, target_nodata)
 
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=True)
         self.assert_all_values_in_raster_within_range(
@@ -1401,7 +2996,7 @@ class foragetests(unittest.TestCase):
         # one input raster includes nodata values
         insert_nodata_values_into_raster(raster_list[0], input_nodata)
 
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=False)
         self.assert_all_values_in_raster_within_range(
@@ -1429,13 +3024,13 @@ class foragetests(unittest.TestCase):
         input_including_nodata = None
         result_including_nodata = None
 
-        forage.raster_sum(
+        forage.raster_list_sum(
             raster_list, input_nodata, target_path, target_nodata,
             nodata_remove=True)
 
         # assert that minimum value in target_path is num_rasters - 1
         for offset_map, raster_block in pygeoprocessing.iterblocks(
-                target_path):
+                (target_path, 1)):
             if len(raster_block[raster_block != target_nodata]) == 0:
                 continue
             min_val = numpy.amin(
@@ -1502,8 +3097,8 @@ class foragetests(unittest.TestCase):
         # one pft has zero percent cover
         percent_cover_dict[pft_id_set[0]] = 0.
         create_constant_raster(
-                aligned_inputs['pft_{}'.format(pft_id_set[0])],
-                percent_cover_dict[pft_id_set[0]])
+            aligned_inputs['pft_{}'.format(pft_id_set[0])],
+            percent_cover_dict[pft_id_set[0]])
 
         known_weighted_sum = 59.46084
         forage.weighted_state_variable_sum(
@@ -1515,13 +3110,10 @@ class foragetests(unittest.TestCase):
         insert_nodata_values_into_raster(
             aligned_inputs['pft_{}'.format(pft_id_set[0])], _TARGET_NODATA)
         insert_nodata_values_into_raster(
-            sv_reg['{}_{}_path'.format(sv, pft_id_set[2])], _TARGET_NODATA)
+            sv_reg['{}_{}_path'.format(sv, pft_id_set[2])], _SV_NODATA)
 
         forage.weighted_state_variable_sum(
             sv, sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
-        self.assert_all_values_in_raster_within_range(
-            weighted_sum_path, known_weighted_sum - tolerance,
-            known_weighted_sum + tolerance, _TARGET_NODATA)
 
     def test_calc_available_nutrient(self):
         """Test `_calc_available_nutrient`.
@@ -1946,9 +3538,9 @@ class foragetests(unittest.TestCase):
         }
         tolerance = 0.0001
 
-        insert_nodata_values_into_raster(aglivc_path, -999)
+        insert_nodata_values_into_raster(aglivc_path, _SV_NODATA)
         insert_nodata_values_into_raster(prbmn_1_path, _IC_NODATA)
-        insert_nodata_values_into_raster(annual_precip_path, -9)
+        insert_nodata_values_into_raster(annual_precip_path, _TARGET_NODATA)
         forage.calc_ce_ratios(
             pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
@@ -2295,7 +3887,8 @@ class foragetests(unittest.TestCase):
                     minimum temperature and cm of snow that will melt
 
             Returns:
-                dict of modified quantities: snow, snlq, pet, inputs_after_snow
+                dict of modified quantities: snowmelt, snow, snlq, pet,
+                inputs_after_snow
             """
             tave = (max_temp + min_temp) / 2.
             inputs_after_snow = precip
@@ -2310,6 +3903,7 @@ class foragetests(unittest.TestCase):
                     # all precip is rain on snow, none left
                     inputs_after_snow = 0
 
+            snowmelt = 0
             if snow > 0:
                 snowtot = snow + snlq
                 evsnow = min(snowtot, (pet * 0.87))
@@ -2329,6 +3923,7 @@ class foragetests(unittest.TestCase):
                         inputs_after_snow = add
 
             results_dict = {
+                'snowmelt': snowmelt,
                 'snow': snow,
                 'snlq': snlq,
                 'pet': pet,
@@ -2373,6 +3968,7 @@ class foragetests(unittest.TestCase):
         min_temp_path = os.path.join(self.workspace_dir, 'min_temp.tif')
         prev_snow_path = os.path.join(self.workspace_dir, 'prev_snow.tif')
         prev_snlq_path = os.path.join(self.workspace_dir, 'prev_snlq.tif')
+        snowmelt_path = os.path.join(self.workspace_dir, 'snowmelt.tif')
         snow_path = os.path.join(self.workspace_dir, 'snow.tif')
         snlq_path = os.path.join(self.workspace_dir, 'snlq.tif')
         inputs_after_snow_path = os.path.join(
@@ -2411,12 +4007,16 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
 
         self.assert_all_values_in_raster_within_range(
             pet_rem_path, result_dict['pet'] - tolerance,
             result_dict['pet'] + tolerance, _TARGET_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'], result_dict['snow'],
@@ -2473,8 +4073,12 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'] - tolerance,
@@ -2534,8 +4138,12 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'] - tolerance,
@@ -2596,8 +4204,12 @@ class foragetests(unittest.TestCase):
         forage._snow(
             site_index_path, site_param_table, precip_path, tave_path,
             max_temp_path, min_temp_path, prev_snow_path, prev_snlq_path,
-            CURRENT_MONTH, snow_path, snlq_path, inputs_after_snow_path,
-            pet_rem_path)
+            CURRENT_MONTH, snowmelt_path, snow_path, snlq_path,
+            inputs_after_snow_path, pet_rem_path)
+
+        self.assert_all_values_in_raster_within_range(
+            snowmelt_path, result_dict['snowmelt'] - tolerance,
+            result_dict['snowmelt'] + tolerance, _TARGET_NODATA)
 
         self.assert_all_values_in_raster_within_range(
             snow_path, result_dict['snow'], result_dict['snow'],
@@ -3190,31 +4802,6 @@ class foragetests(unittest.TestCase):
             result_dict['modified_moisture_inputs'] + tolerance,
             _TARGET_NODATA)
 
-    def test_get_nlaypg_max(self):
-        """Test `_get_nlaypg_max`.
-
-        Use the function `get_nlaypg_max` to retrieve the maximum value of
-        nlaypg across plant functional types.
-
-        Raises:
-            AssertionError if `get_nlaypg_max` does not match results
-            calculated by hand
-
-        Returns:
-            None
-        """
-        from natcap.invest import forage
-
-        veg_trait_table = {
-            1: {'nlaypg': 4},
-            2: {'nlaypg': 6},
-            3: {'nlaypg': 2},
-        }
-
-        known_nlaypg_max = 6
-        nlaypg_max = forage.get_nlaypg_max(veg_trait_table)
-        self.assertEqual(nlaypg_max, known_nlaypg_max)
-
     def test_distribute_water_to_soil_layer(self):
         """Test `distribute_water_to_soil_layer`.
 
@@ -3531,7 +5118,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
         insert_nodata_values_into_array(rwcf_1_ar, _TARGET_NODATA)
-        insert_nodata_values_into_array(asmos_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(asmos_1_ar, _SV_NODATA)
 
         evlos = forage.calc_evaporation_loss(
             rwcf_1_ar, pevp_ar, absevap_ar, asmos_1_ar, awilt_1_ar, adep_1_ar)
@@ -3619,6 +5206,58 @@ class foragetests(unittest.TestCase):
         create_random_raster(raster1_path, raster1_val, raster1_val)
         create_random_raster(raster2_path, raster2_nodata, raster2_nodata)
         forage.raster_difference(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=True)
+        self.assert_all_values_in_raster_within_range(
+            target_path, raster1_val, raster1_val, _TARGET_NODATA)
+
+    def test_raster_sum(self):
+        """Test `raster_sum`.
+
+        Use the function `raster_sum` to add two rasters, while allowing
+        nodata values in one raster to propagate to the result.  Then
+        calculate the difference again, treating nodata values as zero.
+
+        Raises:
+            AssertionError if `raster_sum` does not match values calculated by
+                hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        raster1_val = 10
+        raster2_val = 3
+        known_result = raster1_val + raster2_val
+        raster1_path = os.path.join(self.workspace_dir, 'raster1.tif')
+        raster2_path = os.path.join(self.workspace_dir, 'raster2.tif')
+        target_path = os.path.join(self.workspace_dir, 'target.tif')
+        create_random_raster(raster1_path, raster1_val, raster1_val)
+        create_random_raster(raster2_path, raster2_val, raster2_val)
+
+        raster1_nodata = -99
+        raster2_nodata = -999
+
+        forage.raster_sum(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=True)
+        self.assert_all_values_in_raster_within_range(
+            target_path, known_result, known_result, _TARGET_NODATA)
+
+        # rasters contain nodata, which should be propagated to result
+        insert_nodata_values_into_raster(raster1_path, raster1_nodata)
+        insert_nodata_values_into_raster(raster2_path, raster2_nodata)
+        forage.raster_sum(
+            raster1_path, raster1_nodata, raster2_path, raster2_nodata,
+            target_path, _TARGET_NODATA, nodata_remove=False)
+        self.assert_all_values_in_raster_within_range(
+            target_path, known_result, known_result, _TARGET_NODATA)
+
+        # full raster of nodata, which should be treated as zero
+        create_random_raster(raster1_path, raster1_val, raster1_val)
+        create_random_raster(raster2_path, raster2_nodata, raster2_nodata)
+        forage.raster_sum(
             raster1_path, raster1_nodata, raster2_path, raster2_nodata,
             target_path, _TARGET_NODATA, nodata_remove=True)
         self.assert_all_values_in_raster_within_range(
@@ -3953,6 +5592,7 @@ class foragetests(unittest.TestCase):
             # monthly shared quantities
             month_reg = {
                 'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+                'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif')
             }
             for pft_i in pft_dict.iterkeys():
                 month_reg['tgprod_{}'.format(pft_i)] = os.path.join(
@@ -4055,16 +5695,16 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snow_path'],
             results_dict['snow'] - tolerance,
-            results_dict['snow'] + tolerance, _TARGET_NODATA)
+            results_dict['snow'] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snlq_path'],
             results_dict['snlq'] - tolerance,
-            results_dict['snlq'] + tolerance, _TARGET_NODATA)
+            results_dict['snlq'] + tolerance, _SV_NODATA)
         for lyr in xrange(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
-                results_dict['asmos'][lyr] + tolerance, _TARGET_NODATA)
+                results_dict['asmos'][lyr] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['month_reg']['amov_2'],
             results_dict['amov_2'] - tolerance,
@@ -4073,11 +5713,11 @@ class foragetests(unittest.TestCase):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['avh2o_1_{}_path'.format(pft_i)],
                 results_dict['avh2o_1'][pft_i] - tolerance,
-                results_dict['avh2o_1'][pft_i] + tolerance, _TARGET_NODATA)
+                results_dict['avh2o_1'][pft_i] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['avh2o_3_path'],
             results_dict['avh2o_3'] - tolerance,
-            results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
+            results_dict['avh2o_3'] + tolerance, _SV_NODATA)
 
         # large snowmelt, large precip
         pet = 4.9680004
@@ -4159,16 +5799,16 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snow_path'],
             results_dict['snow'] - tolerance,
-            results_dict['snow'] + tolerance, _TARGET_NODATA)
+            results_dict['snow'] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snlq_path'],
             results_dict['snlq'] - tolerance,
-            results_dict['snlq'] + tolerance, _TARGET_NODATA)
+            results_dict['snlq'] + tolerance, _SV_NODATA)
         for lyr in xrange(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
-                results_dict['asmos'][lyr] + tolerance, _TARGET_NODATA)
+                results_dict['asmos'][lyr] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             input_dict['month_reg']['amov_2'],
             results_dict['amov_2'] - amov_tolerance,
@@ -4181,4 +5821,2491 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['avh2o_3_path'],
             results_dict['avh2o_3'] - tolerance,
-            results_dict['avh2o_3'] + tolerance, _TARGET_NODATA)
+            results_dict['avh2o_3'] + tolerance, _SV_NODATA)
+
+    def test_monthly_N_fixation(self):
+        """Test `_monthly_N_fixation`.
+
+        Use the function `_monthly_N_fixation` to calculate monthly atmospheric
+        N deposition and add it to the surface mineral N pool.  Compare results
+        to values calculated by point-based version.
+
+        Raises:
+            AssertionError if updated mineral_1_1 does not match value
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        # known inputs
+        precip = 12.6
+        month_index = 4
+        annual_precip = 230.
+        baseNdep = 24.
+        epnfs_2 = 0.01
+        prev_minerl_1_1 = 3.2
+        minerl_1_1 = monthly_N_fixation_point(
+            precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1)
+
+        aligned_inputs = {
+            'precip_{}'.format(month_index): os.path.join(
+                self.workspace_dir, 'precip_{}.tif'.format(month_index)),
+            'site_index': os.path.join(
+                    self.workspace_dir, 'site_index.tif'),
+        }
+        year_reg = {
+            'annual_precip_path': os.path.join(
+                self.workspace_dir, 'annual_precip.tif'),
+            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif')
+        }
+        prev_sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1_prev.tif'),
+        }
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+        }
+        site_param_table = {1: {'epnfs_2': epnfs_2}}
+
+        create_random_raster(
+            aligned_inputs['precip_{}'.format(month_index)], precip,
+            precip)
+        create_random_raster(aligned_inputs['site_index'], 1, 1)
+        create_random_raster(
+            year_reg['annual_precip_path'], annual_precip, annual_precip)
+        create_random_raster(year_reg['baseNdep_path'], baseNdep, baseNdep)
+        create_random_raster(
+            prev_sv_reg['minerl_1_1_path'], prev_minerl_1_1, prev_minerl_1_1)
+
+        tolerance = 0.000001
+        forage._monthly_N_fixation(
+            aligned_inputs, month_index, site_param_table,
+            year_reg, prev_sv_reg, sv_reg)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
+            minerl_1_1 + tolerance, _SV_NODATA)
+
+        insert_nodata_values_into_raster(
+            aligned_inputs['precip_{}'.format(month_index)], -9999)
+        insert_nodata_values_into_raster(
+            year_reg['baseNdep_path'], _TARGET_NODATA)
+        insert_nodata_values_into_raster(
+            prev_sv_reg['minerl_1_1_path'], _SV_NODATA)
+
+        forage._monthly_N_fixation(
+            aligned_inputs, month_index, site_param_table,
+            year_reg, prev_sv_reg, sv_reg)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
+            minerl_1_1 + tolerance, _SV_NODATA)
+
+    def test_calc_anerb(self):
+        """Test `calc_anerb`.
+
+        Use the function `calc_anerb` to calculate the effect of soil anaerobic
+        conditions on decomposition. Compare the calculated value to a value
+        calculated by point-based version.
+
+        Raises:
+            AssertionError if anerb does not match value calculated by
+                point-based version
+
+        Returns:
+            None
+        """
+
+        from natcap.invest import forage
+
+        array_shape = (10, 10)
+        tolerance = 0.00000001
+
+        # low rprpet, anerb = 1
+        rprpet = 0.8824
+        pevap = 6.061683
+        drain = 0.003
+        aneref_1 = 1.5
+        aneref_2 = 3.
+        aneref_3 = 0.3
+
+        rprpet_arr = numpy.full(array_shape, rprpet)
+        pevap_arr = numpy.full(array_shape, pevap)
+        drain_arr = numpy.full(array_shape, drain)
+        aneref_1_arr = numpy.full(array_shape, aneref_1)
+        aneref_2_arr = numpy.full(array_shape, aneref_2)
+        aneref_3_arr = numpy.full(array_shape, aneref_3)
+
+        anerb = calc_anerb_point(
+            rprpet, pevap, drain, aneref_1, aneref_2, aneref_3)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(rprpet_arr, _TARGET_NODATA)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        # high rprpet, xh2o > 0
+        rprpet = 2.0004
+        rprpet_arr = numpy.full(array_shape, rprpet)
+        anerb = calc_anerb_point(
+            rprpet, pevap, drain, aneref_1, aneref_2, aneref_3)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(drain_arr, _IC_NODATA)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        # high rprpet, xh2o = 0
+        drain = 1.
+        drain_arr = numpy.full(array_shape, drain)
+        anerb = calc_anerb_point(
+            rprpet, pevap, drain, aneref_1, aneref_2, aneref_3)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(pevap_arr, _TARGET_NODATA)
+        anerb_arr = forage.calc_anerb(
+            rprpet_arr, pevap_arr, drain_arr, aneref_1_arr, aneref_2_arr,
+            aneref_3_arr)
+        self.assert_all_values_in_array_within_range(
+            anerb_arr, anerb - tolerance, anerb + tolerance, _TARGET_NODATA)
+
+    def test_declig_point(self):
+        """Test `declig_point`.
+
+        Use the function `declig_point` to calculate change in state variables
+        as material containing lignin decomposes into SOM2 and SOM1. Compare
+        calculated changes in state variables to changes calculated by hand.
+
+        Raises:
+            AssertionError if `declig_point` does not match values calculated
+                by hand
+
+        Returns:
+            None
+        """
+        # no decomposition happens, mineral ratios are insufficient
+        aminrl_1 = 0.
+        aminrl_2 = 0.
+        ligcon = 0.3779
+        rsplig = 0.0146
+        ps1co2_lyr = 0.0883
+        strucc_lyr = 155.5253
+        tcflow = 40.82
+        struce_lyr_1 = 0.7776
+        struce_lyr_2 = 0.3111
+        rnew_lyr_1_1 = 190.  # observed ratio: 200.0068
+        rnew_lyr_2_1 = 300.  # observed ratio: 499.9206
+        rnew_lyr_1_2 = 0.
+        rnew_lyr_2_2 = 0.
+        minerl_1_1 = 0.
+        minerl_1_2 = 0.
+
+        d_strucc_lyr = declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_1 = declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_2 = declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_1 = declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_2 = declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_gromin_1 = declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2c_lyr = declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_1 = declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_2 = declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1c_lyr = declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_1 = declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_2 = declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+
+        self.assertEqual(d_strucc_lyr, 0)
+        self.assertEqual(d_struce_lyr_1, 0)
+        self.assertEqual(d_struce_lyr_2, 0)
+        self.assertEqual(d_minerl_1_1, 0)
+        self.assertEqual(d_minerl_1_2, 0)
+        self.assertEqual(d_gromin_1, 0)
+        self.assertEqual(d_som2c_lyr, 0)
+        self.assertEqual(d_som2e_lyr_1, 0)
+        self.assertEqual(d_som2e_lyr_2, 0)
+        self.assertEqual(d_som1c_lyr, 0)
+        self.assertEqual(d_som1e_lyr_1, 0)
+        self.assertEqual(d_som1e_lyr_2, 0)
+
+        # decomposition occurs, subsidized by mineral N and P
+        aminrl_1 = 6.4944
+        aminrl_2 = 33.2791
+        ligcon = 0.3779
+        rsplig = 0.0146
+        ps1co2_lyr = 0.0883
+        strucc_lyr = 155.5253
+        tcflow = 40.82
+        struce_lyr_1 = 0.7776
+        struce_lyr_2 = 0.3111
+        rnew_lyr_1_1 = 210.8  # greater than observed ratio: 200.0068
+        rnew_lyr_2_1 = 540.2  # greater than observed ratio: 499.9206
+        rnew_lyr_1_2 = 190.3
+        rnew_lyr_2_2 = 520.8
+        minerl_1_1 = 6.01
+        minerl_1_2 = 32.87
+
+        # values calculated by hand
+        d_strucc_lyr_obs = -40.82
+        d_struce_lyr_1_obs = -0.204093044668617
+        d_struce_lyr_2_obs = -0.08165296578756
+        d_minerl_1_1_obs = 0.014387319170996
+        d_minerl_1_2_obs = 0.00960796090459662
+        d_gromin_1_obs = 0.0182639608121622
+        d_som2c_lyr_obs = 15.2006601812
+        d_som2e_lyr_1_obs = 0.0798773525023647
+        d_som2e_lyr_2_obs = 0.029187135524578
+        d_som1c_lyr_obs = 23.1518210274
+        d_som1e_lyr_1_obs = 0.109828372995256
+        d_som1e_lyr_2_obs = 0.0428578693583858
+
+        # call 12 times, 12 return values
+        d_strucc_lyr = declig_point(
+            'd_strucc')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_1 = declig_point(
+            'd_struce_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_struce_lyr_2 = declig_point(
+            'd_struce_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_1 = declig_point(
+            'd_minerl_1_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_minerl_1_2 = declig_point(
+            'd_minerl_1_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_gromin_1 = declig_point(
+            'd_gromin_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2c_lyr = declig_point(
+            'd_som2c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_1 = declig_point(
+            'd_som2e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som2e_lyr_2 = declig_point(
+            'd_som2e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1c_lyr = declig_point(
+            'd_som1c')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_1 = declig_point(
+            'd_som1e_1')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+        d_som1e_lyr_2 = declig_point(
+            'd_som1e_2')(
+                aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr,
+                tcflow, struce_lyr_1, struce_lyr_2, rnew_lyr_1_1, rnew_lyr_2_1,
+                rnew_lyr_1_2, rnew_lyr_2_2, minerl_1_1, minerl_1_2)
+
+        self.assertAlmostEqual(d_strucc_lyr, d_strucc_lyr_obs, places=10)
+        self.assertAlmostEqual(d_struce_lyr_1, d_struce_lyr_1_obs, places=10)
+        self.assertAlmostEqual(d_struce_lyr_2, d_struce_lyr_2_obs, places=10)
+        self.assertAlmostEqual(d_minerl_1_1, d_minerl_1_1_obs, places=10)
+        self.assertAlmostEqual(d_minerl_1_2, d_minerl_1_2_obs, places=10)
+        self.assertAlmostEqual(d_gromin_1, d_gromin_1_obs, places=10)
+        self.assertAlmostEqual(d_som2c_lyr, d_som2c_lyr_obs, places=10)
+        self.assertAlmostEqual(d_som2e_lyr_1, d_som2e_lyr_1_obs, places=10)
+        self.assertAlmostEqual(d_som2e_lyr_2, d_som2e_lyr_2_obs, places=10)
+        self.assertAlmostEqual(d_som1c_lyr, d_som1c_lyr_obs, places=10)
+        self.assertAlmostEqual(d_som1e_lyr_1, d_som1e_lyr_1_obs, places=10)
+        self.assertAlmostEqual(d_som1e_lyr_2, d_som1e_lyr_2_obs, places=10)
+
+    @unittest.skip("skipping decomposition test")
+    def test_decomposition(self):
+        """Test `_decomposition`.
+
+        Test the function `_decomposition` to calculate the change in state
+        variables following one decomposition step.  Compare modified state
+        variables to values calculated by point version of decomposition.
+
+        Raises:
+            AssertionError if change in state variable calculated by
+                `_decomposition` does not match change calculated by point-
+                based version
+
+        Returns:
+            None
+        """
+        def generate_model_inputs_from_point_inputs(
+                inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+                pp_reg_vals, rnew_dict):
+            """Generate model inputs for `_decomposition` from test inputs."""
+            nrows = 1
+            ncols = 1
+
+            aligned_inputs = {
+                'precip_{}'.format(month_index): os.path.join(
+                    self.workspace_dir, 'precip.tif'),
+                'min_temp_{}'.format(current_month): os.path.join(
+                    self.workspace_dir, 'min_temp.tif'),
+                'max_temp_{}'.format(current_month): os.path.join(
+                    self.workspace_dir, 'max_temp.tif'),
+                'ph_path': os.path.join(self.workspace_dir, 'pH.tif'),
+                'site_index': os.path.join(
+                    self.workspace_dir, 'site_index.tif'),
+            }
+            create_random_raster(
+                aligned_inputs['precip_{}'.format(month_index)],
+                inputs['precip'], inputs['precip'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['min_temp_{}'.format(current_month)],
+                inputs['min_temp'], inputs['min_temp'],
+                nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['max_temp_{}'.format(current_month)],
+                inputs['max_temp'], inputs['max_temp'], nrows=nrows,
+                ncols=ncols)
+            create_random_raster(
+                aligned_inputs['ph_path'], inputs['pH'], inputs['pH'],
+                nrows=nrows, ncols=ncols)
+            create_random_raster(
+                aligned_inputs['site_index'], 1, 1, nrows=nrows, ncols=ncols)
+
+            site_param_table = {1: {}}
+            for key, value in params.iteritems():
+                site_param_table[1][key] = value
+
+            year_reg = {
+                'annual_precip_path': os.path.join(
+                    self.workspace_dir, 'annual_precip.tif'),
+                'baseNdep_path': os.path.join(
+                    self.workspace_dir, 'baseNdep.tif'),
+            }
+            create_random_raster(
+                year_reg['annual_precip_path'], year_reg_vals['annual_precip'],
+                year_reg_vals['annual_precip'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                year_reg['baseNdep_path'], year_reg_vals['baseNdep'],
+                year_reg_vals['baseNdep'], nrows=nrows, ncols=ncols)
+
+            month_reg = {
+                'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif'),
+                'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+            }
+            create_random_raster(
+                month_reg['snowmelt'], month_reg_vals['snowmelt'],
+                month_reg_vals['snowmelt'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                month_reg['amov_2'], month_reg_vals['amov_2'],
+                month_reg_vals['amov_2'], nrows=nrows, ncols=ncols)
+
+            prev_sv_reg = {}
+            sv_reg = {}
+            for state_var in [
+                    'minerl_1_1', 'minerl_1_2', 'snow', 'avh2o_3', 'parent_2',
+                    'secndy_2', 'occlud']:
+                prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}_p.tif'.format(state_var))
+                sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}.tif'.format(state_var))
+                create_random_raster(
+                    prev_sv_reg['{}_path'.format(state_var)],
+                    state_var_dict[state_var], state_var_dict[state_var],
+                    nrows=nrows, ncols=ncols)
+                create_random_raster(
+                    sv_reg['{}_path'.format(state_var)],
+                    state_var_dict[state_var], state_var_dict[state_var],
+                    nrows=nrows, ncols=ncols)
+            for compartment in ['strlig']:
+                for lyr in [1, 2]:
+                    state_var = '{}_{}'.format(compartment, lyr)
+                    prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}_p.tif'.format(state_var))
+                    sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}.tif'.format(state_var))
+                    create_random_raster(
+                        prev_sv_reg['{}_path'.format(state_var)],
+                        state_var_dict[state_var], state_var_dict[state_var],
+                        nrows=nrows, ncols=ncols)
+            for compartment in ['som3']:
+                state_var = '{}c'.format(compartment)
+                prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}_p.tif'.format(state_var))
+                sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}.tif'.format(state_var))
+                create_random_raster(
+                    prev_sv_reg['{}_path'.format(state_var)],
+                    state_var_dict[state_var],
+                    state_var_dict[state_var],
+                    nrows=nrows, ncols=ncols)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}'.format(compartment, iel)
+                    prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}_p.tif'.format(state_var))
+                    sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}.tif'.format(state_var))
+                    create_random_raster(
+                        prev_sv_reg['{}_path'.format(state_var)],
+                        state_var_dict[state_var],
+                        state_var_dict[state_var],
+                        nrows=nrows, ncols=ncols)
+            for compartment in ['struc', 'metab', 'som1', 'som2']:
+                for lyr in [1, 2]:
+                    state_var = '{}c_{}'.format(compartment, lyr)
+                    prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}_p.tif'.format(state_var))
+                    sv_reg['{}_path'.format(state_var)] = os.path.join(
+                        self.workspace_dir, '{}.tif'.format(state_var))
+                    create_random_raster(
+                        prev_sv_reg['{}_path'.format(state_var)],
+                        state_var_dict[state_var],
+                        state_var_dict[state_var],
+                        nrows=nrows, ncols=ncols)
+                    for iel in [1, 2]:
+                        state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                        prev_sv_reg['{}_path'.format(state_var)] = (
+                            os.path.join(
+                                self.workspace_dir,
+                                '{}_p.tif'.format(state_var)))
+                        sv_reg['{}_path'.format(state_var)] = os.path.join(
+                            self.workspace_dir, '{}.tif'.format(state_var))
+                        create_random_raster(
+                            prev_sv_reg['{}_path'.format(state_var)],
+                            state_var_dict[state_var],
+                            state_var_dict[state_var],
+                            nrows=nrows, ncols=ncols)
+            for lyr in xrange(1, params['nlayer'] + 1):
+                state_var = 'minerl_{}_2'.format(lyr)
+                prev_sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}_p.tif'.format(state_var))
+                sv_reg['{}_path'.format(state_var)] = os.path.join(
+                    self.workspace_dir, '{}.tif'.format(state_var))
+                create_random_raster(
+                    prev_sv_reg['{}_path'.format(state_var)],
+                    state_var_dict[state_var],
+                    state_var_dict[state_var],
+                    nrows=nrows, ncols=ncols)
+            pp_reg = {
+                'rnewas_1_1_path': os.path.join(
+                    self.workspace_dir, 'rnewas_1_1.tif'),
+                'rnewas_1__path': os.path.join(
+                    self.workspace_dir, 'rnewas_1_2.tif'),
+                'rnewas_2_1_path': os.path.join(
+                    self.workspace_dir, 'rnewas_2_1.tif'),
+                'rnewas_2_2_path': os.path.join(
+                    self.workspace_dir, 'rnewas_2_2.tif'),
+                'rnewbs_1_1_path': os.path.join(
+                    self.workspace_dir, 'rnewbs_1_1.tif'),
+                'rnewbs_1_2_path': os.path.join(
+                    self.workspace_dir, 'rnewbs_1_2.tif'),
+                'rnewbs_2_1_path': os.path.join(
+                    self.workspace_dir, 'rnewbs_2_1.tif'),
+                'rnewbs_2_2_path': os.path.join(
+                    self.workspace_dir, 'rnewbs_2_2.tif'),
+            }
+            for key in rnew_dict.iterkeys():
+                create_random_raster(
+                    pp_reg[key], rnew_dict[key], rnew_dict[key],
+                    nrows=nrows, ncols=ncols)
+            pp_reg['eftext_path'] = os.path.join(
+                self.workspace_dir, 'eftext.tif')
+            pp_reg['orglch_path'] = os.path.join(
+                self.workspace_dir, 'orglch.tif')
+            pp_reg['fps1s3_path'] = os.path.join(
+                self.workspace_dir, 'fps1s3.tif')
+            pp_reg['fps2s3_path'] = os.path.join(
+                self.workspace_dir, 'fps2s3.tif')
+            create_random_raster(
+                pp_reg['eftext_path'], pp_reg_vals['eftext'],
+                pp_reg_vals['eftext'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                pp_reg['orglch_path'], pp_reg_vals['orglch'],
+                pp_reg_vals['orglch'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                pp_reg['fps1s3_path'], pp_reg_vals['fps1s3'],
+                pp_reg_vals['fps1s3'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                pp_reg['fps2s3_path'], pp_reg_vals['fps2s3'],
+                pp_reg_vals['fps2s3'], nrows=nrows, ncols=ncols)
+
+            input_dict = {
+                'aligned_inputs': aligned_inputs,
+                'site_param_table': site_param_table,
+                'year_reg': year_reg,
+                'month_reg': month_reg,
+                'prev_sv_reg': prev_sv_reg,
+                'sv_reg': sv_reg,
+                'pp_reg': pp_reg,
+            }
+            return input_dict
+        from natcap.invest import forage
+
+        # known inputs
+        current_month = 4
+        month_index = 2
+        inputs = {
+            'min_temp': 3.2,
+            'max_temp': 17.73,
+            'precip': 30.5,
+            'pH': 6.84,
+        }
+        params = {
+            'fwloss_4': 0.8,
+            'teff_1': 15.4,
+            'teff_2': 11.75,
+            'teff_3': 29.7,
+            'teff_4': 0.031,
+            'drain': 1,
+            'aneref_1': 1.5,
+            'aneref_2': 3,
+            'aneref_3': 0.3,
+            'epnfs_2': 30.,
+            'sorpmx': 2,
+            'pslsrb': 1,
+            'strmax_1': 5000,
+            'dec1_1': 3.9,
+            'pligst_1': 3,
+            'rsplig': 0.3,
+            'ps1co2_1': 0.45,
+            'strmax_2': 5000,
+            'dec1_2': 4.9,
+            'pligst_2': 3,
+            'ps1co2_2': 0.55,
+            'pcemic1_1_1': 16,
+            'pcemic1_2_1': 10,
+            'pcemic1_3_1': 0.02,
+            'pcemic1_1_2': 200,
+            'pcemic1_2_2': 99,
+            'pcemic1_3_2': 0.0015,
+            'dec2_1': 14.8,
+            'pmco2_1': 0.55,
+            'varat1_1_1': 14,
+            'varat1_2_1': 3,
+            'varat1_3_1': 2,
+            'varat1_1_2': 150,
+            'varat1_2_2': 30,
+            'varat1_3_2': 2,
+            'dec2_2': 18.5,
+            'pmco2_2': 0.55,
+            'rad1p_1_1': 12,
+            'rad1p_2_1': 3,
+            'rad1p_3_1': 5,
+            'rad1p_1_2': 220,
+            'rad1p_2_2': 5,
+            'rad1p_3_2': 100,
+            'dec3_1': 6,
+            'p1co2a_1': 0.6,
+            'varat22_1_1': 20,
+            'varat22_2_1': 12,
+            'varat22_3_1': 2,
+            'varat22_1_2': 400,
+            'varat22_2_2': 100,
+            'varat22_3_2': 2,
+            'dec3_2': 7.3,
+            'animpt': 5,
+            'varat3_1_1': 8,
+            'varat3_2_1': 6,
+            'varat3_3_1': 2,
+            'varat3_1_2': 200,
+            'varat3_2_2': 50,
+            'varat3_3_2': 2,
+            'omlech_3': 60,
+            'dec5_2': 0.2,
+            'p2co2_2': 0.55,
+            'dec5_1': 0.2,
+            'p2co2_1': 0.55,
+            'dec4': 0.0045,
+            'p3co2': 0.55,
+            'cmix': 0.5,
+            'pparmn_2': 0.0001,
+            'psecmn_2': 0.0022,
+            'nlayer': 5,
+            'pmnsec_2': 0,
+            'psecoc1': 0,
+            'psecoc2': 0,
+            'vlossg': 1,
+        }
+        state_var_dict = {
+            'snow': 0.,
+            'avh2o_3': 3.110,
+            'strlig_1': 0.3779,
+            'strlig_2': 0.2871,
+            'minerl_1_1': 6.4143,
+            'minerl_1_2': 33.1954,
+            'strucc_1': 156.0546,
+            'struce_1_1': 0.7803,
+            'struce_1_2': 0.3121,
+            'som2c_1': 92.9935,
+            'som2e_1_1': 4.2466,
+            'som2e_1_2': 0.1328,
+            'som1c_1': 12.8192,
+            'som1e_1_1': 1.5752,
+            'som1e_1_2': 0.1328,
+            'strucc_2': 163.2008,
+            'struce_2_1': 0.816,
+            'struce_2_2': 0.3264,
+            'som2c_2': 922.1382,
+            'som2e_2_1': 60.0671,
+            'som2e_2_2': 5.6575,
+            'som1c_2': 39.1055,
+            'som1e_2_1': 12.2767,
+            'som1e_2_2': 1.2263,
+            'metabc_1': 13.7579,
+            'metabe_1_1': 1.1972,
+            'metabe_1_2': 0.0351,
+            'metabc_2': 9.8169,
+            'metabe_2_1': 0.6309,
+            'metabe_2_2': 0.088,
+            'som3c': 544.8848,
+            'som3e_1': 87.4508,
+            'som3e_2': 79.917,
+            'parent_2': 100.,
+            'secndy_2': 50.,
+            'occlud': 50.,
+        }
+        for lyr in xrange(1, params['nlayer'] + 1):
+            state_var_dict['minerl_{}_2'.format(lyr)] = 20.29
+
+        year_reg_vals = {
+            'annual_precip': 230.,
+            'baseNdep': 24.,
+        }
+        month_reg_vals = {
+            'snowmelt': 0.29,
+            'amov_2': 0.481,
+        }
+        pp_reg_vals = {
+            'eftext': 0.15,
+            'orglch': 0.01,
+            'fps1s3': 0.58,
+            'fps2s3': 0.58,
+            'p1co2_2': 0.55,
+        }
+        rnew_dict = {
+            'rnewas_1_1': 210.8,
+            'rnewas_2_1': 540.2,
+            'rnewas_1_2': 190.3,
+            'rnewas_2_2': 520.8,
+            'rnewbs_1_1': 210.8,
+            'rnewbs_2_1': 540.2,
+            'rnewbs_1_2': 190.3,
+            'rnewbs_2_2': 520.8,
+        }
+        pevap = 9.324202
+        input_dict = generate_model_inputs_from_point_inputs(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            pp_reg_vals, rnew_dict)
+
+        sv_mod_point = decomposition_point(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            pp_reg_vals, rnew_dict, pevap)
+
+        sv_mod_raster = forage._decomposition(
+            input_dict['aligned_inputs'], current_month, month_index,
+            input_dict['site_param_table'], input_dict['year_reg'],
+            input_dict['month_reg'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'])
+
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            tolerance = 0.0001
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    point_value = sv_mod_point[state_var]
+                    model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                    self.assert_all_values_in_raster_within_range(
+                        model_res_path, point_value - tolerance,
+                        point_value + tolerance, _SV_NODATA)
+        for compartment in ['som3']:
+            state_var = '{}c'.format(compartment)
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+            for iel in [1, 2]:
+                state_var = '{}e_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for compartment in ['minerl_1']:
+            tolerance = 0.001
+            for iel in [1, 2]:
+                state_var = '{}_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+
+        # no decomposition, mineral ratios are insufficient
+        rnew_dict = {
+            'rnewas_1_1': 190.,
+            'rnewas_2_1': 300.,
+            'rnewas_1_2': 140.,
+            'rnewas_2_2': 200.,
+            'rnewbs_1_1': 190.,
+            'rnewbs_2_1': 300.,
+            'rnewbs_1_2': 140.,
+            'rnewbs_2_2': 200.
+        }
+        state_var_dict['minerl_1_1'] = 0.00000001
+        state_var_dict['minerl_1_2'] = 0.00000001
+
+        input_dict = generate_model_inputs_from_point_inputs(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            pp_reg_vals, rnew_dict)
+
+        sv_mod_point = decomposition_point(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            pp_reg_vals, rnew_dict, pevap)
+
+        sv_mod_raster = forage._decomposition(
+            input_dict['aligned_inputs'], current_month, month_index,
+            input_dict['site_param_table'], input_dict['year_reg'],
+            input_dict['month_reg'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'])
+
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            tolerance = 0.0001
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    point_value = sv_mod_point[state_var]
+                    model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                    self.assert_all_values_in_raster_within_range(
+                        model_res_path, point_value - tolerance,
+                        point_value + tolerance, _SV_NODATA)
+        for compartment in ['som3']:
+            state_var = '{}c'.format(compartment)
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+            for iel in [1, 2]:
+                state_var = '{}e_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for compartment in ['minerl_1']:
+            tolerance = 0.001
+            for iel in [1, 2]:
+                state_var = '{}_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+
+        # decomposition occurs, subsidized by mineral N and P
+        rnew_dict = {
+            'rnewas_1_1': 210.8,
+            'rnewas_2_1': 540.2,
+            'rnewas_1_2': 190.3,
+            'rnewas_2_2': 520.8,
+            'rnewbs_1_1': 210.8,
+            'rnewbs_2_1': 540.2,
+            'rnewbs_1_2': 190.3,
+            'rnewbs_2_2': 520.8
+        }
+        state_var_dict['minerl_1_1'] = 6.01
+        state_var_dict['minerl_1_2'] = 32.87
+
+        state_var_dict['strlig_1'] = 0.2987
+        state_var_dict['strlig_2'] = 0.4992
+
+        input_dict = generate_model_inputs_from_point_inputs(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            pp_reg_vals, rnew_dict)
+
+        sv_mod_point = decomposition_point(
+            inputs, params, state_var_dict, year_reg_vals, month_reg_vals,
+            pp_reg_vals, rnew_dict, pevap)
+
+        sv_mod_raster = forage._decomposition(
+            input_dict['aligned_inputs'], current_month, month_index,
+            input_dict['site_param_table'], input_dict['year_reg'],
+            input_dict['month_reg'], input_dict['prev_sv_reg'],
+            input_dict['sv_reg'], input_dict['pp_reg'])
+
+        for compartment in ['struc', 'metab', 'som1', 'som2']:
+            tolerance = 0.0001
+            for lyr in [1, 2]:
+                state_var = '{}c_{}'.format(compartment, lyr)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+                for iel in [1, 2]:
+                    state_var = '{}e_{}_{}'.format(compartment, lyr, iel)
+                    point_value = sv_mod_point[state_var]
+                    model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                    self.assert_all_values_in_raster_within_range(
+                        model_res_path, point_value - tolerance,
+                        point_value + tolerance, _SV_NODATA)
+        for compartment in ['som3']:
+            state_var = '{}c'.format(compartment)
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+            for iel in [1, 2]:
+                state_var = '{}e_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for compartment in ['minerl_1']:
+            tolerance = 0.001
+            for iel in [1, 2]:
+                state_var = '{}_{}'.format(compartment, iel)
+                point_value = sv_mod_point[state_var]
+                model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+                self.assert_all_values_in_raster_within_range(
+                    model_res_path, point_value - tolerance,
+                    point_value + tolerance, _SV_NODATA)
+        for state_var in ['parent_2', 'secndy_2', 'occlud']:
+            point_value = sv_mod_point[state_var]
+            model_res_path = sv_mod_raster['{}_path'.format(state_var)]
+            self.assert_all_values_in_raster_within_range(
+                model_res_path, point_value - tolerance,
+                point_value + tolerance, _SV_NODATA)
+
+    def test_esched(self):
+        """Test `esched`.
+
+        Use the function `esched` to calculate the flow of one element
+        accompanying decomposition of C.  Test that the function matches
+        values calculated by point-based version.
+
+        Raises:
+            AssertionError if `esched` does not match value calculated
+                by `esched_point`
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00000001
+
+        # immobilization
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 190.3
+        anps = 0.7776
+        labile = 6.01
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        # raster inputs
+        cflow_path = os.path.join(self.workspace_dir, 'cflow.tif')
+        tca_path = os.path.join(self.workspace_dir, 'tca.tif')
+        rcetob_path = os.path.join(self.workspace_dir, 'rcetob.tif')
+        anps_path = os.path.join(self.workspace_dir, 'anps.tif')
+        labile_path = os.path.join(self.workspace_dir, 'labile.tif')
+        # output paths
+        mat_leaving_a_path = os.path.join(self.workspace_dir, 'leavinga.tif')
+        mat_arriving_b_path = os.path.join(self.workspace_dir, 'arrivingb.tif')
+        mineral_flow_path = os.path.join(self.workspace_dir, 'mineralflow.tif')
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_raster(cflow_path, _IC_NODATA)
+        insert_nodata_values_into_raster(anps_path, _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        # mineralization
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 520.8
+        anps = 0.3111
+        labile = 32.87
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_raster(anps_path, _SV_NODATA)
+        insert_nodata_values_into_raster(tca_path, _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        # no movement
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 520.8
+        anps = 0.3111
+        labile = 0.
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_raster(rcetob_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(labile_path, _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_leaving_a'), mat_leaving_a_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('material_arriving_b'), mat_arriving_b_path,
+            gdal.GDT_Float32, _IC_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cflow_path, tca_path, rcetob_path, anps_path, labile_path]],
+            forage.esched('mineral_flow'), mineral_flow_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            mat_leaving_a_path, material_leaving_a - tolerance,
+            material_leaving_a + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mat_arriving_b_path, material_arriving_b - tolerance,
+            material_arriving_b + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            mineral_flow_path, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+    def test_nutrient_flow(self):
+        """Test `nutrient_flow`.
+
+        Use the function `nutrient_flow` to calculate and apply the flow of
+        one element accompanying decomposition of C. Test calculated values
+        against values calculated by point-based version.
+
+        Raises:
+            AssertionError if `nutrient_flow` does not match values calculated
+                by `esched_point`
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00000001
+
+        # immobilization
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 190.3
+        anps = 0.7776
+        labile = 6.01
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        d_estatv_donating = -material_leaving_a
+        d_estatv_receiving = material_arriving_b
+        d_minerl = mineral_flow
+        if mineral_flow > 0:
+            gromin = mineral_flow
+        else:
+            gromin = 0
+
+        # raster inputs
+        cflow_path = os.path.join(self.workspace_dir, 'cflow.tif')
+        tca_path = os.path.join(self.workspace_dir, 'tca.tif')
+        rcetob_path = os.path.join(self.workspace_dir, 'rcetob.tif')
+        anps_path = os.path.join(self.workspace_dir, 'anps.tif')
+        labile_path = os.path.join(self.workspace_dir, 'labile.tif')
+        d_estatv_donating_path = os.path.join(
+            self.workspace_dir, 'estatv_donating.tif')
+        d_estatv_receiving_path = os.path.join(
+            self.workspace_dir, 'estatv_receiving.tif')
+        d_minerl_path = os.path.join(self.workspace_dir, 'minerl.tif')
+        gromin_path = os.path.join(self.workspace_dir, 'gromin.tif')
+
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+        create_random_raster(d_estatv_donating_path, 0, 0)
+        create_random_raster(d_estatv_receiving_path, 0, 0)
+        create_random_raster(d_minerl_path, 0, 0)
+        create_random_raster(gromin_path, 0, 0)
+
+        forage.nutrient_flow(
+            cflow_path, tca_path, anps_path, rcetob_path,
+            labile_path, d_estatv_donating_path, d_estatv_receiving_path,
+            d_minerl_path, gromin_path)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_donating_path, d_estatv_donating - tolerance,
+            d_estatv_donating + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_receiving_path, d_estatv_receiving - tolerance,
+            d_estatv_receiving + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_minerl_path, d_minerl - tolerance, d_minerl + tolerance,
+            _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            gromin_path, gromin - tolerance, gromin + tolerance, _IC_NODATA)
+
+        create_random_raster(d_estatv_donating_path, 0, 0)
+        create_random_raster(d_estatv_receiving_path, 0, 0)
+        create_random_raster(d_minerl_path, 0, 0)
+        create_random_raster(gromin_path, 0, 0)
+
+        insert_nodata_values_into_raster(cflow_path, _IC_NODATA)
+        insert_nodata_values_into_raster(tca_path, _SV_NODATA)
+        insert_nodata_values_into_raster(rcetob_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(anps_path, _SV_NODATA)
+        insert_nodata_values_into_raster(d_estatv_donating_path, _IC_NODATA)
+
+        forage.nutrient_flow(
+            cflow_path, tca_path, anps_path, rcetob_path,
+            labile_path, d_estatv_donating_path, d_estatv_receiving_path,
+            d_minerl_path, gromin_path)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_donating_path, d_estatv_donating - tolerance,
+            d_estatv_donating + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_receiving_path, d_estatv_receiving - tolerance,
+            d_estatv_receiving + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_minerl_path, d_minerl - tolerance, d_minerl + tolerance,
+            _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            gromin_path, gromin - tolerance, gromin + tolerance,
+            _TARGET_NODATA)
+
+        # mineralization
+        cflow = 15.2006
+        tca = 155.5253
+        rcetob = 520.8
+        anps = 0.3111
+        labile = 32.87
+
+        material_leaving_a = esched_point(
+            'material_leaving_a')(cflow, tca, rcetob, anps, labile)
+        material_arriving_b = esched_point(
+            'material_arriving_b')(cflow, tca, rcetob, anps, labile)
+        mineral_flow = esched_point(
+            'mineral_flow')(cflow, tca, rcetob, anps, labile)
+
+        d_estatv_donating = -material_leaving_a
+        d_estatv_receiving = material_arriving_b
+        d_minerl = mineral_flow
+
+        # raster inputs
+        create_random_raster(cflow_path, cflow, cflow)
+        create_random_raster(tca_path, tca, tca)
+        create_random_raster(rcetob_path, rcetob, rcetob)
+        create_random_raster(anps_path, anps, anps)
+        create_random_raster(labile_path, labile, labile)
+        create_random_raster(d_estatv_donating_path, 0, 0)
+        create_random_raster(d_estatv_receiving_path, 0, 0)
+        create_random_raster(d_minerl_path, 0, 0)
+
+        forage.nutrient_flow(
+            cflow_path, tca_path, anps_path, rcetob_path,
+            labile_path, d_estatv_donating_path, d_estatv_receiving_path,
+            d_minerl_path)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_donating_path, d_estatv_donating - tolerance,
+            d_estatv_donating + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_receiving_path, d_estatv_receiving - tolerance,
+            d_estatv_receiving + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_minerl_path, d_minerl - tolerance, d_minerl + tolerance,
+            _IC_NODATA)
+
+        create_random_raster(d_estatv_donating_path, 0, 0)
+        create_random_raster(d_estatv_receiving_path, 0, 0)
+        create_random_raster(d_minerl_path, 0, 0)
+
+        insert_nodata_values_into_raster(cflow_path, _IC_NODATA)
+        insert_nodata_values_into_raster(tca_path, _SV_NODATA)
+        insert_nodata_values_into_raster(rcetob_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(anps_path, _SV_NODATA)
+        insert_nodata_values_into_raster(d_estatv_donating_path, _IC_NODATA)
+
+        forage.nutrient_flow(
+            cflow_path, tca_path, anps_path, rcetob_path,
+            labile_path, d_estatv_donating_path, d_estatv_receiving_path,
+            d_minerl_path)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_donating_path, d_estatv_donating - tolerance,
+            d_estatv_donating + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_estatv_receiving_path, d_estatv_receiving - tolerance,
+            d_estatv_receiving + tolerance, _IC_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            d_minerl_path, d_minerl - tolerance, d_minerl + tolerance,
+            _IC_NODATA)
+
+    def test_fsfunc(self):
+        """Test `fsfunc`.
+
+        Use the function `fsfunc` to calculate the fraction of mineral P that
+        is in solution.  Compare calculated value to value calculated by point
+        version.
+
+        Raises:
+            AssertionError if `initialize_aminrl_2` does not match value
+                calculated by point version of function
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        tolerance = 0.00001
+
+        # known values
+        minerl_1_2 = 32.87
+        sorpmx = 2.
+        pslsrb = 1.
+        fsol_point = fsfunc_point(minerl_1_2, pslsrb, sorpmx)
+
+        # raster inputs
+        minerl_1_2_path = os.path.join(self.workspace_dir, 'minerl_1_2.tif')
+        sorpmx_path = os.path.join(self.workspace_dir, 'sorpmx.tif')
+        pslsrb_path = os.path.join(self.workspace_dir, 'pslsrb.tif')
+        fsol_path = os.path.join(self.workspace_dir, 'fsol.tif')
+
+        create_random_raster(minerl_1_2_path, minerl_1_2, minerl_1_2)
+        create_random_raster(sorpmx_path, sorpmx, sorpmx)
+        create_random_raster(pslsrb_path, pslsrb, pslsrb)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                minerl_1_2_path, sorpmx_path, pslsrb_path]],
+            forage.fsfunc, fsol_path, gdal.GDT_Float32,
+            _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            fsol_path, fsol_point - tolerance, fsol_point + tolerance,
+            _SV_NODATA)
+
+        insert_nodata_values_into_raster(minerl_1_2_path, _SV_NODATA)
+        insert_nodata_values_into_raster(pslsrb_path, _IC_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                minerl_1_2_path, sorpmx_path, pslsrb_path]],
+            forage.fsfunc, fsol_path, gdal.GDT_Float32,
+            _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            fsol_path, fsol_point - tolerance, fsol_point + tolerance,
+            _SV_NODATA)
+
+    def test_calc_tcflow_strucc_1(self):
+        """Test `calc_tcflow_strucc_1`.
+
+        Use the function `calc_tcflow_strucc_1` to calculate total flow
+        out of surface structural C. Ensure that calculated values match
+        values calculated by point-based version defined here.
+
+        Raises:
+            AssertionError if `calc_tcflow_strucc_1` does not match values
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def tcflow_strucc_1_point(
+                aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
+                rnewas_1_1, rnewas_2_1, strmax_1, defac, dec1_1, pligst_1,
+                strlig_1, pheff_struc):
+            """Point-based implementation of `calc_tcflow_strucc_1`.
+
+            Returns:
+                tcflow_strucc_1, total flow of C limited by N and P
+            """
+            potential_flow = (min(
+                strucc_1, strmax_1) * defac * dec1_1 *
+                math.exp(-pligst_1 * strlig_1) * 0.020833 * pheff_struc)
+
+            decompose_mask = (
+                ((aminrl_1 > 0.0000001) | (
+                    (strucc_1 / struce_1_1) <= rnewas_1_1)) &
+                ((aminrl_2 > 0.0000001) | (
+                    (strucc_1 / struce_1_2) <= rnewas_2_1)))
+
+            if decompose_mask:
+                tcflow_strucc_1 = potential_flow
+            else:
+                tcflow_strucc_1 = 0
+            return tcflow_strucc_1
+        from natcap.invest import forage
+
+        array_shape = (10, 10)
+        tolerance = 0.0000001
+
+        # decomposition can occur
+        aminrl_1 = 6.4143
+        aminrl_2 = 30.9253
+        strucc_1 = 156.0546
+        struce_1_1 = 0.7803
+        struce_1_2 = 0.3121
+        rnewas_1_1 = 210.8
+        rnewas_2_1 = 540.2
+        strmax_1 = 5000.
+        defac = 0.822
+        dec1_1 = 3.9
+        pligst_1 = 3.
+        strlig_1 = 0.3779
+        pH = 6.84
+        pheff_struc = numpy.clip(
+            (0.5 + (1.1 / numpy.pi) *
+                numpy.arctan(numpy.pi * 0.7 * (pH - 4.))), 0, 1)
+
+        tcflow_strucc_1 = tcflow_strucc_1_point(
+            aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
+            rnewas_1_1, rnewas_2_1, strmax_1, defac, dec1_1, pligst_1,
+            strlig_1, pheff_struc)
+
+        # array inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        strucc_1_ar = numpy.full(array_shape, strucc_1)
+        struce_1_1_ar = numpy.full(array_shape, struce_1_1)
+        struce_1_2_ar = numpy.full(array_shape, struce_1_2)
+        rnewas_1_1_ar = numpy.full(array_shape, rnewas_1_1)
+        rnewas_2_1_ar = numpy.full(array_shape, rnewas_2_1)
+        strmax_1_ar = numpy.full(array_shape, strmax_1)
+        defac_ar = numpy.full(array_shape, defac)
+        dec1_1_ar = numpy.full(array_shape, dec1_1)
+        pligst_1_ar = numpy.full(array_shape, pligst_1)
+        strlig_1_ar = numpy.full(array_shape, strlig_1)
+        pheff_struc_ar = numpy.full(array_shape, pheff_struc)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(struce_1_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(strlig_1_ar, _SV_NODATA)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
+
+        # N insufficient to allow decomposition
+        aminrl_1 = 0.
+        aminrl_2 = 30.9253
+        strucc_1 = 156.0546
+        struce_1_1 = 0.7803
+        struce_1_2 = 0.3121
+        rnewas_1_1 = 170.
+        rnewas_2_1 = 540.2
+        strmax_1 = 5000.
+        defac = 0.822
+        dec1_1 = 3.9
+        pligst_1 = 3.
+        strlig_1 = 0.3779
+        pH = 6.84
+        pheff_struc = numpy.clip(
+            (0.5 + (1.1 / numpy.pi) *
+                numpy.arctan(numpy.pi * 0.7 * (pH - 4.))), 0, 1)
+
+        tcflow_strucc_1 = tcflow_strucc_1_point(
+            aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
+            rnewas_1_1, rnewas_2_1, strmax_1, defac, dec1_1, pligst_1,
+            strlig_1, pheff_struc)
+
+        # array inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        strucc_1_ar = numpy.full(array_shape, strucc_1)
+        struce_1_1_ar = numpy.full(array_shape, struce_1_1)
+        struce_1_2_ar = numpy.full(array_shape, struce_1_2)
+        rnewas_1_1_ar = numpy.full(array_shape, rnewas_1_1)
+        rnewas_2_1_ar = numpy.full(array_shape, rnewas_2_1)
+        strmax_1_ar = numpy.full(array_shape, strmax_1)
+        defac_ar = numpy.full(array_shape, defac)
+        dec1_1_ar = numpy.full(array_shape, dec1_1)
+        pligst_1_ar = numpy.full(array_shape, pligst_1)
+        strlig_1_ar = numpy.full(array_shape, strlig_1)
+        pheff_struc_ar = numpy.full(array_shape, pheff_struc)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(strmax_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(dec1_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(aminrl_1_ar, _SV_NODATA)
+
+        tcflow_strucc1_ar = forage.calc_tcflow_strucc_1(
+            aminrl_1_ar, aminrl_2_ar, strucc_1_ar, struce_1_1_ar,
+            struce_1_2_ar, rnewas_1_1_ar, rnewas_2_1_ar, strmax_1_ar, defac_ar,
+            dec1_1_ar, pligst_1_ar, strlig_1_ar, pheff_struc_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_strucc1_ar, tcflow_strucc_1 - tolerance,
+            tcflow_strucc_1 + tolerance, _IC_NODATA)
+
+    def test_reclassify_nodata(self):
+        """Test `reclassify_nodata`.
+
+        Use the function `reclassify_nodata` to reset the nodata value of
+        a raster.
+
+        Raises:
+            AssertionError if the nodata value of a raster following
+                `reclassify_nodata` is not equal to the specified nodata type
+            AssertionError if unique values in a raster contain more than the
+                fill value and the correct nodata value
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        fill_value = 0
+        target_path = os.path.join(self.workspace_dir, 'target_raster.tif')
+        create_random_raster(target_path, fill_value, fill_value)
+        insert_nodata_values_into_raster(target_path, _TARGET_NODATA)
+
+        new_nodata_value = -999
+        forage.reclassify_nodata(target_path, new_nodata_value)
+        result_nodata_value = pygeoprocessing.get_raster_info(
+            target_path)['nodata'][0]
+        self.assertEqual(
+            new_nodata_value, result_nodata_value,
+            msg="New nodata value does not match specified nodata value")
+
+        # check unique values inside raster
+        raster_values = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                (target_path, 1)):
+            raster_values.update(numpy.unique(raster_block))
+        self.assertEqual(
+            raster_values, set([fill_value, float(new_nodata_value)]),
+            msg="Raster contains extraneous values")
+
+        new_nodata_value = float(numpy.finfo('float32').min)
+        forage.reclassify_nodata(target_path, new_nodata_value)
+        result_nodata_value = pygeoprocessing.get_raster_info(
+            target_path)['nodata'][0]
+        self.assertEqual(
+            new_nodata_value, result_nodata_value,
+            msg="New nodata value does not match specified nodata value")
+        raster_values = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                (target_path, 1)):
+            raster_values.update(numpy.unique(raster_block))
+        self.assertEqual(
+            raster_values, set([fill_value, float(new_nodata_value)]),
+            msg="Raster contains extraneous values")
+
+        new_nodata_value = 8920
+        forage.reclassify_nodata(target_path, new_nodata_value)
+        insert_nodata_values_into_raster(target_path, new_nodata_value)
+        result_nodata_value = pygeoprocessing.get_raster_info(
+            target_path)['nodata'][0]
+        self.assertEqual(
+            new_nodata_value, result_nodata_value,
+            msg="New nodata value does not match specified nodata value")
+        raster_values = set()
+        for offset_map, raster_block in pygeoprocessing.iterblocks(
+                (target_path, 1)):
+            raster_values.update(numpy.unique(raster_block))
+        self.assertEqual(
+            raster_values, set([fill_value, float(new_nodata_value)]),
+            msg="Raster contains extraneous values")
+
+    def test_calc_respiration_mineral_flow(self):
+        """Test `calc_respiration_mineral_flow`.
+
+        Use the function `calc_respiration_mineral_flow` to calculate
+        mineral flow of one element associated with respiration. Compare
+        the result to values calculated by point-based verison defined
+        here.
+
+        Raises:
+            AssertionError if `calc_respiration_mineral_flow` does not
+                match values calculated by point-based version
+
+        Returns:
+            None
+        """
+        def respir_minr_flow_point(cflow, frac_co2, estatv, cstatv):
+            co2_loss = cflow * frac_co2
+            mineral_flow = co2_loss * estatv / cstatv
+            return mineral_flow
+
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.0000000001
+
+        # known values
+        cflow = 15.2006601
+        frac_co2 = 0.0146
+        estatv = 0.7776
+        cstatv = 155.5253
+        mineral_flow = respir_minr_flow_point(cflow, frac_co2, estatv, cstatv)
+
+        cflow_ar = numpy.full(array_shape, cflow)
+        frac_co2_ar = numpy.full(array_shape, frac_co2)
+        estatv_ar = numpy.full(array_shape, estatv)
+        cstatv_ar = numpy.full(array_shape, cstatv)
+        mineral_flow_ar = forage.calc_respiration_mineral_flow(
+            cflow_ar, frac_co2_ar, estatv_ar, cstatv_ar)
+
+        self.assert_all_values_in_array_within_range(
+            mineral_flow_ar, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(cflow_ar, _IC_NODATA)
+        insert_nodata_values_into_array(frac_co2_ar, _IC_NODATA)
+        insert_nodata_values_into_array(estatv_ar, _SV_NODATA)
+        insert_nodata_values_into_array(cstatv_ar, _SV_NODATA)
+
+        mineral_flow_ar = forage.calc_respiration_mineral_flow(
+            cflow_ar, frac_co2_ar, estatv_ar, cstatv_ar)
+
+        self.assert_all_values_in_array_within_range(
+            mineral_flow_ar, mineral_flow - tolerance,
+            mineral_flow + tolerance, _IC_NODATA)
+
+    def test_update_gross_mineralization(self):
+        """Test `update_gross_mineralization`.
+
+        Test the function `update_gross_mineralization`  against values
+        calculated by hand.
+
+        Raises:
+            AssertionError if `update_gross_mineralization` does not match
+                values calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.0000001
+
+        # known values
+        gross_mineralization = 0.0481
+        mineral_flow = 0.00044
+        gromin_updated = gross_mineralization + mineral_flow
+
+        gross_mineralization_ar = numpy.full(array_shape, gross_mineralization)
+        mineral_flow_ar = numpy.full(array_shape, mineral_flow)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(
+            gross_mineralization_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(mineral_flow_ar, _IC_NODATA)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+        # known values
+        gross_mineralization = 0.048881
+        mineral_flow = -0.00674
+        gromin_updated = gross_mineralization
+
+        gross_mineralization_ar = numpy.full(array_shape, gross_mineralization)
+        mineral_flow_ar = numpy.full(array_shape, mineral_flow)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(
+            gross_mineralization_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(mineral_flow_ar, _IC_NODATA)
+
+        gromin_updated_ar = forage.update_gross_mineralization(
+            gross_mineralization_ar, mineral_flow_ar)
+        self.assert_all_values_in_array_within_range(
+            gromin_updated_ar, gromin_updated - tolerance,
+            gromin_updated + tolerance, _TARGET_NODATA)
+
+    def test_calc_net_cflow(self):
+        """Test `calc_net_cflow`.
+
+        Test `calc_net_cflow` against value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_net_cflow` does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.0000001
+
+        # known values
+        cflow = 5.2006601
+        frac_co2 = 0.0182
+        net_cflow = cflow - (cflow * frac_co2)
+
+        cflow_ar = numpy.full(array_shape, cflow)
+        frac_co2_ar = numpy.full(array_shape, frac_co2)
+        net_cflow_ar = forage.calc_net_cflow(cflow_ar, frac_co2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            net_cflow_ar, net_cflow - tolerance, net_cflow + tolerance,
+            _IC_NODATA)
+
+        insert_nodata_values_into_array(cflow_ar, _IC_NODATA)
+        insert_nodata_values_into_array(frac_co2_ar, _IC_NODATA)
+
+        net_cflow_ar = forage.calc_net_cflow(cflow_ar, frac_co2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            net_cflow_ar, net_cflow - tolerance, net_cflow + tolerance,
+            _IC_NODATA)
+
+    def test_calc_tcflow_surface(self):
+        """Test `calc_tcflow_surface`.
+
+        Test `calc_tcflow_surface` against value calculated by point-based
+        version.
+
+        Raises:
+            AssertionError if `calc_tcflow_surface` does not match value
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def calc_tcflow_surface_point(
+                aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
+                rceto1_1, rceto1_2, defac, dec2_1, pheff_metab):
+            """Point implementation of `calc_tcflow_surface`."""
+            decompose_mask = (
+                ((aminrl_1 > 0.0000001) | (
+                    (metabc_1 / metabe_1_1) <= rceto1_1)) &
+                ((aminrl_2 > 0.0000001) | (
+                    (metabc_1 / metabe_1_2) <= rceto1_2)))  # line 194 Litdec.f
+            if decompose_mask:
+                tcflow_metabc_1 = numpy.clip(
+                    (metabc_1 * defac * dec2_1 * 0.020833 * pheff_metab), 0,
+                    metabc_1)
+            else:
+                tcflow_metabc_1 = 0.
+            return tcflow_metabc_1
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, decomposition can occur
+        aminrl_1 = 5.8821
+        aminrl_2 = 0.04781
+        metabc_1 = 169.22
+        metabe_1_1 = 0.7776
+        metabe_1_2 = 0.3111
+        rceto1_1 = 5.29
+        rceto1_2 = 2.92
+        defac = 0.822
+        dec2_1 = 3.9
+        pheff_metab = 0.9917
+
+        tcflow_metabc_1_point = calc_tcflow_surface_point(
+            aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
+            rceto1_1, rceto1_2, defac, dec2_1, pheff_metab)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_1_ar = numpy.full(array_shape, metabc_1)
+        metabe_1_1_ar = numpy.full(array_shape, metabe_1_1)
+        metabe_1_2_ar = numpy.full(array_shape, metabe_1_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_1_ar = numpy.full(array_shape, dec2_1)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_surface(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_1_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(metabe_1_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(metabc_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_surface(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+        # known values, no decomposition
+        aminrl_1 = 0.
+        aminrl_2 = 0.
+        metabc_1 = 169.22
+        metabe_1_1 = 0.7776
+        metabe_1_2 = 0.3111
+        rceto1_1 = 200.
+        rceto1_2 = 400.
+        defac = 0.822
+        dec2_1 = 3.9
+        pheff_metab = 0.9917
+
+        tcflow_metabc_1_point = calc_tcflow_surface_point(
+            aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
+            rceto1_1, rceto1_2, defac, dec2_1, pheff_metab)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_1_ar = numpy.full(array_shape, metabc_1)
+        metabe_1_1_ar = numpy.full(array_shape, metabe_1_1)
+        metabe_1_2_ar = numpy.full(array_shape, metabe_1_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_1_ar = numpy.full(array_shape, dec2_1)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_surface(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rceto1_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_1_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(dec2_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_1_ar = forage.calc_tcflow_surface(
+            aminrl_1_ar, aminrl_2_ar, metabc_1_ar, metabe_1_1_ar,
+            metabe_1_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_1_ar,
+            pheff_metab_ar)
+
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_1_ar, tcflow_metabc_1_point - tolerance,
+            tcflow_metabc_1_point + tolerance, _IC_NODATA)
+
+    def test_calc_tcflow_soil(self):
+        """Test `calc_tcflow_soil`.
+
+        Test `calc_tcflow_soil` against value calculated by point-based
+        version.
+
+        Raises:
+            AssertionError if `calc_tcflow_soil` does not match value
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        def calc_tcflow_soil_point(
+                aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2, rceto1_1,
+                rceto1_2, defac, dec2_2, pheff_metab, anerb):
+            """Point implementation of `calc_tcflow_soil`."""
+            decompose_mask = (
+                ((aminrl_1 > 0.0000001) | (
+                    (metabc_2 / metabe_2_1) <= rceto1_1)) &
+                ((aminrl_2 > 0.0000001) | (
+                    (metabc_2 / metabe_2_2) <= rceto1_2)))  # line 194 Litdec.f
+            if decompose_mask:
+                tcflow_metabc_2 = numpy.clip(
+                    (metabc_2 * defac * dec2_2 * 0.020833 * pheff_metab *
+                        anerb), 0, metabc_2)
+            else:
+                tcflow_metabc_2 = 0.
+            return tcflow_metabc_2
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, decomposition can occur
+        aminrl_1 = 5.8821
+        aminrl_2 = 0.04781
+        metabc_2 = 169.22
+        metabe_2_1 = 0.7776
+        metabe_2_2 = 0.3111
+        rceto1_1 = 5.29
+        rceto1_2 = 2.92
+        defac = 0.822
+        dec2_2 = 3.9
+        pheff_metab = 0.9917
+        anerb = 0.3
+
+        tcflow_metabc_2_point = calc_tcflow_soil_point(
+            aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2,
+            rceto1_1, rceto1_2, defac, dec2_2, pheff_metab, anerb)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_2_ar = numpy.full(array_shape, metabc_2)
+        metabe_2_1_ar = numpy.full(array_shape, metabe_2_1)
+        metabe_2_2_ar = numpy.full(array_shape, metabe_2_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_2_ar = numpy.full(array_shape, dec2_2)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+        anerb_ar = numpy.full(array_shape, anerb)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_soil(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_2_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(metabe_2_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(anerb_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabc_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_soil(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+        # known values, no decomposition
+        aminrl_1 = 0.
+        aminrl_2 = 0.
+        metabc_2 = 169.22
+        metabe_2_1 = 0.7776
+        metabe_2_2 = 0.3111
+        rceto1_1 = 200.
+        rceto1_2 = 400.
+        defac = 0.822
+        dec2_2 = 3.9
+        pheff_metab = 0.9917
+
+        tcflow_metabc_2_point = calc_tcflow_soil_point(
+            aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2,
+            rceto1_1, rceto1_2, defac, dec2_2, pheff_metab, anerb)
+
+        # raster inputs
+        aminrl_1_ar = numpy.full(array_shape, aminrl_1)
+        aminrl_2_ar = numpy.full(array_shape, aminrl_2)
+        metabc_2_ar = numpy.full(array_shape, metabc_2)
+        metabe_2_1_ar = numpy.full(array_shape, metabe_2_1)
+        metabe_2_2_ar = numpy.full(array_shape, metabe_2_2)
+        rceto1_1_ar = numpy.full(array_shape, rceto1_1)
+        rceto1_2_ar = numpy.full(array_shape, rceto1_2)
+        defac_ar = numpy.full(array_shape, defac)
+        dec2_2_ar = numpy.full(array_shape, dec2_2)
+        pheff_metab_ar = numpy.full(array_shape, pheff_metab)
+        anerb_ar = numpy.full(array_shape, anerb)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_soil(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+        insert_nodata_values_into_array(aminrl_2_ar, _SV_NODATA)
+        insert_nodata_values_into_array(defac_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rceto1_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(metabe_2_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(dec2_2_ar, _IC_NODATA)
+        insert_nodata_values_into_array(pheff_metab_ar, _TARGET_NODATA)
+
+        tcflow_metabc_2_ar = forage.calc_tcflow_soil(
+            aminrl_1_ar, aminrl_2_ar, metabc_2_ar, metabe_2_1_ar,
+            metabe_2_2_ar, rceto1_1_ar, rceto1_2_ar, defac_ar, dec2_2_ar,
+            pheff_metab_ar, anerb_ar)
+        self.assert_all_values_in_array_within_range(
+            tcflow_metabc_2_ar, tcflow_metabc_2_point - tolerance,
+            tcflow_metabc_2_point + tolerance, _IC_NODATA)
+
+    def test_belowground_ratio(self):
+        """Test `_belowground_ratio`.
+
+        Use the function `_belowground_ratio` to calculate required C/iel
+        ratio of belowground decomposing material.  Compare calculate values
+        to values calculated by point-based version.
+
+        Raises:
+            AssertionError if `_belowground_ratio` does not match values
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, aminrl > varat_3_iel
+        aminrl = 5.928
+        varat_1_iel = 14.
+        varat_2_iel = 3.
+        varat_3_iel = 2.
+
+        belowground_point = bgdrat_point(
+            aminrl, varat_1_iel, varat_2_iel, varat_3_iel)
+
+        # array inputs
+        aminrl_ar = numpy.full(array_shape, aminrl)
+        varat_1_iel_ar = numpy.full(array_shape, varat_1_iel)
+        varat_2_iel_ar = numpy.full(array_shape, varat_2_iel)
+        varat_3_iel_ar = numpy.full(array_shape, varat_3_iel)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aminrl_ar, _SV_NODATA)
+        insert_nodata_values_into_array(varat_1_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_2_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_3_iel_ar, _IC_NODATA)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        # no mineral source
+        aminrl = 0.
+        varat_1_iel = 14.
+        varat_2_iel = 3.
+        varat_3_iel = 2.
+
+        belowground_point = bgdrat_point(
+            aminrl, varat_1_iel, varat_2_iel, varat_3_iel)
+
+        # array inputs
+        aminrl_ar = numpy.full(array_shape, aminrl)
+        varat_1_iel_ar = numpy.full(array_shape, varat_1_iel)
+        varat_2_iel_ar = numpy.full(array_shape, varat_2_iel)
+        varat_3_iel_ar = numpy.full(array_shape, varat_3_iel)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aminrl_ar, _SV_NODATA)
+        insert_nodata_values_into_array(varat_1_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_2_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_3_iel_ar, _IC_NODATA)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        # known values, aminrl < varat_3_iel
+        aminrl = 1.9917
+        varat_1_iel = 14.
+        varat_2_iel = 5.
+        varat_3_iel = 3.
+
+        belowground_point = bgdrat_point(
+            aminrl, varat_1_iel, varat_2_iel, varat_3_iel)
+
+        # array inputs
+        aminrl_ar = numpy.full(array_shape, aminrl)
+        varat_1_iel_ar = numpy.full(array_shape, varat_1_iel)
+        varat_2_iel_ar = numpy.full(array_shape, varat_2_iel)
+        varat_3_iel_ar = numpy.full(array_shape, varat_3_iel)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aminrl_ar, _SV_NODATA)
+        insert_nodata_values_into_array(varat_1_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_2_iel_ar, _IC_NODATA)
+        insert_nodata_values_into_array(varat_3_iel_ar, _IC_NODATA)
+
+        belowground_ratio = forage._belowground_ratio(
+            aminrl_ar, varat_1_iel_ar, varat_2_iel_ar, varat_3_iel_ar)
+        self.assert_all_values_in_array_within_range(
+            belowground_ratio, belowground_point - tolerance,
+            belowground_point + tolerance, _TARGET_NODATA)
+
+    def test_calc_surface_som2_ratio(self):
+        """Test `calc_surface_som2_ratio`.
+
+        Use the function `calc_surface_som2_ratio` to calculate the required
+        ratio for material entering surface SOM2. Compare the calculated
+        value to value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_surface_som2_ratio` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, calc term > rad1p_3
+        som1c_1 = 12.8192
+        som1e_1 = 1.5752
+        rad1p_1 = 12.
+        rad1p_2 = 3.
+        rad1p_3 = 5.
+        pcemic1_2 = 10.
+        rceto2_surface = 14.552565
+
+        # array inputs
+        som1c_1_ar = numpy.full(array_shape, som1c_1)
+        som1e_1_ar = numpy.full(array_shape, som1e_1)
+        rad1p_1_ar = numpy.full(array_shape, rad1p_1)
+        rad1p_2_ar = numpy.full(array_shape, rad1p_2)
+        rad1p_3_ar = numpy.full(array_shape, rad1p_3)
+        pcemic1_2_ar = numpy.full(array_shape, pcemic1_2)
+
+        receto2_surface_ar = forage.calc_surface_som2_ratio(
+            som1c_1_ar,  som1e_1_ar, rad1p_1_ar, rad1p_2_ar, rad1p_3_ar,
+            pcemic1_2_ar)
+        self.assert_all_values_in_array_within_range(
+            receto2_surface_ar, rceto2_surface - tolerance,
+            rceto2_surface + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(som1c_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(som1e_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(rad1p_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rad1p_2_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rad1p_3_ar, _IC_NODATA)
+        insert_nodata_values_into_array(pcemic1_2_ar, _IC_NODATA)
+
+        receto2_surface_ar = forage.calc_surface_som2_ratio(
+            som1c_1_ar,  som1e_1_ar, rad1p_1_ar, rad1p_2_ar, rad1p_3_ar,
+            pcemic1_2_ar)
+        self.assert_all_values_in_array_within_range(
+            receto2_surface_ar, rceto2_surface - tolerance,
+            rceto2_surface + tolerance, _TARGET_NODATA)
+
+        # known values, calc term < rad1p_3
+        som1c_1 = 12.8192
+        som1e_1 = 2.
+        rad1p_1 = 8.
+        rad1p_2 = 3.
+        rad1p_3 = 5.
+        pcemic1_2 = 10.
+        rceto2_surface = 5.
+
+        # array inputs
+        som1c_1_ar = numpy.full(array_shape, som1c_1)
+        som1e_1_ar = numpy.full(array_shape, som1e_1)
+        rad1p_1_ar = numpy.full(array_shape, rad1p_1)
+        rad1p_2_ar = numpy.full(array_shape, rad1p_2)
+        rad1p_3_ar = numpy.full(array_shape, rad1p_3)
+        pcemic1_2_ar = numpy.full(array_shape, pcemic1_2)
+
+        receto2_surface_ar = forage.calc_surface_som2_ratio(
+            som1c_1_ar,  som1e_1_ar, rad1p_1_ar, rad1p_2_ar, rad1p_3_ar,
+            pcemic1_2_ar)
+        self.assert_all_values_in_array_within_range(
+            receto2_surface_ar, rceto2_surface - tolerance,
+            rceto2_surface + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(som1c_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(som1e_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(rad1p_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rad1p_2_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rad1p_3_ar, _IC_NODATA)
+        insert_nodata_values_into_array(pcemic1_2_ar, _IC_NODATA)
+
+        receto2_surface_ar = forage.calc_surface_som2_ratio(
+            som1c_1_ar,  som1e_1_ar, rad1p_1_ar, rad1p_2_ar, rad1p_3_ar,
+            pcemic1_2_ar)
+        self.assert_all_values_in_array_within_range(
+            receto2_surface_ar, rceto2_surface - tolerance,
+            rceto2_surface + tolerance, _TARGET_NODATA)
+
+    def test_calc_c_leach(self):
+        """Test `calc_c_leach`.
+
+        Use the function `calc_c_leach` to calculate the C leaching
+        from soil SOM1 into stream flow during decomposition.  Compare
+        calculated values to value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_c_leach` does not match value
+                calculated by hand.
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (10, 10)
+        tolerance = 0.00001
+
+        # known values, linten > 1
+        amov_2 = 63.1
+        tcflow = 40.38
+        omlech_3 = 60.
+        orglch = 0.07
+        cleach = 2.8266
+
+        # array inputs
+        amov_2_ar = numpy.full(array_shape, amov_2)
+        tcflow_ar = numpy.full(array_shape, tcflow)
+        omlech_3_ar = numpy.full(array_shape, omlech_3)
+        orglch_ar = numpy.full(array_shape, orglch)
+
+        cleach_ar = forage.calc_c_leach(
+            amov_2_ar, tcflow_ar, omlech_3_ar, orglch_ar)
+        self.assert_all_values_in_array_within_range(
+            cleach_ar, cleach - tolerance, cleach + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(amov_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(tcflow_ar, _IC_NODATA)
+        insert_nodata_values_into_array(omlech_3_ar, _IC_NODATA)
+        insert_nodata_values_into_array(orglch_ar, _IC_NODATA)
+
+        cleach_ar = forage.calc_c_leach(
+            amov_2_ar, tcflow_ar, omlech_3_ar, orglch_ar)
+        self.assert_all_values_in_array_within_range(
+            cleach_ar, cleach - tolerance, cleach + tolerance, _TARGET_NODATA)
+
+        # known values, linten < 1
+        amov_2 = 10.5
+        tcflow = 40.38
+        omlech_3 = 60.
+        orglch = 0.07
+        cleach = 0.494655
+
+        # array inputs
+        amov_2_ar = numpy.full(array_shape, amov_2)
+        tcflow_ar = numpy.full(array_shape, tcflow)
+        omlech_3_ar = numpy.full(array_shape, omlech_3)
+        orglch_ar = numpy.full(array_shape, orglch)
+
+        cleach_ar = forage.calc_c_leach(
+            amov_2_ar, tcflow_ar, omlech_3_ar, orglch_ar)
+        self.assert_all_values_in_array_within_range(
+            cleach_ar, cleach - tolerance, cleach + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(amov_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(tcflow_ar, _IC_NODATA)
+        insert_nodata_values_into_array(omlech_3_ar, _IC_NODATA)
+        insert_nodata_values_into_array(orglch_ar, _IC_NODATA)
+
+        cleach_ar = forage.calc_c_leach(
+            amov_2_ar, tcflow_ar, omlech_3_ar, orglch_ar)
+        self.assert_all_values_in_array_within_range(
+            cleach_ar, cleach - tolerance, cleach + tolerance, _TARGET_NODATA)
+
+    def test_remove_leached_iel(self):
+        """Test `remove_leached_iel`.
+
+        Use the function `remove_leached_iel` to remove leached nutrients from
+        SOM1 during decomposition. Test the calculated values against values
+        calculated by hand.
+
+        Raises:
+            AssertionError if calculated values do not match values calculated
+                by hand
+        """
+        from natcap.invest import forage
+        nrows = 10
+        ncols = 10
+        tolerance = 0.00001
+
+        # known values, leaching N
+        som1c_2 = 10.5
+        som1e_2_iel = 40.38
+        cleach = 0.494655
+        iel = 1
+        d_som1e_2_iel_before = 50.22
+        d_som1e_2_iel_after = 49.2688491
+
+        # raster inputs
+        som1c_2_path = os.path.join(self.workspace_dir, 'som1c_2.tif')
+        som1e_2_iel_path = os.path.join(self.workspace_dir, 'som1e_2_iel.tif')
+        cleach_path = os.path.join(self.workspace_dir, 'cleach.tif')
+        d_som1e_2_iel_path = os.path.join(
+            self.workspace_dir, 'd_som1e_2_iel.tif')
+        create_random_raster(som1c_2_path, som1c_2, som1c_2)
+        create_random_raster(som1e_2_iel_path, som1e_2_iel, som1e_2_iel)
+        create_random_raster(cleach_path, cleach, cleach)
+        create_random_raster(
+            d_som1e_2_iel_path, d_som1e_2_iel_before, d_som1e_2_iel_before)
+
+        forage.remove_leached_iel(
+            som1c_2_path, som1e_2_iel_path, cleach_path, d_som1e_2_iel_path,
+            iel)
+        self.assert_all_values_in_raster_within_range(
+            d_som1e_2_iel_path, d_som1e_2_iel_after - tolerance,
+            d_som1e_2_iel_after + tolerance, _IC_NODATA)
+
+        create_random_raster(
+            d_som1e_2_iel_path, d_som1e_2_iel_before, d_som1e_2_iel_before)
+        insert_nodata_values_into_raster(som1c_2_path, _SV_NODATA)
+        insert_nodata_values_into_raster(som1e_2_iel_path, _SV_NODATA)
+        insert_nodata_values_into_raster(cleach_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(d_som1e_2_iel_path, _IC_NODATA)
+
+        forage.remove_leached_iel(
+            som1c_2_path, som1e_2_iel_path, cleach_path, d_som1e_2_iel_path,
+            iel)
+        self.assert_all_values_in_raster_within_range(
+            d_som1e_2_iel_path, d_som1e_2_iel_after - tolerance,
+            d_som1e_2_iel_after + tolerance, _IC_NODATA)
+
+        # known values, leaching P
+        som1c_2 = 10.5
+        som1e_2_iel = 40.38
+        cleach = 0.494655
+        iel = 2
+        d_som1e_2_iel_before = 50.22
+        d_som1e_2_iel_after = 50.16564852
+
+        # raster inputs
+        som1c_2_path = os.path.join(self.workspace_dir, 'som1c_2.tif')
+        som1e_2_iel_path = os.path.join(self.workspace_dir, 'som1e_2_iel.tif')
+        cleach_path = os.path.join(self.workspace_dir, 'cleach.tif')
+        d_som1e_2_iel_path = os.path.join(
+            self.workspace_dir, 'd_som1e_2_iel.tif')
+        create_random_raster(som1c_2_path, som1c_2, som1c_2)
+        create_random_raster(som1e_2_iel_path, som1e_2_iel, som1e_2_iel)
+        create_random_raster(cleach_path, cleach, cleach)
+        create_random_raster(
+            d_som1e_2_iel_path, d_som1e_2_iel_before, d_som1e_2_iel_before)
+
+        forage.remove_leached_iel(
+            som1c_2_path, som1e_2_iel_path, cleach_path, d_som1e_2_iel_path,
+            iel)
+        self.assert_all_values_in_raster_within_range(
+            d_som1e_2_iel_path, d_som1e_2_iel_after - tolerance,
+            d_som1e_2_iel_after + tolerance, _IC_NODATA)
+
+        create_random_raster(
+            d_som1e_2_iel_path, d_som1e_2_iel_before, d_som1e_2_iel_before)
+        insert_nodata_values_into_raster(som1c_2_path, _SV_NODATA)
+        insert_nodata_values_into_raster(som1e_2_iel_path, _SV_NODATA)
+        insert_nodata_values_into_raster(cleach_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(d_som1e_2_iel_path, _IC_NODATA)
+
+        forage.remove_leached_iel(
+            som1c_2_path, som1e_2_iel_path, cleach_path, d_som1e_2_iel_path,
+            iel)
+        self.assert_all_values_in_raster_within_range(
+            d_som1e_2_iel_path, d_som1e_2_iel_after - tolerance,
+            d_som1e_2_iel_after + tolerance, _IC_NODATA)
