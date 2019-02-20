@@ -194,7 +194,6 @@ class ExponentialDecayUtilsTests(unittest.TestCase):
         kernel_filepath = os.path.join(self.workspace_dir, 'kernel_100.tif')
         utils.exponential_decay_kernel_raster(
             expected_distance, kernel_filepath)
-        shutil.copyfile(kernel_filepath, 'kernel.tif')
 
         pygeoprocessing.testing.assert_rasters_equal(
             os.path.join(
@@ -253,15 +252,15 @@ class LogToFileTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.workspace)
 
-    def test_log_to_file_no_thread(self):
-        """Utils: Verify that we can exclude messages not from this thread."""
+    def test_log_to_file_all_threads(self):
+        """Utils: Verify that we can capture messages from all threads."""
         from natcap.invest.utils import log_to_file
 
         logfile = os.path.join(self.workspace, 'logfile.txt')
 
         def _log_from_other_thread():
             thread_logger = logging.getLogger()
-            thread_logger.info('this should not be logged')
+            thread_logger.info('this is from a thread')
 
         local_logger = logging.getLogger()
 
@@ -281,7 +280,7 @@ class LogToFileTests(unittest.TestCase):
 
         messages = [msg for msg in open(logfile).read().split('\n')
                     if msg if msg]
-        self.assertEqual(len(messages), 2)
+        self.assertEqual(len(messages), 3)
 
     def test_log_to_file_from_thread(self):
         """Utils: Verify that we can filter from a threading.Thread."""
@@ -291,16 +290,16 @@ class LogToFileTests(unittest.TestCase):
 
         def _log_from_other_thread():
             thread_logger = logging.getLogger()
-            thread_logger.info('this should be logged')
+            thread_logger.info('this should not be logged')
+            thread_logger.info('neither should this message')
 
         local_logger = logging.getLogger()
 
         thread = threading.Thread(target=_log_from_other_thread)
 
-        with log_to_file(logfile, threadname=thread.name) as handler:
+        with log_to_file(logfile, exclude_threads=[thread.name]) as handler:
             thread.start()
-            local_logger.info('this should not be logged')
-            local_logger.info('neither should this message')
+            local_logger.info('this should be logged')
 
             thread.join()
             handler.flush()
@@ -327,7 +326,7 @@ class ThreadFilterTests(unittest.TestCase):
         filterer = ThreadFilter(threading.currentThread().name)
 
         # The record comes from the same thread.
-        self.assertEqual(filterer.filter(record), True)
+        self.assertEqual(filterer.filter(record), False)
 
     def test_thread_filter_different_thread(self):
         from natcap.invest.utils import ThreadFilter
@@ -345,7 +344,7 @@ class ThreadFilterTests(unittest.TestCase):
         filterer = ThreadFilter('Thread-nonexistent')
 
         # The record comes from the same thread.
-        self.assertEqual(filterer.filter(record), False)
+        self.assertEqual(filterer.filter(record), True)
 
 
 class BuildLookupFromCsvTests(unittest.TestCase):
@@ -367,7 +366,7 @@ class BuildLookupFromCsvTests(unittest.TestCase):
         with open(table_path, 'w') as table_file:
             table_file.write(table_str)
         result = utils.build_lookup_from_csv(
-            table_path, 'a', to_lower=True, numerical_cast=True)
+            table_path, 'a', to_lower=True)
         expected_dict = {
             0.0: {
                 'a': 0.0,
@@ -506,8 +505,7 @@ class BuildLookupFromCSVTests(unittest.TestCase):
         csv_file = os.path.join(self.workspace, 'csv.csv')
         with open(csv_file, 'w') as file_obj:
             file_obj.write(textwrap.dedent(
-                """
-                header1,header2,header3
+                """header1,header2,header3
                 1,2,3
                 4,FOO,bar
                 """
@@ -525,16 +523,16 @@ class BuildLookupFromCSVTests(unittest.TestCase):
             file_obj.write(textwrap.dedent(
                 """
                 header1,HEADER2,header3
-                1,2,3
-                4,FOO,bar
+                1,2,bar
+                4,5,FOO
                 """
             ).strip())
 
         lookup_dict = utils.build_lookup_from_csv(
-            csv_file, 'header1', to_lower=True, numerical_cast=False)
+            csv_file, 'header1', to_lower=True)
 
-        self.assertEqual(lookup_dict['4']['header2'], 'foo')
-        self.assertEqual(lookup_dict['1']['header2'], '2')
+        self.assertEqual(lookup_dict[4]['header3'], 'foo')
+        self.assertEqual(lookup_dict[1]['header2'], 2)
 
     def test_results_uppercase_numeric_cast(self):
         """utils: test handling of uppercase, num. casting, blank values."""
@@ -547,6 +545,27 @@ class BuildLookupFromCSVTests(unittest.TestCase):
                 header1,HEADER2,header3,missing_column,
                 1,2,3,
                 4,FOO,bar,
+                """
+            ).strip())
+
+        lookup_dict = utils.build_lookup_from_csv(
+            csv_file, 'header1', to_lower=False)
+
+        self.assertEqual(lookup_dict[4]['HEADER2'], 'FOO')
+        self.assertEqual(lookup_dict[4]['header3'], 'bar')
+        self.assertEqual(lookup_dict[1]['header1'], 1)
+
+    def test_csv_dialect_detection_semicolon_delimited(self):
+        """utils: test that we can parse semicolon-delimited CSVs."""
+        from natcap.invest import utils
+
+        csv_file = os.path.join(self.workspace, 'csv.csv')
+        with open(csv_file, 'w') as file_obj:
+            file_obj.write(textwrap.dedent(
+                """
+                header1;HEADER2;header3;
+                1;2;3;
+                4;FOO;bar;
                 """
             ).strip())
 
