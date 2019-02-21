@@ -7376,3 +7376,399 @@ def _decomposition(
         temp_val_dict['d_statv_temp'], _SV_NODATA,
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['minerl_1_1_path'], _SV_NODATA)
+
+
+def partit(
+        cpart_path, recres_1_path, recres_2_path, frlign_path, sv_reg,
+        site_index_path, site_param_table, lyr):
+    """Partition incoming material into structural and metabolic pools.
+
+    When organic material is added to the soil, for example as dead
+    biomass falls and becomes litter, or when organic material is added
+    from animal waste, it is partitioned into structural (STRUCC_lyr) and
+    metabolic (METABC_lyr) material according to the ratio of lignin to N in
+    the residue. As residue is partitioned, some N and P may be directly
+    absorbed from surface mineral N or P into the residue.
+
+    Parameters:
+        cpart_path (string): path to raster containing C in incoming material
+            that is to be partitioned
+        recres_1_path (string): path to raster containing N/C ratio in incoming
+            material
+        recres_2_path (string): path to raster containing P/C ratio in incoming
+            material
+        frlign_path (string): path to raster containing fraction of incoming
+            material that is lignin
+        sv_reg (dict): map of key, path pairs giving paths to current state
+            variables
+        site_index_path (string): path to site spatial index raster
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        lyr (int): layer which is receiving the incoming material (i.e.,
+            1=surface layer, 2=soil layer)
+
+    Modifies:
+        the rasters indicated by the following paths:
+            sv_reg['minerl_1_1_path']
+            sv_reg['minerl_1_2_path']
+            sv_reg['metabc_{}_path'.format(lyr)]
+            sv_reg['strucc_{}_path'.format(lyr)]
+            sv_reg['metabe_{}_1_path'.format(lyr)]
+            sv_reg['metabe_{}_2_path'.format(lyr)]
+            sv_reg['struce_{}_1_path'.format(lyr)]
+            sv_reg['struce_{}_2_path'.format(lyr)]
+            sv_reg['strlig_{}_path'.format(lyr)]
+
+    Returns:
+        None
+    """
+    def calc_dirabs(
+            cpart, recres_iel, minerl_1_iel, damr_lyr_iel, pabres, damrmn_iel):
+        """Calculate direct absorption of mineral N or P.
+
+        When organic material is added to the soil, some mineral N or P may
+        be directly absorbed from the surface mineral layer into the incoming
+        material. the amount transferred depends on the N or P in the incoming
+        material and the required C/N or C/P ratio of receiving material.
+
+        Parameters:
+            cpart (numpy.ndarray): derived, C in incoming material
+            recres_iel (numpy.ndarray): derived, <iel>/C ratio in incoming
+                material
+            minerl_1_iel (numpy.ndarray): state variable, surface mineral <iel>
+            damr_lyr_iel (numpy.ndarray): parameter, fraction of iel in lyr
+                absorbed by residue
+            pabres (numpy.ndarray): parameter, amount of residue which will
+                give maximum direct absorption of iel
+            damrmn_iel (numpy.ndarray): parameter, minimum C/iel ratio allowed
+                in residue after direct absorption
+
+        Returns:
+            dirabs_iel, <iel> (N or P) absorbed from the surface mineral pool
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (recres_iel != _TARGET_NODATA) &
+            (~numpy.isclose(minerl_1_iel, _SV_NODATA)) &
+            (damr_lyr_iel != _IC_NODATA) &
+            (pabres != _IC_NODATA) &
+            (damrmn_iel != _IC_NODATA))
+
+        # epart_iel: iel in incoming material, calculated here from the ratio
+        epart_iel = numpy.empty(cpart.shape, dtype=numpy.float32)
+        epart_iel[:] = _TARGET_NODATA
+        epart_iel[valid_mask] = cpart[valid_mask] * recres_iel[valid_mask]
+
+        dirabs_iel = numpy.empty(cpart.shape, dtype=numpy.float32)
+        dirabs_iel[:] = _TARGET_NODATA
+        dirabs_iel[valid_mask] = 0.
+
+        minerl_mask = ((minerl_1_iel >= 0) & valid_mask)
+        dirabs_iel[minerl_mask] = (
+            damr_lyr_iel[minerl_mask] * minerl_1_iel[minerl_mask] *
+            numpy.maximum(cpart[minerl_mask] / pabres[minerl_mask], 1.))
+
+        # rcetot: C/E ratio of incoming material
+        rcetot = numpy.empty(cpart.shape, dtype=numpy.float32)
+        rcetot[:] = _IC_NODATA
+        e_sufficient_mask = (((epart_iel + dirabs_iel) > 0) & valid_mask)
+        rcetot[valid_mask] = 0
+        rcetot[e_sufficient_mask] = (
+            cpart[e_sufficient_mask] / (
+                epart_iel[e_sufficient_mask] + dirabs_iel[e_sufficient_mask]))
+
+        dirabs_mod_mask = ((rcetot < damrmn_iel) & valid_mask)
+        dirabs_iel[dirabs_mod_mask] = numpy.maximum(
+            cpart[dirabs_mod_mask] / damrmn_iel[dirabs_mod_mask] -
+            epart_iel[dirabs_mod_mask], 0.)
+        return dirabs_iel
+
+    def calc_d_metabc_lyr(cpart, recres_1, dirabs_1, frlign, spl_1, spl_2):
+        """Calculate the change in metabolic C after addition of new material.
+
+        Parameters:
+            cpart (numpy.ndarray): C in incoming material
+            recres_1 (numpy.ndarray): N in incoming material
+            dirabs_1 (numpy.ndarray): derived, direct aborption of mineral N
+                into incoming material
+            frlign (numpy.ndarray): fraction of incoming material which is
+                lignin
+            spl_1 (numpy.ndarray): parameter, intercept of regression
+                predicting fraction of residue going to metabolic
+            spl_2 (numpy.ndarray): parameter, slope of regression predicting
+                fraction of residue going to metabolic
+
+        Returns:
+            d_metabc_lyr, change in metabc_lyr
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (recres_1 != _TARGET_NODATA) &
+            (frlign != _TARGET_NODATA) &
+            (spl_1 != _IC_NODATA) &
+            (spl_2 != _IC_NODATA))
+
+        epart_1 = numpy.empty(cpart.shape, dtype=numpy.float32)
+        epart_1[:] = _TARGET_NODATA
+        epart_1[valid_mask] = cpart[valid_mask] * recres_1[valid_mask]
+
+        # rlnres: ratio of lignin to N in the incoming material
+        rlnres = numpy.empty(cpart.shape, dtype=numpy.float32)
+        rlnres[:] = _TARGET_NODATA
+        rlnres[valid_mask] = (
+            frlign[valid_mask] / (
+                (epart_1[valid_mask] + dirabs_1[valid_mask]) /
+                (cpart[valid_mask] * 2.5)))
+
+        # frmet: fraction of cpart that goes to metabolic
+        frmet = numpy.empty(cpart.shape, dtype=numpy.float32)
+        frmet[:] = _TARGET_NODATA
+        frmet[valid_mask] = (
+            spl_1[valid_mask] - spl_2[valid_mask] * rlnres[valid_mask])
+
+        lign_exceeded_mask = ((frlign > (1. - frmet)) & valid_mask)
+        frmet[lign_exceeded_mask] = 1. - frlign[lign_exceeded_mask]
+
+        d_metabc_lyr = numpy.empty(cpart.shape, dtype=numpy.float32)
+        d_metabc_lyr[:] = _TARGET_NODATA
+        d_metabc_lyr[valid_mask] = cpart[valid_mask] * frmet[valid_mask]
+        return d_metabc_lyr
+
+    def calc_d_strucc_lyr(cpart, d_metabc_lyr):
+        """Calculate change in structural C after addition of new material.
+
+        Parameters:
+            cpart (numpy.ndarray): derived, C in incoming material
+            d_metabc_lyr (numpy.ndarray) derived, change in metabc_lyr
+
+        Returns:
+            d_strucc_lyr, change in strucc_lyr
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (d_metabc_lyr != _TARGET_NODATA))
+
+        d_strucc_lyr = numpy.empty(cpart.shape, dtype=numpy.float32)
+        d_strucc_lyr[:] = _TARGET_NODATA
+        d_strucc_lyr[valid_mask] = cpart[valid_mask] - d_metabc_lyr[valid_mask]
+        return d_strucc_lyr
+
+    def calc_d_struce_lyr_iel(d_strucc_lyr, rcestr_iel):
+        """Calculate the change in N or P in structural material in layer lyr.
+
+        Parameters:
+            d_strucc_lyr (numpy.ndarray): change in strucc_lyr with addition of
+                incoming material
+            rcestr_iel (numpy.ndarray): parameter, C/<iel> ratio for structural
+                material
+
+        Returns:
+            d_struce_lyr_iel, change in structural N or P in layer lyr
+        """
+        valid_mask = (
+            (d_strucc_lyr != _TARGET_NODATA) &
+            (rcestr_iel != _IC_NODATA))
+
+        d_struce_lyr_iel = numpy.empty(d_strucc_lyr.shape, dtype=numpy.float32)
+        d_struce_lyr_iel[valid_mask] = (
+            d_strucc_lyr[valid_mask] / rcestr_iel[valid_mask])
+        return d_struce_lyr_iel
+
+    def calc_d_metabe_lyr_iel(cpart, recres_iel, dirabs_iel, d_struce_lyr_iel):
+        """Calculate the change in N or P in metabolic material in layer lyr.
+
+        Parameters:
+            cpart (numpy.ndarray): C in incoming material
+            recres_iel (numpy.ndarray): <iel>/C ratio in incoming material
+            dirabs_iel (numpy.ndarray): <iel> absorbed from the surface mineral
+                pool
+            d_struce_lyr_iel (numpy.ndarray): change in structural N or P in
+                layer lyr
+
+        Returns:
+            d_metabe_lyr_iel, change in metabolic N or P in layer lyr
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (recres_iel != _TARGET_NODATA) &
+            (dirabs_iel != _TARGET_NODATA) &
+            (d_struce_lyr_iel != _TARGET_NODATA))
+
+        epart_iel = numpy.empty(cpart.shape, dtype=numpy.float32)
+        epart_iel[:] = _TARGET_NODATA
+        epart_iel[valid_mask] = cpart[valid_mask] * recres_iel[valid_mask]
+
+        d_metabe_lyr_iel = numpy.empty(cpart.shape, dtype=numpy.float32)
+        d_metabe_lyr_iel[:] = _TARGET_NODATA
+        d_metabe_lyr_iel[valid_mask] = (
+            epart_iel[valid_mask] + dirabs_iel[valid_mask] -
+            d_struce_lyr_iel[valid_mask])
+        return d_metabe_lyr_iel
+
+    def calc_d_strlig_lyr(frlign, d_strucc_lyr, cpart, strlig_lyr, strucc_lyr):
+        """Calculate change in fraction of lignin in structural material.
+
+        Parameters:
+            frlign (numpy.ndarray): fraction of incoming material which is
+                lignin
+            d_strucc_lyr (numpy.ndarray): change in strucc_lyr with addition of
+                incoming material
+            cpart (numpy.ndarray): C in incoming material
+            strlig_lyr (numpy.ndarray): state variable, lignin in structural
+                material in receiving layer
+            strucc_lyr (numpy.ndarray): state variable, C in structural
+                material in layer lyr
+
+        Returns:
+            d_strlig_lyr, change in fraction of lignin in structural material
+                in layer lyr
+        """
+        valid_mask = (
+            (frlign != _TARGET_NODATA) &
+            (d_strucc_lyr != _TARGET_NODATA) &
+            (cpart != _TARGET_NODATA) &
+            (~numpy.isclose(strlig_lyr, _SV_NODATA)) &
+            (~numpy.isclose(strucc_lyr, _SV_NODATA)))
+
+        fligst = numpy.empty(frlign.shape, dtype=numpy.float32)
+        fligst[:] = _TARGET_NODATA
+        fligst[valid_mask] = numpy.minimum(
+            frlign[valid_mask] / (
+                d_strucc_lyr[valid_mask] / cpart[valid_mask]), 1.)
+
+        strlig_lyr_mod = numpy.empty(frlign.shape, dtype=numpy.float32)
+        strlig_lyr_mod[:] = _TARGET_NODATA
+        strlig_lyr_mod[valid_mask] = (
+            ((strlig_lyr[valid_mask] * strucc_lyr[valid_mask]) +
+                (fligst[valid_mask] * d_strucc_lyr[valid_mask])) /
+            (strucc_lyr[valid_mask] + d_strucc_lyr[valid_mask]))
+
+        d_strlig_lyr = numpy.empty(frlign.shape, dtype=numpy.float32)
+        d_strlig_lyr[:] = _IC_NODATA
+        d_strlig_lyr[valid_mask] = (
+            strlig_lyr_mod[valid_mask] - strlig_lyr[valid_mask])
+        return d_strlig_lyr
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'dirabs_1', 'dirabs_2', 'd_metabc_lyr', 'd_strucc_lyr',
+            'd_struce_lyr_iel', 'd_statv_temp', 'operand_temp']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    param_val_dict = {}
+    for val in [
+            'damr_{}_1'.format(lyr), 'damr_{}_2'.format(lyr), 'pabres',
+            'damrmn_1', 'damrmn_2', 'spl_1', 'spl_2', 'rcestr_1',
+            'rcestr_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+    # direct absorption of N and P from surface mineral layer
+    for iel in [1, 2]:
+        if iel == 1:
+            recres_path = recres_1_path
+        else:
+            recres_path = recres_2_path
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cpart_path, recres_path,
+                sv_reg['minerl_1_{}_path'.format(iel)],
+                param_val_dict['damr_{}_{}'.format(lyr, iel)],
+                param_val_dict['pabres'],
+                param_val_dict['damrmn_{}'.format(iel)]]],
+            calc_dirabs, temp_val_dict['dirabs_{}'.format(iel)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # remove direct absorption from surface mineral layer
+        shutil.copyfile(
+            sv_reg['minerl_1_{}_path'.format(iel)],
+            temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['dirabs_{}'.format(iel)], _TARGET_NODATA,
+            sv_reg['minerl_1_{}_path'.format(iel)], _SV_NODATA)
+
+    # partition C into structural and metabolic
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            cpart_path, recres_1_path, temp_val_dict['dirabs_1'],
+            frlign_path, param_val_dict['spl_1'],
+            param_val_dict['spl_2']]],
+        calc_d_metabc_lyr, temp_val_dict['d_metabc_lyr'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            cpart_path, temp_val_dict['d_metabc_lyr']]],
+        calc_d_strucc_lyr, temp_val_dict['d_strucc_lyr'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    shutil.copyfile(
+        sv_reg['metabc_{}_path'.format(lyr)], temp_val_dict['d_statv_temp'])
+    raster_sum(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['d_metabc_lyr'], _TARGET_NODATA,
+        sv_reg['metabc_{}_path'.format(lyr)], _SV_NODATA)
+    shutil.copyfile(
+        sv_reg['strucc_{}_path'.format(lyr)], temp_val_dict['d_statv_temp'])
+    raster_sum(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['d_strucc_lyr'], _TARGET_NODATA,
+        sv_reg['strucc_{}_path'.format(lyr)], _SV_NODATA)
+
+    # partition N and P into structural and metabolic
+    for iel in [1, 2]:
+        if iel == 1:
+            recres_path = recres_1_path
+        else:
+            recres_path = recres_2_path
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['d_strucc_lyr'],
+                param_val_dict['rcestr_{}'.format(iel)]]],
+            calc_d_struce_lyr_iel, temp_val_dict['d_struce_lyr_iel'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['struce_{}_{}_path'.format(lyr, iel)],
+            temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['d_struce_lyr_iel'], _TARGET_NODATA,
+            sv_reg['struce_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cpart_path, recres_path,
+                temp_val_dict['dirabs_{}'.format(iel)],
+                temp_val_dict['d_struce_lyr_iel']]],
+            calc_d_metabe_lyr_iel, temp_val_dict['operand_temp'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['metabe_{}_{}_path'.format(lyr, iel)],
+            temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['operand_temp'], _TARGET_NODATA,
+            sv_reg['metabe_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+
+    # adjust fraction of lignin in receiving structural pool
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            frlign_path, temp_val_dict['d_strucc_lyr'], cpart_path,
+            sv_reg['strlig_{}_path'.format(lyr)],
+            sv_reg['strucc_{}_path'.format(lyr)]]],
+        calc_d_strlig_lyr, temp_val_dict['operand_temp'], gdal.GDT_Float32,
+        _IC_NODATA)
+    shutil.copyfile(
+        sv_reg['strlig_{}_path'.format(lyr)],
+        temp_val_dict['d_statv_temp'])
+    raster_sum(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['operand_temp'], _TARGET_NODATA,
+        sv_reg['strlig_{}_path'.format(lyr)], _SV_NODATA)

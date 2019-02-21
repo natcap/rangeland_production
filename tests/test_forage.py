@@ -1857,7 +1857,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -8328,7 +8328,8 @@ class foragetests(unittest.TestCase):
         def partit_point(
                 cpart, recres_1, recres_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
                 minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
-                rcestr_1, rcestr_2, strlig_lyr, strucc_lyr):
+                rcestr_1, rcestr_2, strlig_lyr, strucc_lyr, metabc_lyr,
+                struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2):
             """Partition incoming material into structural and metabolic.
 
             When organic material is added to the soil, for example as dead
@@ -8354,9 +8355,9 @@ class foragetests(unittest.TestCase):
                 pabres (float): parameter, amount of residue which will give
                     maximum direct absorption of N
                 frlign (float): fraction of incoming material which is lignin
-                spl_1 (float): parameter, intercept of regression prediction
+                spl_1 (float): parameter, intercept of regression predicting
                     fraction of residue going to metabolic
-                spl_2 (float): parameter, slope of regression prediction
+                spl_2 (float): parameter, slope of regression predicting
                     fraction of residue going to metabolic
                 rcestr_1 (float): parameter, C/N ratio for structural material
                 rcestr_2 (float): parameter, C/P ratio for structural material
@@ -8364,18 +8365,28 @@ class foragetests(unittest.TestCase):
                     material in receiving layer
                 strucc_lyr (float): state variable, C in structural material in
                     lyr
+                metabc_lyr (float): state variable, C in metabolic material in
+                    lyr
+                struce_lyr_1 (float): state variable, N in structural material
+                    in lyr
+                metabe_lyr_1 (float): state variable, N in metabolic material
+                    in lyr
+                struce_lyr_2 (float): state variable, P in structural material
+                    in lyr
+                metabe_lyr_2 (float): state variable, P in metabolic material
+                    in lyr
 
             Returns:
-                dictionary of values giving change in state variables:
-                    d_minerl_1_1: change in surface mineral N
-                    d_minerl_1_2: change in surface mineral P
-                    d_metabc_lyr: change in METABC_lyr
-                    d_strucc_lyr: change in STRUCC_lyr
-                    d_struce_lyr_1: change in STRUCE_lyr_1
-                    d_metabe_lyr_1: change in METABE_lyr_1
-                    d_struce_lyr_2: change in STRUCE_lyr_2
-                    d_metabe_lyr_2: change in METABE_lyr_2
-                    d_strlig_lyr: change in strlig_lyr
+                dictionary of values giving modified state variables:
+                    mod_minerl_1_1: modified surface mineral N
+                    mod_minerl_1_2: modified surface mineral P
+                    mod_metabc_lyr: modified METABC_lyr
+                    mod_strucc_lyr: modified STRUCC_lyr
+                    mod_struce_lyr_1: modified STRUCE_lyr_1
+                    mod_metabe_lyr_1: modified METABE_lyr_1
+                    mod_struce_lyr_2: modified STRUCE_lyr_2
+                    mod_metabe_lyr_2: modified METABE_lyr_2
+                    mod_strlig_lyr: modified strlig_lyr
             """
             # calculate direct absorption of mineral N by residue
             epart_1 = cpart * recres_1
@@ -8439,18 +8450,19 @@ class foragetests(unittest.TestCase):
             d_strlig_lyr = strlig_lyr_mod - strlig_lyr
 
             result_dict = {
-                'd_minerl_1_1': -dirabs_1,
-                'd_minerl_1_2': -dirabs_2,
-                'd_metabc_lyr': d_metabc_lyr,
-                'd_strucc_lyr': d_strucc_lyr,
-                'd_struce_lyr_1': d_struce_lyr_1,
-                'd_metabe_lyr_1': d_metabe_lyr_1,
-                'd_struce_lyr_2': d_struce_lyr_2,
-                'd_metabe_lyr_2': d_metabe_lyr_2,
-                'd_strlig_lyr': d_strlig_lyr,
+                'mod_minerl_1_1': minerl_1_1 - dirabs_1,
+                'mod_minerl_1_2': minerl_1_2 - dirabs_2,
+                'mod_metabc_lyr': metabc_lyr + d_metabc_lyr,
+                'mod_strucc_lyr': strucc_lyr + d_strucc_lyr,
+                'mod_struce_lyr_1': struce_lyr_1 + d_struce_lyr_1,
+                'mod_metabe_lyr_1': metabe_lyr_1 + d_metabe_lyr_1,
+                'mod_struce_lyr_2': struce_lyr_2 + d_struce_lyr_2,
+                'mod_metabe_lyr_2': metabe_lyr_2 + d_metabe_lyr_2,
+                'mod_strlig_lyr': strlig_lyr + d_strlig_lyr,
             }
             return result_dict
         from natcap.invest import forage
+        tolerance = 0.0001
 
         # known inputs
         cpart = 10.1
@@ -8470,10 +8482,113 @@ class foragetests(unittest.TestCase):
         rcestr_2 = 500.
         strlig_lyr = 0.224
         strucc_lyr = 157.976
+        metabc_lyr = 7.7447
+        struce_lyr_1 = 0.8046
+        metabe_lyr_1 = 0.4243
+        struce_lyr_2 = 0.3152
+        metabe_lyr_2 = 0.0555
 
         # raster inputs
+        cpart_path = os.path.join(self.workspace_dir, 'cpart.tif')
+        recres_1_path = os.path.join(self.workspace_dir, 'recres_1.tif')
+        recres_2_path = os.path.join(self.workspace_dir, 'recres_2.tif')
+        frlign_path = os.path.join(self.workspace_dir, 'frlign.tif')
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+            'minerl_1_2_path': os.path.join(
+                self.workspace_dir, 'minerl_1_2.tif'),
+            'metabc_1_path': os.path.join(
+                self.workspace_dir, 'metabc.tif'),
+            'strucc_1_path': os.path.join(
+                self.workspace_dir, 'strucc.tif'),
+            'struce_1_1_path': os.path.join(
+                self.workspace_dir, 'struce_1_1.tif'),
+            'metabe_1_1_path': os.path.join(
+                self.workspace_dir, 'metabe_1_1.tif'),
+            'struce_1_2_path': os.path.join(
+                self.workspace_dir, 'struce_1_2.tif'),
+            'metabe_1_2_path': os.path.join(
+                self.workspace_dir, 'metabe_1_2.tif'),
+            'strlig_1_path': os.path.join(self.workspace_dir, 'strlig.tif')
+        }
+
+        create_constant_raster(cpart_path, cpart)
+        create_constant_raster(recres_1_path, recres_1)
+        create_constant_raster(recres_2_path, recres_2)
+        create_constant_raster(frlign_path, frlign)
+        create_constant_raster(site_index_path, 1)
+
+        create_constant_raster(sv_reg['minerl_1_1_path'], minerl_1_1)
+        create_constant_raster(sv_reg['minerl_1_2_path'], minerl_1_2)
+        create_constant_raster(sv_reg['metabc_1_path'], metabc_lyr)
+        create_constant_raster(sv_reg['strucc_1_path'], strucc_lyr)
+        create_constant_raster(sv_reg['struce_1_1_path'], struce_lyr_1)
+        create_constant_raster(sv_reg['metabe_1_1_path'], metabe_lyr_1)
+        create_constant_raster(sv_reg['struce_1_2_path'], struce_lyr_2)
+        create_constant_raster(sv_reg['metabe_1_2_path'], metabe_lyr_2)
+        create_constant_raster(sv_reg['strlig_1_path'], strlig_lyr)
+
+        site_param_table = {
+            1: {
+                'damr_1_1': damr_lyr_1,
+                'damr_1_2': damr_lyr_2,
+                'pabres': pabres,
+                'damrmn_1': damrmn_1,
+                'damrmn_2': damrmn_2,
+                'spl_1': spl_1,
+                'spl_2': spl_2,
+                'rcestr_1': rcestr_1,
+                'rcestr_2': rcestr_2,
+            }
+        }
+        lyr = 1
 
         point_results_dict = partit_point(
             cpart, recres_1, recres_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
             minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
-            rcestr_1, rcestr_2, strlig_lyr, strucc_lyr)
+            rcestr_1, rcestr_2, strlig_lyr, strucc_lyr, metabc_lyr,
+            struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2)
+
+        forage.partit(
+            cpart_path, recres_1_path, recres_2_path, frlign_path, sv_reg,
+            site_index_path, site_param_table, lyr)
+
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'],
+            point_results_dict['mod_minerl_1_1'] - tolerance,
+            point_results_dict['mod_minerl_1_1'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_2_path'],
+            point_results_dict['mod_minerl_1_2'] - tolerance,
+            point_results_dict['mod_minerl_1_2'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabc_1_path'],
+            point_results_dict['mod_metabc_lyr'] - tolerance,
+            point_results_dict['mod_metabc_lyr'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strucc_1_path'],
+            point_results_dict['mod_strucc_lyr'] - tolerance,
+            point_results_dict['mod_strucc_lyr'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_1_path'],
+            point_results_dict['mod_struce_lyr_1'] - tolerance,
+            point_results_dict['mod_struce_lyr_1'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_1_path'],
+            point_results_dict['mod_metabe_lyr_1'] - tolerance,
+            point_results_dict['mod_metabe_lyr_1'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_2_path'],
+            point_results_dict['mod_struce_lyr_2'] - tolerance,
+            point_results_dict['mod_struce_lyr_2'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_2_path'],
+            point_results_dict['mod_metabe_lyr_2'] - tolerance,
+            point_results_dict['mod_metabe_lyr_2'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strlig_1_path'],
+            point_results_dict['mod_strlig_lyr'] - 0.003,
+            point_results_dict['mod_strlig_lyr'] + 0.003, _SV_NODATA)
