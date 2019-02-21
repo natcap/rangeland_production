@@ -8309,3 +8309,171 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             d_som1e_2_iel_path, d_som1e_2_iel_after - tolerance,
             d_som1e_2_iel_after + tolerance, _IC_NODATA)
+
+    def test_partit(self):
+        """Test `partit`.
+
+        Use the function `partit` to partition organic residue into structural
+        and metabolic material.  Test the calculated quantities against values
+        calculated by point-based version defined here.
+
+        Raises:
+            AssertionError if the change in C, N, P, and lignin calculated by
+                `partit` does not match the value calculated by point-based
+                version
+
+        Returns:
+            None
+        """
+        def partit_point(
+                cpart, recres_1, recres_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
+                minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
+                rcestr_1, rcestr_2, strlig_lyr, strucc_lyr):
+            """Partition incoming material into structural and metabolic.
+
+            When organic material is added to the soil, for example as dead
+            biomass falls and becomes litter, or when organic material is added
+            from animal waste, it must be partitioned into structural
+            (STRUCC_lyr) and metabolic (METABC_lyr) material.  This is done
+            according to the ratio of lignin to N in the residue.
+
+            Parameters:
+                cpart (float): C in incoming material
+                recres_1 (float): N/C ratio in incoming material
+                recres_2 (float): P/C ratio in incoming material
+                damr_lyr_1 (float): parameter, fraction of N in lyr absorbed by
+                    residue
+                damr_lyr_2 (float): parameter, fraction of P in lyr absorbed by
+                    residue
+                minerl_1_1 (float): state variable, surface mineral N
+                minerl_1_2 (float): state variable, surface mineral P
+                damrmn_1 (float): parameter, minimum C/N ratio allowed in
+                    residue after direct absorption
+                damrmn_2 (float): parameter, minimum C/P ratio allowed in
+                    residue after direct absorption
+                pabres (float): parameter, amount of residue which will give
+                    maximum direct absorption of N
+                frlign (float): fraction of incoming material which is lignin
+                spl_1 (float): parameter, intercept of regression prediction
+                    fraction of residue going to metabolic
+                spl_2 (float): parameter, slope of regression prediction
+                    fraction of residue going to metabolic
+                rcestr_1 (float): parameter, C/N ratio for structural material
+                rcestr_2 (float): parameter, C/P ratio for structural material
+                strlig_lyr (float): state variable, lignin in structural
+                    material in receiving layer
+                strucc_lyr (float): state variable, C in structural material in
+                    lyr
+
+            Returns:
+                dictionary of values giving change in state variables:
+                    d_minerl_1_1: change in surface mineral N
+                    d_minerl_1_2: change in surface mineral P
+                    d_metabc_lyr: change in METABC_lyr
+                    d_strucc_lyr: change in STRUCC_lyr
+                    d_struce_lyr_1: change in STRUCE_lyr_1
+                    d_metabe_lyr_1: change in METABE_lyr_1
+                    d_struce_lyr_2: change in STRUCE_lyr_2
+                    d_metabe_lyr_2: change in METABE_lyr_2
+                    d_strlig_lyr: change in strlig_lyr
+            """
+            # calculate direct absorption of mineral N by residue
+            epart_1 = cpart * recres_1
+            if minerl_1_1 < 0:
+                dirabs_1 = 0
+            else:
+                dirabs_1 = damr_lyr_1 * minerl_1_1 * max(cpart / pabres, 1.)
+            # rcetot: C/E ratio of incoming material
+            if (epart_1 + dirabs_1) <= 0:
+                rcetot = 0
+            else:
+                rcetot = cpart/(epart_1 + dirabs_1)
+            if rcetot < damrmn_1:
+                dirabs_1 = max(cpart / damrmn_1 - epart_1, 0.)
+
+            # direct absorption of mineral P by residue
+            epart_2 = cpart * recres_2
+            if minerl_1_2 < 0:
+                dirabs_2 = 0
+            else:
+                dirabs_2 = damr_lyr_2 * minerl_1_2 * max(cpart / pabres, 1.)
+            # rcetot: C/E ratio of incoming material
+            if (epart_2 + dirabs_2) <= 0:
+                rcetot = 0
+            else:
+                rcetot = cpart/(epart_2 + dirabs_2)
+            if rcetot < damrmn_2:
+                dirabs_2 = max(cpart / damrmn_2 - epart_2, 0.)
+
+            # rlnres: ratio of lignin to N in the incoming material
+            rlnres = frlign / ((epart_1 + dirabs_1) / (cpart * 2.5))
+
+            # frmet: fraction of incoming C that goes to metabolic
+            frmet = spl_1 - spl_2 * rlnres
+            if frlign > (1 - frmet):
+                frmet = (1 - frlign)
+
+            # d_metabe_lyr_iel (caddm) is added to metabc_lyr
+            d_metabc_lyr = cpart * frmet
+
+            # d_strucc_lyr (cadds) is added to strucc_lyr
+            d_strucc_lyr = cpart - d_metabc_lyr
+
+            # d_struce_lyr_1 (eadds_1) is added to STRUCE_lyr_1
+            d_struce_lyr_1 = d_strucc_lyr / rcestr_1
+            # d_metabe_lyr_1 (eaddm_1) is added to METABE_lyr_1
+            d_metabe_lyr_1 = epart_1 + dirabs_1 - d_struce_lyr_1
+
+            # d_struce_lyr_2 (eadds_2) is added to STRUCE_lyr_2
+            d_struce_lyr_2 = d_strucc_lyr / rcestr_2
+            # d_metabe_lyr_2 (eaddm_2) is added to METABE_lyr_2
+            d_metabe_lyr_2 = epart_2 + dirabs_2 - d_struce_lyr_2
+
+            # fligst: fraction of material to structural which is lignin
+            # used to update the state variable strlig_lyr, lignin in
+            # structural material in the given layer
+            fligst = min(frlign / (d_strucc_lyr / cpart), 1.)
+            strlig_lyr_mod = (
+                ((strlig_lyr * strucc_lyr) + (fligst * d_strucc_lyr)) /
+                (strucc_lyr + d_strucc_lyr))
+            d_strlig_lyr = strlig_lyr_mod - strlig_lyr
+
+            result_dict = {
+                'd_minerl_1_1': -dirabs_1,
+                'd_minerl_1_2': -dirabs_2,
+                'd_metabc_lyr': d_metabc_lyr,
+                'd_strucc_lyr': d_strucc_lyr,
+                'd_struce_lyr_1': d_struce_lyr_1,
+                'd_metabe_lyr_1': d_metabe_lyr_1,
+                'd_struce_lyr_2': d_struce_lyr_2,
+                'd_metabe_lyr_2': d_metabe_lyr_2,
+                'd_strlig_lyr': d_strlig_lyr,
+            }
+            return result_dict
+        from natcap.invest import forage
+
+        # known inputs
+        cpart = 10.1
+        recres_1 = 0.0031
+        recres_2 = 0.00042
+        damr_lyr_1 = 0.02
+        damr_lyr_2 = 0.02
+        minerl_1_1 = 40.45
+        minerl_1_2 = 24.19
+        damrmn_1 = 15.
+        damrmn_2 = 150.
+        pabres = 100.
+        frlign = 0.3
+        spl_1 = 0.85
+        spl_2 = 0.013
+        rcestr_1 = 200.
+        rcestr_2 = 500.
+        strlig_lyr = 0.224
+        strucc_lyr = 157.976
+
+        # raster inputs
+
+        point_results_dict = partit_point(
+            cpart, recres_1, recres_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
+            minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
+            rcestr_1, rcestr_2, strlig_lyr, strucc_lyr)
