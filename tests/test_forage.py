@@ -8394,7 +8394,7 @@ class foragetests(unittest.TestCase):
             None
         """
         def partit_point(
-                cpart, recres_1, recres_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
+                cpart, epart_1, epart_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
                 minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
                 rcestr_1, rcestr_2, strlig_lyr, strucc_lyr, metabc_lyr,
                 struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2):
@@ -8408,8 +8408,8 @@ class foragetests(unittest.TestCase):
 
             Parameters:
                 cpart (float): C in incoming material
-                recres_1 (float): N/C ratio in incoming material
-                recres_2 (float): P/C ratio in incoming material
+                epart_1 (float): N in incoming material
+                epart_2 (float): P in incoming material
                 damr_lyr_1 (float): parameter, fraction of N in lyr absorbed by
                     residue
                 damr_lyr_2 (float): parameter, fraction of P in lyr absorbed by
@@ -8457,7 +8457,6 @@ class foragetests(unittest.TestCase):
                     mod_strlig_lyr: modified strlig_lyr
             """
             # calculate direct absorption of mineral N by residue
-            epart_1 = cpart * recres_1
             if minerl_1_1 < 0:
                 dirabs_1 = 0
             else:
@@ -8471,7 +8470,6 @@ class foragetests(unittest.TestCase):
                 dirabs_1 = max(cpart / damrmn_1 - epart_1, 0.)
 
             # direct absorption of mineral P by residue
-            epart_2 = cpart * recres_2
             if minerl_1_2 < 0:
                 dirabs_2 = 0
             else:
@@ -8534,8 +8532,8 @@ class foragetests(unittest.TestCase):
 
         # known inputs
         cpart = 10.1
-        recres_1 = 0.0031
-        recres_2 = 0.00042
+        epart_1 = 0.03131
+        epart_2 = 0.004242
         damr_lyr_1 = 0.02
         damr_lyr_2 = 0.02
         minerl_1_1 = 40.45
@@ -8558,8 +8556,8 @@ class foragetests(unittest.TestCase):
 
         # raster inputs
         cpart_path = os.path.join(self.workspace_dir, 'cpart.tif')
-        recres_1_path = os.path.join(self.workspace_dir, 'recres_1.tif')
-        recres_2_path = os.path.join(self.workspace_dir, 'recres_2.tif')
+        epart_1_path = os.path.join(self.workspace_dir, 'epart_1.tif')
+        epart_2_path = os.path.join(self.workspace_dir, 'epart_2.tif')
         frlign_path = os.path.join(self.workspace_dir, 'frlign.tif')
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
 
@@ -8584,8 +8582,8 @@ class foragetests(unittest.TestCase):
         }
 
         create_constant_raster(cpart_path, cpart)
-        create_constant_raster(recres_1_path, recres_1)
-        create_constant_raster(recres_2_path, recres_2)
+        create_constant_raster(epart_1_path, epart_1)
+        create_constant_raster(epart_2_path, epart_2)
         create_constant_raster(frlign_path, frlign)
         create_constant_raster(site_index_path, 1)
 
@@ -8615,13 +8613,13 @@ class foragetests(unittest.TestCase):
         lyr = 1
 
         point_results_dict = partit_point(
-            cpart, recres_1, recres_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
+            cpart, epart_1, epart_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
             minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
             rcestr_1, rcestr_2, strlig_lyr, strucc_lyr, metabc_lyr,
             struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2)
 
         forage.partit(
-            cpart_path, recres_1_path, recres_2_path, frlign_path, sv_reg,
+            cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
             site_index_path, site_param_table, lyr)
 
         self.assert_all_values_in_raster_within_range(
