@@ -131,11 +131,9 @@ def insert_nodata_values_into_raster(target_raster, nodata_value):
     os.remove(prior_copy)
 
 
-def create_constant_raster(target_path, fill_value):
+def create_constant_raster(target_path, fill_value, n_cols=1, n_rows=1):
     """Create a single-pixel raster with value `fill_value`."""
     geotransform = [0, 1, 0, 44.5, 0, 1]
-    n_cols = 1
-    n_rows = 1
     n_bands = 1
     datatype = gdal.GDT_Float32
     projection = osr.SpatialReference()
@@ -2555,15 +2553,15 @@ class foragetests(unittest.TestCase):
     def test_yearly_tasks(self):
         """Test `_yearly_tasks`.
 
-        Use `_yearly_tasks` to calculate annual precipitation and annual
-        atmospheric N deposition from random inputs. Test that the function
-        fails if fewer than 12 months of precipitation are supplied. Test that
-        the function fails if the dates of precipitation inputs do not fill
-        the 12 months surrounding the current month. Test that annual
-        precipitation falls inside the range [0, 72]. Test that annual
-        atmospheric N deposition falls inside the range [0, 37]. Introduce
-        nodata values into input rasters and test that atmospheric N deposition
-        remains within the specified range.
+        Use `_yearly_tasks` to calculate annual precipitation, annual
+        atmospheric N deposition, and the fraction of residue which is lignin
+        from random inputs. Test that the function fails if fewer than 12
+        months of precipitation are supplied. Test that the function fails if
+        the dates of precipitation inputs do not fill the 12 months surrounding
+        the current month. Test that annual precipitation falls inside the
+        range [0, 72]. Test that annual atmospheric N deposition falls inside
+        the range [0, 37]. Introduce nodata values into input rasters and test
+        that atmospheric N deposition remains within the specified range.
 
         Raises:
             AssertionError if `_yearly_tasks` does not fail with fewer than 12
@@ -2584,6 +2582,10 @@ class foragetests(unittest.TestCase):
             1: {
                 'epnfa_1': numpy.random.uniform(0, 1),
                 'epnfa_2': numpy.random.uniform(0, 0.5),
+                'fligni_1_1': 0.02,
+                'fligni_2_1': 0.0012,
+                'fligni_1_2': 0.26,
+                'fligni_2_2': -0.0015,
                 }
             }
 
@@ -2596,7 +2598,12 @@ class foragetests(unittest.TestCase):
         year_reg = {
             'annual_precip_path': os.path.join(
                 self.workspace_dir, 'annual_precip.tif'),
-            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif')
+            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif'),
+            'pltlig_above': os.path.join(
+                self.workspace_dir, 'pltlig_above.tif'),
+            'pltlig_below': os.path.join(
+                self.workspace_dir, 'pltlig_below.tif'),
+
         }
 
         create_random_raster(site_index_path, 1, 1)
@@ -2654,6 +2661,67 @@ class foragetests(unittest.TestCase):
             self.assert_all_values_in_raster_within_range(
                 year_reg['baseNdep_path'], minimum_acceptable_Ndep,
                 maximum_acceptable_Ndep, Ndep_nodata)
+
+        # known inputs, fraction of plant residue that is lignin
+        tolerance = 0.0000001
+        for key, path in complete_aligned_inputs.iteritems():
+            create_constant_raster(path, 0, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            site_index_path, site_param_table, complete_aligned_inputs,
+            month_index, year_reg)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above'], 0.02 - tolerance, 0.02 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below'], 0.26 - tolerance, 0.26 + tolerance,
+            _TARGET_NODATA)
+
+        for key, path in complete_aligned_inputs.iteritems():
+            create_constant_raster(path, 6, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            site_index_path, site_param_table, complete_aligned_inputs,
+            month_index, year_reg)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above'], 0.106 - tolerance, 0.1064 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below'], 0.152 - tolerance, 0.152 + tolerance,
+            _TARGET_NODATA)
+        for input_raster in input_raster_list:
+            insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
+        forage._yearly_tasks(
+            site_index_path, site_param_table, complete_aligned_inputs,
+            month_index, year_reg)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above'], 0.1064 - tolerance, 0.1064 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below'], 0.152 - tolerance, 0.152 + tolerance,
+            _TARGET_NODATA)
+
+        for key, path in complete_aligned_inputs.iteritems():
+            create_constant_raster(path, 40, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            site_index_path, site_param_table, complete_aligned_inputs,
+            month_index, year_reg)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above'], 0.5 - tolerance, 0.5 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below'], 0.02 - tolerance, 0.02 + tolerance,
+            _TARGET_NODATA)
+
+        for key, path in complete_aligned_inputs.iteritems():
+            create_constant_raster(path, 0.03, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            site_index_path, site_param_table, complete_aligned_inputs,
+            month_index, year_reg)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above'], 0.020432 - tolerance, 020432 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below'], 0.25946 - tolerance, 0.25946 + tolerance,
+            _TARGET_NODATA)
 
     def test_reference_evapotranspiration(self):
         """Test `_reference_evapotranspiration`.

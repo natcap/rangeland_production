@@ -164,6 +164,8 @@ _PERSISTENT_PARAMS_FILES = {
 _YEARLY_FILES = {
     'annual_precip_path': 'annual_precip.tif',
     'baseNdep_path': 'baseNdep.tif',
+    'pltlig_above': 'pltlig_above.tif',
+    'pltlig_below': 'pltlig_below.tif',
     }
 
 # intermediate values for each plant functional type that are shared
@@ -1758,14 +1760,14 @@ def _yearly_tasks(
         year_reg):
     """Calculate quantities that remain static for 12 months.
 
-    These quantities are annual precipitation and annual atmospheric N
-    deposition. Century also calculates non-symbiotic soil N fixation once
-    yearly, but here those were moved to monthly tasks.
-    Century uses precipitation in the future 12 months (prcgrw) to predict
-    root:shoot ratios, but here we instead use the sum of monthly
-    precipitation in 12 months including the current one, if data for 12
-    future months are not available.
-    Lines 79-82 Eachyr.f
+    These quantities are annual precipitation, annual atmospheric N
+    deposition, and the fraction of plant residue which is lignin. Century also
+    calculates non-symbiotic soil N fixation once yearly, but here those were
+    moved to monthly tasks. Century uses precipitation in the future 12 months
+    (prcgrw) to predict root:shoot ratios, but here we instead use the sum of
+    monthly precipitation in 12 months including the current one, if data for
+    12 future months are not available.
+    Lines 79-82, 164 Eachyr.f
 
     Parameters:
         site_index_path (string): path to site spatial index raster
@@ -1778,54 +1780,19 @@ def _yearly_tasks(
         year_reg (dict): map of key, path pairs giving paths to the annual
             precipitation and N deposition rasters
 
-    Modifies the rasters year_reg['annual_precip_path'] and
-        year_reg['baseNdep_path']
+    Modifies:
+        the rasters indicated by:
+            year_reg['annual_precip_path']
+            year_reg['baseNdep_path']
+            year_reg['pltlig_above']
+            year_reg['pltlig_below']
 
     Returns:
         None
 
     Raises:
-        ValueError if less than 12 monthly precipitation rasters can be found
+        ValueError if fewer than 12 monthly precipitation rasters can be found
     """
-    offset = -12
-    annual_precip_rasters = []
-    while len(annual_precip_rasters) < 12:
-        offset += 1
-        if offset == 12:
-            raise ValueError("Insufficient precipitation rasters were found")
-        precip_month = month_index + offset
-        try:
-            annual_precip_rasters.append(
-                    aligned_inputs['precip_%d' % precip_month])
-        except KeyError:
-            continue
-
-    precip_nodata = set([])
-    for precip_raster in annual_precip_rasters:
-        precip_nodata.update(
-            set([pygeoprocessing.get_raster_info(precip_raster)['nodata'][0]]))
-    if len(precip_nodata) > 1:
-        raise ValueError("Precipitation rasters include >1 nodata value")
-    precip_nodata = list(precip_nodata)[0]
-
-    raster_list_sum(
-        annual_precip_rasters, precip_nodata, year_reg['annual_precip_path'],
-        _TARGET_NODATA)
-
-    # calculate base N deposition
-    # intermediate parameter rasters for this operation
-    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
-    param_val_dict = {}
-    for val in['epnfa_1', 'epnfa_2']:
-        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        param_val_dict[val] = target_path
-        site_to_val = dict(
-            [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
-        pygeoprocessing.reclassify_raster(
-            (site_index_path, 1), site_to_val, target_path,
-            gdal.GDT_Float32, _IC_NODATA)
-
     def calc_base_N_dep(epnfa_1, epnfa_2, prcann):
         """Calculate base annual atmospheric N deposition.
 
@@ -1851,11 +1818,100 @@ def _yearly_tasks(
         baseNdep[baseNdep < 0] = 0.
         return baseNdep
 
+    def calc_pltlig(fligni_1_lyr, fligni_2_lyr, prcann):
+        """Calculate the fraction of residue that is lignin. Cmplig.f
+
+        This fraction is used to calculate the fraction of residue (i.e.,
+        incoming litter from fall of standing dead or incoming soil from death
+        of roots) that is partitioned to metabolic vs structural pools. It is
+        calculated once per year from annual precipitation and fixed
+        parameters.
+
+        Parameters:
+            fligni_1_lyr (numpy.ndarray): parameter, intercept for regression
+                predicting lignin content fraction from rainfall
+            fligni_2_lyr (numpy.ndarray): parameter, slope for regression
+                predicting lignin content fraction from rainfall
+            prcann (numpy.ndarray): derived, annual precipitation
+
+        Returns:
+            pltlig_lyr, fraction of residue that is lignin
+        """
+        valid_mask = (
+            (fligni_1_lyr != _IC_NODATA) &
+            (fligni_2_lyr != _IC_NODATA) &
+            (prcann != _TARGET_NODATA))
+
+        pltlig = numpy.empty(fligni_1_lyr.shape, dtype=numpy.float32)
+        pltlig[:] = _TARGET_NODATA
+        pltlig[valid_mask] = (
+            fligni_1_lyr[valid_mask] + fligni_2_lyr[valid_mask] *
+            prcann[valid_mask])
+        pltlig[valid_mask] = numpy.clip(pltlig[valid_mask], 0.02, 0.5)
+        return pltlig
+
+    offset = -12
+    annual_precip_rasters = []
+    while len(annual_precip_rasters) < 12:
+        offset += 1
+        if offset == 12:
+            raise ValueError("Insufficient precipitation rasters were found")
+        precip_month = month_index + offset
+        try:
+            annual_precip_rasters.append(
+                    aligned_inputs['precip_%d' % precip_month])
+        except KeyError:
+            continue
+
+    precip_nodata = set([])
+    for precip_raster in annual_precip_rasters:
+        precip_nodata.update(
+            set([pygeoprocessing.get_raster_info(precip_raster)['nodata'][0]]))
+    if len(precip_nodata) > 1:
+        raise ValueError("Precipitation rasters include >1 nodata value")
+    precip_nodata = list(precip_nodata)[0]
+
+    raster_list_sum(
+        annual_precip_rasters, precip_nodata, year_reg['annual_precip_path'],
+        _TARGET_NODATA)
+
+    # intermediate parameter rasters for this operation
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    param_val_dict = {}
+    for val in[
+            'epnfa_1', 'epnfa_2', 'fligni_1_1', 'fligni_2_1',
+            'fligni_1_2', 'fligni_2_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+    # calculate base N deposition
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             param_val_dict['epnfa_1'], param_val_dict['epnfa_2'],
             year_reg['annual_precip_path']]],
         calc_base_N_dep, year_reg['baseNdep_path'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    # fraction of surface residue that is lignin
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['fligni_1_1'], param_val_dict['fligni_2_1'],
+            year_reg['annual_precip_path']]],
+        calc_pltlig, year_reg['pltlig_above'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    # fraction of soil residue that is lignin
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['fligni_1_2'], param_val_dict['fligni_2_2'],
+            year_reg['annual_precip_path']]],
+        calc_pltlig, year_reg['pltlig_below'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
     # clean up temporary files
@@ -7390,7 +7446,8 @@ def partit(
     the residue. As residue is partitioned, some N and P may be directly
     absorbed from surface mineral N or P into the residue.
 
-    Parameters:
+    Parameters:  TODO should take incoming N and incoming P as arg
+                 instead of ratios
         cpart_path (string): path to raster containing C in incoming material
             that is to be partitioned
         recres_1_path (string): path to raster containing N/C ratio in incoming
