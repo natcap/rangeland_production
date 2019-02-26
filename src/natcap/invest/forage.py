@@ -181,7 +181,7 @@ _PFT_INTERMEDIATE_VALUES = [
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
-_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt']
+_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt', 'bgwfunc']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -6324,8 +6324,31 @@ def _decomposition(
             pevap[no_melt_mask])
         return rprpet
 
+    def calc_bgwfunc(rprpet):
+        """Calculate the impact of belowground water content on decomposition.
+
+        Bgwfunc reflects the effect of soil moisture on decomposition and is
+        also used to calculate shoot senescence due to water stress. It is
+        calculated from the ratio of soil water in the top two soil layers to
+        reference evapotranspiration.
+
+        Parameters:
+            rprpet (numpy.ndarray): derived, ratio of precipitation or snowmelt
+                to reference evapotranspiration
+
+        Returns:
+            bgwfunc, the effect of soil moisture on decomposition
+        """
+        valid_mask = (rprpet != _TARGET_NODATA)
+        bgwfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        bgwfunc[:] = _TARGET_NODATA
+        bgwfunc[valid_mask] = (
+            1. / (1. + 30 * numpy.exp(-8.5 * rprpet[valid_mask])))
+        bgwfunc[(valid_mask & (rprpet > 9))] = 1
+        return bgwfunc
+
     def calc_defac(
-            rprpet, snow, min_temp, max_temp, teff_1, teff_2, teff_3, teff_4):
+            bgwfunc, snow, min_temp, max_temp, teff_1, teff_2, teff_3, teff_4):
         """Calculate decomposition factor.
 
         The decomposition factor influences the rate of surface and soil
@@ -6333,8 +6356,8 @@ def _decomposition(
         moisture. Lines 151-200, Cycle.f.
 
         Parameters:
-            rprpet (numpy.ndarray): derived, ratio of precipitation or snowmelt
-                to reference evapotranspiration
+            bgwfunc (numpy.ndarray): derived, effect of soil moisture on
+                decomposition
             snow (numpy.ndarray): state variable, current snowpack
             min_temp (numpy.ndarray): input, minimum temperature for the month
             max_temp (numpy.ndarray): input, maximum temperature for the month
@@ -6354,7 +6377,7 @@ def _decomposition(
             defac, aboveground and belowground decomposition factor
         """
         valid_mask = (
-            (rprpet != _TARGET_NODATA) &
+            (bgwfunc != _TARGET_NODATA) &
             (snow != _TARGET_NODATA) &
             (~numpy.isclose(min_temp, min_temp_nodata)) &
             (~numpy.isclose(max_temp, max_temp_nodata)) &
@@ -6362,19 +6385,12 @@ def _decomposition(
             (teff_2 != _IC_NODATA) &
             (teff_3 != _IC_NODATA) &
             (teff_4 != _IC_NODATA))
-
-        agwfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
-        agwfunc[:] = _TARGET_NODATA
-        agwfunc[valid_mask] = (
-            1. / (1. + 30 * numpy.exp(-8.5 * rprpet[valid_mask])))
-        agwfunc[(valid_mask & (rprpet > 9))] = 1
-
-        stemp = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        stemp = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         stemp[:] = _TARGET_NODATA
         stemp[valid_mask] = (min_temp[valid_mask] + max_temp[valid_mask]) / 2.
         stemp[(valid_mask & (snow > 0))] = 0.
 
-        tfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        tfunc = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         tfunc[:] = _TARGET_NODATA
         tfunc[valid_mask] = numpy.maximum(
             0.01,
@@ -6385,10 +6401,10 @@ def _decomposition(
                 numpy.arctan(numpy.pi * teff_4[valid_mask] *
                 (30.0 - teff_1[valid_mask]))))
 
-        defac = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        defac = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         defac[:] = _TARGET_NODATA
         defac[valid_mask] = numpy.maximum(
-            0., tfunc[valid_mask] * agwfunc[valid_mask])
+            0., tfunc[valid_mask] * bgwfunc[valid_mask])
         return defac
 
     def calc_pheff_struc(pH):
@@ -6524,10 +6540,16 @@ def _decomposition(
         calc_rprpet, temp_val_dict['rprpet'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
+    # bgwfunc, effect of soil moisture on decomposition
+    pygeoprocessing.raster_calculator(
+        [(temp_val_dict['rprpet'], 1)],
+        calc_bgwfunc, month_reg['bgwfunc'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
     # defac, decomposition factor calculated from soil temp and moisture
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
-            temp_val_dict['rprpet'], sv_reg['snow_path'],
+            month_reg['bgwfunc'], sv_reg['snow_path'],
             aligned_inputs['min_temp_{}'.format(current_month)],
             aligned_inputs['max_temp_{}'.format(current_month)],
             param_val_dict['teff_1'], param_val_dict['teff_2'],

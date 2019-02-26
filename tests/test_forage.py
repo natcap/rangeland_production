@@ -1203,7 +1203,7 @@ def decomposition_point(
             tcflow = (
                 state_var['som1c_2'] * defac * params['dec3_2'] *
                 pp_reg['eftext'] * anerb * 0.020833 * pheff_metab)
-            co2los = tcflow * params['p1co2_2']
+            co2los = tcflow * pp_reg['p1co2_2']
             d_som1c_2 -= tcflow
             # respiration, line 179 Somdec.f
             mnrflo_1 = co2los * state_var['som1e_2_1'] / state_var['som1c_2']
@@ -1855,7 +1855,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -6348,6 +6348,7 @@ class foragetests(unittest.TestCase):
             month_reg = {
                 'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif'),
                 'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+                'bgwfunc': os.path.join(self.workspace_dir, 'bgwfunc.tif'),
             }
             create_random_raster(
                 month_reg['snowmelt'], month_reg_vals['snowmelt'],
@@ -6445,7 +6446,7 @@ class foragetests(unittest.TestCase):
             pp_reg = {
                 'rnewas_1_1_path': os.path.join(
                     self.workspace_dir, 'rnewas_1_1.tif'),
-                'rnewas_1__path': os.path.join(
+                'rnewas_1_2_path': os.path.join(
                     self.workspace_dir, 'rnewas_1_2.tif'),
                 'rnewas_2_1_path': os.path.join(
                     self.workspace_dir, 'rnewas_2_1.tif'),
@@ -6462,8 +6463,8 @@ class foragetests(unittest.TestCase):
             }
             for key in rnew_dict.iterkeys():
                 create_random_raster(
-                    pp_reg[key], rnew_dict[key], rnew_dict[key],
-                    nrows=nrows, ncols=ncols)
+                    pp_reg['{}_path'.format(key)], rnew_dict[key],
+                    rnew_dict[key], nrows=nrows, ncols=ncols)
             pp_reg['eftext_path'] = os.path.join(
                 self.workspace_dir, 'eftext.tif')
             pp_reg['orglch_path'] = os.path.join(
@@ -6472,6 +6473,8 @@ class foragetests(unittest.TestCase):
                 self.workspace_dir, 'fps1s3.tif')
             pp_reg['fps2s3_path'] = os.path.join(
                 self.workspace_dir, 'fps2s3.tif')
+            pp_reg['p1co2_2_path'] = os.path.join(
+                self.workspace_dir, 'p1co2_2.tif')
             create_random_raster(
                 pp_reg['eftext_path'], pp_reg_vals['eftext'],
                 pp_reg_vals['eftext'], nrows=nrows, ncols=ncols)
@@ -6484,6 +6487,9 @@ class foragetests(unittest.TestCase):
             create_random_raster(
                 pp_reg['fps2s3_path'], pp_reg_vals['fps2s3'],
                 pp_reg_vals['fps2s3'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                pp_reg['p1co2_2_path'], pp_reg_vals['p1co2_2'],
+                pp_reg_vals['p1co2_2'], nrows=nrows, ncols=ncols)
 
             input_dict = {
                 'aligned_inputs': aligned_inputs,
