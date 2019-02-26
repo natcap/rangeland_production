@@ -160,13 +160,14 @@ _PERSISTENT_PARAMS_FILES = {
     'rnewbs_2_2_path': 'rnewbs_2_2.tif',
     }
 
-# values that are updated once per year
+# site-level values that are updated once per year
 _YEARLY_FILES = {
     'annual_precip_path': 'annual_precip.tif',
     'baseNdep_path': 'baseNdep.tif',
-    'pltlig_above': 'pltlig_above.tif',
-    'pltlig_below': 'pltlig_below.tif',
     }
+
+# pft-level values that are updated once per year
+_YEARLY_PFT_FILES = ['pltlig_above', 'pltlig_below']
 
 # intermediate values for each plant functional type that are shared
 # between submodels, but do not need to be saved as output
@@ -633,6 +634,10 @@ def execute(args):
     year_reg = dict(
         [(key, os.path.join(year_dir, path)) for key, path in
             _YEARLY_FILES.iteritems()])
+    for pft_i in pft_id_set:
+        for file in _YEARLY_PFT_FILES:
+            year_reg['{}_{}'.format(file, pft_i)] = os.path.join(
+                year_dir, '{}_{}.tif'.format(file, pft_i))
 
     # make monthly directory for monthly intermediate parameters that are
     # shared between submodels, but do not need to be saved as output
@@ -652,8 +657,8 @@ def execute(args):
         if (month_index % 12) == 0:
             # Update yearly quantities
             _yearly_tasks(
-                aligned_inputs['site_index'], site_param_table,
-                aligned_inputs, month_index, year_reg)
+                aligned_inputs, site_param_table, veg_trait_table, month_index,
+                year_reg, pft_id_set)
 
         current_month = (starting_month + month_index - 1) % 12 + 1
         year = starting_year + (starting_month + month_index - 1) // 12
@@ -1756,36 +1761,39 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
 
 def _yearly_tasks(
-        site_index_path, site_param_table, aligned_inputs, month_index,
-        year_reg):
+        aligned_inputs, site_param_table, veg_trait_table, month_index,
+        year_reg, pft_id_set):
     """Calculate quantities that remain static for 12 months.
 
     These quantities are annual precipitation, annual atmospheric N
-    deposition, and the fraction of plant residue which is lignin. Century also
-    calculates non-symbiotic soil N fixation once yearly, but here those were
-    moved to monthly tasks. Century uses precipitation in the future 12 months
-    (prcgrw) to predict root:shoot ratios, but here we instead use the sum of
-    monthly precipitation in 12 months including the current one, if data for
-    12 future months are not available.
+    deposition, and the fraction of plant residue which is lignin for each pft.
+    Century also calculates non-symbiotic soil N fixation once yearly, but here
+    those were moved to monthly tasks. Century uses precipitation in the future
+    12 months (prcgrw) to predict root:shoot ratios, but here we instead use
+    the sum of monthly precipitation in 12 months including the current one, if
+    data for 12 future months are not available.
     Lines 79-82, 164 Eachyr.f
 
     Parameters:
-        site_index_path (string): path to site spatial index raster
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including monthly precipitation and site
+            spatial index raster
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
-        aligned_inputs (dict): map of key, path pairs indicating paths
-            to aligned model inputs, including monthly precipitation
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
         month_index (int): current monthly step, relative to 0 so that
             month_index=0 at first monthly time step
         year_reg (dict): map of key, path pairs giving paths to the annual
             precipitation and N deposition rasters
+        pft_id_set (set): set of integers identifying plant functional types
 
     Modifies:
         the rasters indicated by:
             year_reg['annual_precip_path']
             year_reg['baseNdep_path']
-            year_reg['pltlig_above']
-            year_reg['pltlig_below']
+            year_reg['pltlig_above_<pft>'] for each pft
+            year_reg['pltlig_below_<pft>'] for each pft
 
     Returns:
         None
@@ -1878,17 +1886,24 @@ def _yearly_tasks(
     # intermediate parameter rasters for this operation
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     param_val_dict = {}
-    for val in[
-            'epnfa_1', 'epnfa_2', 'fligni_1_1', 'fligni_2_1',
-            'fligni_1_2', 'fligni_2_2']:
+    for val in['epnfa_1', 'epnfa_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
                 (site_code, table) in site_param_table.iteritems()])
         pygeoprocessing.reclassify_raster(
-            (site_index_path, 1), site_to_val, target_path,
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
+    for val in ['fligni_1_1', 'fligni_2_1', 'fligni_1_2', 'fligni_2_2']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
+                [_IC_NODATA], fill_value_list=[fill_val])
 
     # calculate base N deposition
     pygeoprocessing.raster_calculator(
@@ -1898,21 +1913,24 @@ def _yearly_tasks(
         calc_base_N_dep, year_reg['baseNdep_path'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
-    # fraction of surface residue that is lignin
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [
-            param_val_dict['fligni_1_1'], param_val_dict['fligni_2_1'],
-            year_reg['annual_precip_path']]],
-        calc_pltlig, year_reg['pltlig_above'], gdal.GDT_Float32,
-        _TARGET_NODATA)
+    for pft_i in pft_id_set:
+        # fraction of surface residue that is lignin
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['fligni_1_1_{}'.format(pft_i)],
+                param_val_dict['fligni_2_1_{}'.format(pft_i)],
+                year_reg['annual_precip_path']]],
+            calc_pltlig, year_reg['pltlig_above_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
 
-    # fraction of soil residue that is lignin
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [
-            param_val_dict['fligni_1_2'], param_val_dict['fligni_2_2'],
-            year_reg['annual_precip_path']]],
-        calc_pltlig, year_reg['pltlig_below'], gdal.GDT_Float32,
-        _TARGET_NODATA)
+        # fraction of soil residue that is lignin
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['fligni_1_2_{}'.format(pft_i)],
+                param_val_dict['fligni_2_2_{}'.format(pft_i)],
+                year_reg['annual_precip_path']]],
+            calc_pltlig, year_reg['pltlig_below_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)

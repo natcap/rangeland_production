@@ -1855,7 +1855,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -2577,38 +2577,46 @@ class foragetests(unittest.TestCase):
         from natcap.invest import forage
 
         month_index = numpy.random.randint(0, 100)
-        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         site_param_table = {
             1: {
                 'epnfa_1': numpy.random.uniform(0, 1),
                 'epnfa_2': numpy.random.uniform(0, 0.5),
+
+                }
+            }
+        veg_trait_table = {
+            1: {
                 'fligni_1_1': 0.02,
                 'fligni_2_1': 0.0012,
                 'fligni_1_2': 0.26,
                 'fligni_2_2': -0.0015,
-                }
             }
-
+        }
+        pft_id_set = [1]
         complete_aligned_inputs = {
             'precip_{}'.format(month): os.path.join(
                 self.workspace_dir, 'precip_{}.tif'.format(month)) for
             month in xrange(month_index, month_index + 12)
         }
+        complete_aligned_inputs['site_index'] = os.path.join(
+            self.workspace_dir, 'site_index.tif')
 
         year_reg = {
             'annual_precip_path': os.path.join(
                 self.workspace_dir, 'annual_precip.tif'),
             'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif'),
-            'pltlig_above': os.path.join(
+            'pltlig_above_1': os.path.join(
                 self.workspace_dir, 'pltlig_above.tif'),
-            'pltlig_below': os.path.join(
+            'pltlig_below_1': os.path.join(
                 self.workspace_dir, 'pltlig_below.tif'),
-
         }
 
-        create_random_raster(site_index_path, 1, 1)
-        for key, path in complete_aligned_inputs.iteritems():
-            create_random_raster(path, 0, 6)
+        create_random_raster(complete_aligned_inputs['site_index'], 1, 1)
+        precip_keys = [
+            'precip_{}'.format(month) for month in
+            xrange(month_index, month_index + 12)]
+        for key in precip_keys:
+            create_random_raster(complete_aligned_inputs[key], 0, 6)
 
         # fewer than 12 months of precip rasters
         modified_inputs = complete_aligned_inputs.copy()
@@ -2616,8 +2624,8 @@ class foragetests(unittest.TestCase):
             numpy.random.randint(month_index, month_index + 12)))
         with self.assertRaises(ValueError):
             forage._yearly_tasks(
-                site_index_path, site_param_table, modified_inputs,
-                month_index, year_reg)
+                modified_inputs, site_param_table, veg_trait_table,
+                month_index, year_reg, pft_id_set)
 
         # 12 months of precip rasters supplied, but outside 12 month window of
         # current month
@@ -2625,8 +2633,8 @@ class foragetests(unittest.TestCase):
             'precip_{}.tif'.format(month_index + 13))
         with self.assertRaises(ValueError):
             forage._yearly_tasks(
-                site_index_path, site_param_table, modified_inputs,
-                month_index, year_reg)
+                modified_inputs, site_param_table, veg_trait_table,
+                month_index, year_reg, pft_id_set)
 
         # complete intact inputs
         minimum_acceptable_annual_precip = 0
@@ -2638,8 +2646,8 @@ class foragetests(unittest.TestCase):
         Ndep_nodata = _TARGET_NODATA
 
         forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
         self.assert_all_values_in_raster_within_range(
             year_reg['annual_precip_path'], minimum_acceptable_annual_precip,
             maximum_acceptabe_annual_precip, precip_nodata)
@@ -2647,13 +2655,11 @@ class foragetests(unittest.TestCase):
             year_reg['baseNdep_path'], minimum_acceptable_Ndep,
             maximum_acceptable_Ndep, Ndep_nodata)
 
-        input_raster_list = [site_index_path] + [
-            path for key, path in complete_aligned_inputs.iteritems()]
-        for input_raster in input_raster_list:
+        for key, input_raster in complete_aligned_inputs.iteritems():
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
             forage._yearly_tasks(
-                site_index_path, site_param_table, complete_aligned_inputs,
-                month_index, year_reg)
+                complete_aligned_inputs, site_param_table, veg_trait_table,
+                month_index, year_reg, pft_id_set)
             self.assert_all_values_in_raster_within_range(
                 year_reg['annual_precip_path'],
                 minimum_acceptable_annual_precip,
@@ -2664,64 +2670,68 @@ class foragetests(unittest.TestCase):
 
         # known inputs, fraction of plant residue that is lignin
         tolerance = 0.0000001
-        for key, path in complete_aligned_inputs.iteritems():
-            create_constant_raster(path, 0, n_rows=3, n_cols=3)
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 0, n_rows=3, n_cols=3)
         forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_above'], 0.02 - tolerance, 0.02 + tolerance,
+            year_reg['pltlig_above_1'], 0.02 - tolerance, 0.02 + tolerance,
             _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_below'], 0.26 - tolerance, 0.26 + tolerance,
+            year_reg['pltlig_below_1'], 0.26 - tolerance, 0.26 + tolerance,
             _TARGET_NODATA)
 
-        for key, path in complete_aligned_inputs.iteritems():
-            create_constant_raster(path, 6, n_rows=3, n_cols=3)
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 6, n_rows=3, n_cols=3)
         forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_above'], 0.106 - tolerance, 0.1064 + tolerance,
+            year_reg['pltlig_above_1'], 0.106 - tolerance, 0.1064 + tolerance,
             _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_below'], 0.152 - tolerance, 0.152 + tolerance,
+            year_reg['pltlig_below_1'], 0.152 - tolerance, 0.152 + tolerance,
             _TARGET_NODATA)
-        for input_raster in input_raster_list:
+        for key, input_raster in complete_aligned_inputs.iteritems():
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
         forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_above'], 0.1064 - tolerance, 0.1064 + tolerance,
+            year_reg['pltlig_above_1'], 0.1064 - tolerance, 0.1064 + tolerance,
             _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_below'], 0.152 - tolerance, 0.152 + tolerance,
-            _TARGET_NODATA)
-
-        for key, path in complete_aligned_inputs.iteritems():
-            create_constant_raster(path, 40, n_rows=3, n_cols=3)
-        forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
-        self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_above'], 0.5 - tolerance, 0.5 + tolerance,
-            _TARGET_NODATA)
-        self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_below'], 0.02 - tolerance, 0.02 + tolerance,
+            year_reg['pltlig_below_1'], 0.152 - tolerance, 0.152 + tolerance,
             _TARGET_NODATA)
 
-        for key, path in complete_aligned_inputs.iteritems():
-            create_constant_raster(path, 0.03, n_rows=3, n_cols=3)
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 40, n_rows=3, n_cols=3)
         forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_above'], 0.020432 - tolerance, 020432 + tolerance,
+            year_reg['pltlig_above_1'], 0.5 - tolerance, 0.5 + tolerance,
             _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            year_reg['pltlig_below'], 0.25946 - tolerance, 0.25946 + tolerance,
+            year_reg['pltlig_below_1'], 0.02 - tolerance, 0.02 + tolerance,
             _TARGET_NODATA)
+
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 0.03, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above_1'], 0.020432 - tolerance,
+            020432 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below_1'], 0.25946 - tolerance,
+            0.25946 + tolerance, _TARGET_NODATA)
 
     def test_reference_evapotranspiration(self):
         """Test `_reference_evapotranspiration`.
