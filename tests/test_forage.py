@@ -8668,3 +8668,227 @@ class foragetests(unittest.TestCase):
             sv_reg['strlig_1_path'],
             point_results_dict['mod_strlig_lyr'] - 0.003,
             point_results_dict['mod_strlig_lyr'] + 0.003, _SV_NODATA)
+
+    def test_calc_delta_iel(self):
+        """Test `calc_delta_iel`.
+
+        Use the function `calc_delta_iel` to calculate the change in N or P
+        accompanying a change in C.  Test that the calculated value matches
+        value calculated by hand.
+
+        Raises:
+            AssertionError if the value calculated by `calc_delta_iel` does not
+                match value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.000001
+        array_shape = (10, 10)
+
+        # known inputs
+        c_state_variable = 120.5
+        iel_state_variable = 39.29
+        delta_c = 17.49
+
+        delta_iel = 5.702756
+
+        # array-based inputs
+        c_state_variable_ar = numpy.full(array_shape, c_state_variable)
+        iel_state_variable_ar = numpy.full(array_shape, iel_state_variable)
+        delta_c_ar = numpy.full(array_shape, delta_c)
+
+        delta_iel_ar = forage.calc_delta_iel(
+            c_state_variable_ar, iel_state_variable_ar, delta_c_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_iel_ar, delta_iel - tolerance, delta_iel + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(c_state_variable_ar, _SV_NODATA)
+        insert_nodata_values_into_array(iel_state_variable_ar, _SV_NODATA)
+        insert_nodata_values_into_array(delta_c_ar, _TARGET_NODATA)
+
+        delta_iel_ar = forage.calc_delta_iel(
+            c_state_variable_ar, iel_state_variable_ar, delta_c_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_iel_ar, delta_iel - tolerance, delta_iel + tolerance,
+            _TARGET_NODATA)
+
+    def test_calc_fall_standing_dead(self):
+        """Test `calc_fall_standing_dead`.
+
+        Use the function `calc_fall_standing_dead` to calculate the change in C
+        in standing dead as standing dead falls to surface litter. Test that
+        the calculated value matches value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_fall_standing_dead` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        array_shape = (10, 10)
+
+        # known values
+        stdedc = 308.22
+        fallrt = 0.15
+
+        delta_c_standing_dead = 46.233
+
+        # array-based inputs
+        stdedc_ar = numpy.full(array_shape, stdedc)
+        fallrt_ar = numpy.full(array_shape, fallrt)
+
+        delta_c_standing_dead_ar = forage.calc_fall_standing_dead(
+            stdedc_ar, fallrt_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_standing_dead_ar, delta_c_standing_dead - tolerance,
+            delta_c_standing_dead + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(stdedc_ar, _SV_NODATA)
+        insert_nodata_values_into_array(fallrt_ar, _IC_NODATA)
+
+        delta_c_standing_dead_ar = forage.calc_fall_standing_dead(
+            stdedc_ar, fallrt_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_standing_dead_ar, delta_c_standing_dead - tolerance,
+            delta_c_standing_dead + tolerance, _TARGET_NODATA)
+
+    def calc_calc_root_death(self):
+        """Test `calc_root_death`.
+
+        Use the function `calc_root_death` to calculate the change in bglivc
+        with root death. Test that the calculated value matches values
+        calculated by hand.
+
+        Raises:
+            AssertionError if `calc_root_death` does not match value calculated
+                by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        array_shape = (10, 10)
+
+        # known values, temperature sufficient for death
+        average_temperature = 8.
+        rtdtmp = 2.
+        rdr = 0.05
+        avh2o_1 = 0.1183
+        deck5 = 5.
+        bglivc = 123.9065
+
+        delta_c_root_death = 6.05213
+
+        # array-based inputs
+        average_temperature_ar = numpy.full(array_shape, average_temperature)
+        rtdtmp_ar = numpy.full(array_shape, rtdtmp)
+        rdr_ar = numpy.full(array_shape, rdr)
+        avh2o_1_ar = numpy.full(array_shape, avh2o_1)
+        deck5_ar = numpy.full(array_shape, deck5)
+        bglivc_ar = numpy.full(array_shape, bglivc)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
+        insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
+        insert_nodata_values_into_array(bglivc_ar, _SV_NODATA)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        # known values, temperature insufficient for death
+        average_temperature = -1.
+        rtdtmp = 2.
+        rdr = 0.05
+        avh2o_1 = 0.1183
+        deck5 = 5.
+        bglivc = 123.9065
+
+        delta_c_root_death = 0.
+
+        # array-based inputs
+        average_temperature_ar = numpy.full(array_shape, average_temperature)
+        rtdtmp_ar = numpy.full(array_shape, rtdtmp)
+        rdr_ar = numpy.full(array_shape, rdr)
+        avh2o_1_ar = numpy.full(array_shape, avh2o_1)
+        deck5_ar = numpy.full(array_shape, deck5)
+        bglivc_ar = numpy.full(array_shape, bglivc)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
+        insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
+        insert_nodata_values_into_array(bglivc_ar, _SV_NODATA)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        # known values, root death rate limited by default value
+        average_temperature = 8.
+        rtdtmp = 2.
+        rdr = 0.98
+        avh2o_1 = 0.1183
+        deck5 = 5.
+        bglivc = 123.9065
+
+        delta_c_root_death = 117.7112
+
+        # array-based inputs
+        average_temperature_ar = numpy.full(array_shape, average_temperature)
+        rtdtmp_ar = numpy.full(array_shape, rtdtmp)
+        rdr_ar = numpy.full(array_shape, rdr)
+        avh2o_1_ar = numpy.full(array_shape, avh2o_1)
+        deck5_ar = numpy.full(array_shape, deck5)
+        bglivc_ar = numpy.full(array_shape, bglivc)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
+        insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
+        insert_nodata_values_into_array(bglivc_ar, _SV_NODATA)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)

@@ -695,6 +695,14 @@ def execute(args):
             aligned_inputs, current_month, month_index, site_param_table,
             year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg)
 
+        _death_and_partition(
+            'stded', aligned_inputs, site_param_table, current_month,
+            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+
+        _death_and_partition(
+            'bgliv', aligned_inputs, site_param_table, current_month,
+            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+
 
 def raster_multiplication(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
@@ -7833,3 +7841,339 @@ def partit(
         temp_val_dict['d_statv_temp'], _SV_NODATA,
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['strlig_{}_path'.format(lyr)], _SV_NODATA)
+
+
+def calc_fall_standing_dead(stdedc, fallrt):
+    """Calculate delta C with fall of standing dead.
+
+    Material falls from standing dead biomass into surface litter
+    according to a constant monthly fall rate.
+
+    Parameters:
+        stdedc (numpy.ndarray): state variable, C in standing dead material
+        fallrt (numpy.ndarray): parameter, fraction of standing dead material
+            that falls each month
+
+    Returns:
+        delta_c_standing_dead, change in C in standing dead
+    """
+    valid_mask = (
+        (~numpy.isclose(stdedc, _SV_NODATA)) &
+        (fallrt != _IC_NODATA))
+    delta_c_standing_dead = numpy.empty(stdedc.shape, dtype=numpy.float32)
+    delta_c_standing_dead[:] = _TARGET_NODATA
+    delta_c_standing_dead[valid_mask] = stdedc[valid_mask] * fallrt[valid_mask]
+    return delta_c_standing_dead
+
+
+def calc_root_death(
+        average_temperature, rtdtmp, rdr, avh2o_1, deck5, bglivc):
+    """Calculate delta C with death of roots.
+
+    Material flows from roots into soil organic matter pools due to root death.
+    Root death rate is limited by average temperature and influenced by
+    available soil moisture. Change in C is calculated by multiplying the root
+    death rate by bglivc, C in live roots.
+
+    Parameters:
+        average_temperature (numpy.ndarray): derived, average temperature for
+            the current month
+        rtdtmp (numpy.ndarray): parameter,  temperature below which root death
+            does not occur
+        rdr (numpy.ndarray): parameter, maximum root death rate at very dry
+            soil conditions
+        avh2o_1 (numpy.ndarray): state variable, water available to the current
+            plant functional type for growth
+        deck5 (numpy.ndarray): parameter, level of available soil water at
+            which root death rate is half maximum
+        bglivc (numpy.ndarray): state variable, C in belowground live roots
+
+    Returns:
+        delta_c_root_death, change in C during root death
+    """
+    valid_mask = (
+        (average_temperature != _IC_NODATA) &
+        (rdr != _IC_NODATA) &
+        (~numpy.isclose(avh2o_1, _SV_NODATA)) &
+        (deck5 != _IC_NODATA) &
+        (~numpy.isclose(bglivc, _SV_NODATA)))
+    root_death_rate = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    root_death_rate[:] = _TARGET_NODATA
+    root_death_rate[valid_mask] = 0.
+
+    temp_sufficient_mask = ((average_temperature >= rtdtmp) & valid_mask)
+    root_death_rate[temp_sufficient_mask] = numpy.minimum(
+        rdr[temp_sufficient_mask] *
+        (1.0 - avh2o_1[temp_sufficient_mask] / (
+            deck5[temp_sufficient_mask] + avh2o_1[temp_sufficient_mask])),
+        0.95)
+
+    delta_c_root_death = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    delta_c_root_death[:] = _TARGET_NODATA
+    delta_c_root_death[valid_mask] = (
+        root_death_rate[valid_mask] * bglivc[valid_mask])
+    return delta_c_root_death
+
+
+def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
+    """Calculate the change in N or P accompanying change in C.
+
+    As C flows out of standing dead biomass or roots, the amount of iel
+    (N or P) flowing out of the same pool is calculated from the change in C
+    according to the ratio of C to iel in the pool.
+
+    Parameters:
+        c_state_variable (numpy.ndarray): state variable, C in the pool that is
+            losing material
+        iel_state_variable (numpy.ndarray): state variable, N or P in the pool
+            that is losing material
+        delta_c (numpy.ndarray): derived, change in C. Change in N or P is
+            proportional to this amount.
+
+    Returns:
+        delta_iel, change in N or P accompanying the change in C
+    """
+    valid_mask = (
+        (~numpy.isclose(c_state_variable, _SV_NODATA)) &
+        (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
+        (delta_c != _TARGET_NODATA))
+    delta_iel = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
+    delta_iel[:] = _TARGET_NODATA
+    delta_iel[valid_mask] = (
+        (iel_state_variable[valid_mask] / c_state_variable[valid_mask]) *
+        delta_c[valid_mask])
+    return delta_iel
+
+
+def _death_and_partition(
+        state_variable, aligned_inputs, site_param_table, current_month,
+        prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table):
+    """Track movement of C, N and P from a pft-level state variable into soil.
+
+    Calculate C, N and P leaving the specified state variable and entering
+    surface or soil organic matter pools.  Subtract the change in C, N and P
+    from the state variable tracked for each pft, sum up the amounts across
+    pfts, and distribute the sum of the material flowing from the state
+    variable to surface or soil structural and metabolic pools.
+
+    Parameters:
+        state_variable (string): string identifying the state variable that is
+            flowing into organic matter.  Must be one of "stded" (for fall
+            of standing dead) or "bgliv" (for death of roots). If the state
+            variable is stded, material flowing from stded enters surface
+            structural and metabolic pools.  If the state variable is bgliv,
+            material flowing from bgliv enters soil structural and metabolic
+            pools.
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including temperature,
+            plant functional type composition, and site spatial index
+        site_param_table (dict): map of site spatial indices to dictionaries
+            containing site parameters
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        pft_id_set (set): set of integers identifying plant functional types
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+
+    Modifies:
+        The rasters indicated by
+            sv_reg['<state_variable>c_<pft>_path'] for each pft
+            sv_reg['<state_variable>e_1_<pft>_path'] for each pft
+            sv_reg['<state_variable>e_2_<pft>_path'] for each pft
+            sv_reg['minerl_1_1_path']
+            sv_reg['minerl_1_2_path']
+            sv_reg['metabc_<lyr>_path']
+            sv_reg['strucc_<lyr>_path']
+            sv_reg['metabe_<lyr>_1_path']
+            sv_reg['metabe_<lyr>_2_path']
+            sv_reg['struce_<lyr>_1_path']
+            sv_reg['struce_<lyr>_2_path']
+            sv_reg['strlig_<lyr>_path']
+        where lyr=1 if `state_variable` == 'stded'
+              lyr=2 if `state_variable` == 'bgliv'
+
+    Returns:
+        None
+    """
+    def calc_avg_temp(max_temp, min_temp):
+        """Calculate average temperature from maximum and minimum temp."""
+        valid_mask = (
+            (~numpy.isclose(max_temp, max_temp_nodata)) &
+            (~numpy.isclose(min_temp, min_temp_nodata)))
+        tave = numpy.empty(max_temp.shape, dtype=numpy.float32)
+        tave[:] = _IC_NODATA
+        tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
+        return tave
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'tave', 'delta_c', 'delta_iel', 'delta_sv_weighted',
+            'operand_temp', 'sum_weighted_delta_C', 'sum_weighted_delta_N',
+            'sum_weighted_delta_P', 'weighted_lignin', 'sum_lignin',
+            'fraction_lignin']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict = {}
+
+    # site-level parameters
+    val = 'deck5'
+    target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict[val] = target_path
+    site_to_val = dict(
+        [(site_code, float(table[val])) for
+            (site_code, table) in site_param_table.iteritems()])
+    pygeoprocessing.reclassify_raster(
+        (aligned_inputs['site_index'], 1), site_to_val, target_path,
+        gdal.GDT_Float32, _IC_NODATA)
+
+    # pft-level parameters
+    for val in['fallrt', 'rtdtmp', 'rdr']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+
+    # sum of material across pfts to be partitioned to organic matter
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_weighted_delta_C'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_weighted_delta_N'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_weighted_delta_P'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_lignin'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+
+    max_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
+    min_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            aligned_inputs['min_temp_{}'.format(current_month)]]],
+        calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
+
+    for pft_i in pft_id_set:
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+
+        # calculate change in C leaving the given state variable
+        if state_variable == 'stded':
+            fill_val = veg_trait_table[pft_i]['fallrt']
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['site_index'], param_val_dict['fallrt'],
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
+                    param_val_dict['fallrt']]],
+                calc_fall_standing_dead, temp_val_dict['delta_c'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+        else:
+            for val in ['rtdtmp', 'rdr']:
+                fill_val = veg_trait_table[pft_i][val]
+                pygeoprocessing.new_raster_from_base(
+                    aligned_inputs['site_index'], param_val_dict[val],
+                    gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['tave'],
+                    param_val_dict['rtdtmp'],
+                    param_val_dict['rdr'],
+                    sv_reg['avh2o_1_{}_path'.format(pft_i)],
+                    param_val_dict['deck5'],
+                    prev_sv_reg['bglivc_{}_path'.format(pft_i)]]],
+                calc_root_death, temp_val_dict['delta_c'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+        # subtract delta_c from the pft-level state variable
+        raster_difference(
+            prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
+            _SV_NODATA, temp_val_dict['delta_c'], _TARGET_NODATA,
+            sv_reg['{}c_{}_path'.format(state_variable, pft_i)], _SV_NODATA)
+        # calculate delta C weighted by % cover of this pft
+        raster_multiplication(
+            temp_val_dict['delta_c'], _TARGET_NODATA,
+            aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+            temp_val_dict['delta_sv_weighted'], _TARGET_NODATA)
+        shutil.copyfile(
+            temp_val_dict['sum_weighted_delta_C'],
+            temp_val_dict['operand_temp'])
+        raster_sum(
+            temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+            temp_val_dict['operand_temp'], _TARGET_NODATA,
+            temp_val_dict['sum_weighted_delta_C'], _TARGET_NODATA)
+        # calculate weighted fraction of flowing C which is lignin
+        if state_variable == 'stded':
+            frlign_path = year_reg['pltlig_above_{}'.format(pft_i)]
+        else:
+            frlign_path = year_reg['pltlig_below_{}'.format(pft_i)]
+        raster_multiplication(
+            temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+            frlign_path, _TARGET_NODATA,
+            temp_val_dict['weighted_lignin'], _TARGET_NODATA)
+        shutil.copyfile(
+            temp_val_dict['sum_lignin'], temp_val_dict['operand_temp'])
+        raster_sum(
+            temp_val_dict['weighted_lignin'], _TARGET_NODATA,
+            temp_val_dict['operand_temp'], _TARGET_NODATA,
+            temp_val_dict['sum_lignin'], _TARGET_NODATA)
+
+        for iel in [1, 2]:
+            # calculate N or P flowing out of the pft-level state variable
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
+                    prev_sv_reg['{}e_{}_{}_path'.format(
+                        state_variable, iel, pft_i)],
+                    temp_val_dict['delta_c']]],
+                calc_delta_iel, temp_val_dict['delta_iel'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            # subtract delta_iel from the pft-level state variable
+            raster_difference(
+                prev_sv_reg['{}e_{}_{}_path'.format(
+                    state_variable, iel, pft_i)], _SV_NODATA,
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                sv_reg['{}e_{}_{}_path'.format(state_variable, iel, pft_i)],
+                _SV_NODATA)
+            # calculate delta iel weighted by % cover of this pft
+            raster_multiplication(
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+                temp_val_dict['delta_sv_weighted'], _TARGET_NODATA)
+            if iel == 1:
+                shutil.copyfile(
+                    temp_val_dict['sum_weighted_delta_N'],
+                    temp_val_dict['operand_temp'])
+                raster_sum(
+                    temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+                    temp_val_dict['operand_temp'], _TARGET_NODATA,
+                    temp_val_dict['sum_weighted_delta_N'], _TARGET_NODATA)
+            else:
+                shutil.copyfile(
+                    temp_val_dict['sum_weighted_delta_P'],
+                    temp_val_dict['operand_temp'])
+                raster_sum(
+                    temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+                    temp_val_dict['operand_temp'], _TARGET_NODATA,
+                    temp_val_dict['sum_weighted_delta_P'], _TARGET_NODATA)
+
+    # partition sum of C, N and P into structural and metabolic pools
+    if state_variable == 'stded':
+        lyr = 1
+    else:
+        lyr = 2
+    raster_division(
+        temp_val_dict['sum_lignin'], _TARGET_NODATA,
+        temp_val_dict['sum_weighted_delta_C'], _TARGET_NODATA,
+        temp_val_dict['fraction_lignin'], _TARGET_NODATA)
+    partit(
+        temp_val_dict['sum_weighted_delta_C'],
+        temp_val_dict['sum_weighted_delta_N'],
+        temp_val_dict['sum_weighted_delta_P'],
+        temp_val_dict['fraction_lignin'],
+        sv_reg, aligned_inputs['site_index'], site_param_table, lyr)
