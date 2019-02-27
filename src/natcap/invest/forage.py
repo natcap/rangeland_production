@@ -703,6 +703,10 @@ def execute(args):
             'bgliv', aligned_inputs, site_param_table, current_month,
             prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
 
+        _shoot_senescence(
+            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
+            current_month)
+
 
 def raster_multiplication(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
@@ -7494,8 +7498,7 @@ def partit(
     the residue. As residue is partitioned, some N and P may be directly
     absorbed from surface mineral N or P into the residue.
 
-    Parameters:  TODO should take incoming N and incoming P as arg
-                 instead of ratios
+    Parameters:
         cpart_path (string): path to raster containing C in incoming material
             that is to be partitioned
         epart_1_path (string): path to raster containing N in incoming
@@ -8199,3 +8202,170 @@ def _death_and_partition(
         temp_val_dict['sum_weighted_delta_P'],
         temp_val_dict['fraction_lignin'],
         sv_reg, aligned_inputs['site_index'], site_param_table, lyr)
+
+
+def calc_senescence_water_shading(
+        aglivc, bgwfunc, fsdeth_1, fsdeth_3, fsdeth_4):
+    """Calculate shoot death due to water stress and shading.
+
+    In months where senescence is not scheduled to occur, some shoot death
+    may still occur due to water stress and shading.
+
+    Parameters:
+        aglivc (numpy.ndarray): state variable, carbon in aboveground live
+            biomass
+        bgwfunc (numpy.ndarray): derived, effect of soil moisture on
+            decomposition and shoot senescence
+        fsdeth_1 (numpy.ndarray): parameter, maximum shoot death rate at very
+            dry soil conditions
+        fsdeth_3 (numpy.ndarray): parameter, additional fraction of shoots
+            which die when aglivc is greater than fsdeth_4
+        fsdeth_4 (numpy.ndarray): parameter, threshold value for aglivc
+            above which shading increases senescence
+
+    Returns:
+        fdeth, fraction of aboveground live biomass that is converted to
+            standing dead
+    """
+    valid_mask = (
+        (~numpy.isclose(aglivc, _SV_NODATA)) &
+        (bgwfunc != _TARGET_NODATA) &
+        (fsdeth_1 != _IC_NODATA) &
+        (fsdeth_3 != _IC_NODATA) &
+        (fsdeth_4 != _IC_NODATA))
+    fdeth = numpy.empty(aglivc.shape, dtype=numpy.float32)
+    fdeth[:] = _TARGET_NODATA
+    fdeth[valid_mask] = fsdeth_1[valid_mask] * (1. - bgwfunc[valid_mask])
+
+    shading_mask = ((aglivc > fsdeth_4) & valid_mask)
+    fdeth[shading_mask] = fdeth[shading_mask] + fsdeth_3[shading_mask]
+    fdeth[valid_mask] = numpy.minimum(fdeth[valid_mask], 1.)
+    return fdeth
+
+
+def _shoot_senescence(
+        pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
+        current_month):
+    """Senescence of live material to standing dead.
+
+    Live aboveground biomass is converted to standing dead according to
+    senescence, which is specified for each pft to occur in one or more months
+    of the year. In other months, some senescence may occur because of water
+    stress or shading.  During senescence, C, N and P move from agliv to stded
+    state variables.
+
+    Parameters:
+        pft_id_set (set): set of integers identifying plant functional types
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+
+    Modifies:
+        the rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['stdedc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+            sv_reg['crpstg_1_<pft>_path'] for each pft
+            sv_reg['crpstg_2_<pft>_path'] for each pft
+            sv_reg['stdede_1_<pft>_path'] for each pft
+            sv_reg['stdede_2_<pft>_path'] for each pft
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'operand_temp', 'fdeth', 'delta_c', 'delta_iel', 'vol_loss',
+            'to_storage', 'to_stdede']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    param_val_dict = {}
+    for val in[
+            'fsdeth_1', 'fsdeth_2', 'fsdeth_3', 'fsdeth_4', 'vlossp',
+            'crprtf_1', 'crprtf_2']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                prev_sv_reg['aglivc_{}_path'.format(pft_i)], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+
+    for pft_i in pft_id_set:
+        if str(current_month) == veg_trait_table[pft_i]['senescence_month']:
+            temp_val_dict['fdeth'] = param_val_dict[
+                'fsdeth_2_{}'.format(pft_i)]
+        else:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+                    month_reg['bgwfunc'],
+                    param_val_dict['fsdeth_1_{}'.format(pft_i)],
+                    param_val_dict['fsdeth_3_{}'.format(pft_i)],
+                    param_val_dict['fsdeth_4_{}'.format(pft_i)]]],
+                calc_senescence_water_shading, temp_val_dict['fdeth'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+        # change in C flowing from aboveground live biomass to standing dead
+        raster_multiplication(
+            temp_val_dict['fdeth'], _TARGET_NODATA,
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['delta_c'], _TARGET_NODATA)
+        raster_difference(
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['delta_c'], _TARGET_NODATA,
+            sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA)
+        raster_sum(
+            prev_sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['delta_c'], _TARGET_NODATA,
+            sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA)
+
+        for iel in [1, 2]:
+            # change in N or P flowing from aboveground live biomass to dead
+            raster_multiplication(
+                temp_val_dict['fdeth'], _TARGET_NODATA,
+                prev_sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['delta_iel'], _TARGET_NODATA)
+            raster_difference(
+                prev_sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['delta_iel'], _TARGET_NODATA,
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            if iel == 1:
+                # volatilization loss of N
+                raster_multiplication(
+                    temp_val_dict['delta_iel'], _TARGET_NODATA,
+                    param_val_dict['vlossp_{}'.format(pft_i)], _IC_NODATA,
+                    temp_val_dict['vol_loss'], _TARGET_NODATA)
+                shutil.copyfile(
+                    temp_val_dict['delta_iel'], temp_val_dict['operand_temp'])
+                raster_difference(
+                    temp_val_dict['operand_temp'], _TARGET_NODATA,
+                    temp_val_dict['vol_loss'], _TARGET_NODATA,
+                    temp_val_dict['delta_iel'], _TARGET_NODATA)
+            # a fraction of N and P goes to crop storage
+            raster_multiplication(
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                param_val_dict['crprtf_{}_{}'.format(iel, pft_i)], _IC_NODATA,
+                temp_val_dict['to_storage'], _TARGET_NODATA)
+            raster_sum(
+                prev_sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['to_storage'], _TARGET_NODATA,
+                sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            # the rest goes to standing dead biomass
+            raster_difference(
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                temp_val_dict['to_storage'], _TARGET_NODATA,
+                temp_val_dict['to_stdede'], _TARGET_NODATA)
+            raster_sum(
+                prev_sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['to_stdede'], _TARGET_NODATA,
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)

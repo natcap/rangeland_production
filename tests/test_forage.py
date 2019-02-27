@@ -1855,7 +1855,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -8898,3 +8898,240 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             delta_c_root_death_ar, delta_c_root_death - tolerance,
             delta_c_root_death + tolerance, _TARGET_NODATA)
+
+    def test_calc_senescence_water_shading(self):
+        """Test `calc_senescence_water_shading`.
+
+        Use the function `calc_senescence_water_shading` to calculate shoot
+        death due to water stress and shading. Test that the calculated value
+        matches value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_senescence_water_shading` does not match
+                value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        array_shape = (10, 10)
+
+        # known values
+        aglivc = 221.59
+        bgwfunc = 0.88
+        fsdeth_1 = 0.2
+        fsdeth_3 = 0.2
+        fsdeth_4 = 150.
+
+        fdeth = 0.224
+
+        # array-based inputs
+        aglivc_ar = numpy.full(array_shape, aglivc)
+        bgwfunc_ar = numpy.full(array_shape, bgwfunc)
+        fsdeth_1_ar = numpy.full(array_shape, fsdeth_1)
+        fsdeth_3_ar = numpy.full(array_shape, fsdeth_3)
+        fsdeth_4_ar = numpy.full(array_shape, fsdeth_4)
+
+        fdeth_ar = forage.calc_senescence_water_shading(
+            aglivc_ar, bgwfunc_ar, fsdeth_1_ar, fsdeth_3_ar, fsdeth_4_ar)
+        self.assert_all_values_in_array_within_range(
+            fdeth_ar, fdeth - tolerance, fdeth + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aglivc_ar, _SV_NODATA)
+        insert_nodata_values_into_array(bgwfunc_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(fsdeth_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(fsdeth_3_ar, _IC_NODATA)
+        insert_nodata_values_into_array(fsdeth_4_ar, _IC_NODATA)
+
+        fdeth_ar = forage.calc_senescence_water_shading(
+            aglivc_ar, bgwfunc_ar, fsdeth_1_ar, fsdeth_3_ar, fsdeth_4_ar)
+        self.assert_all_values_in_array_within_range(
+            fdeth_ar, fdeth - tolerance, fdeth + tolerance, _TARGET_NODATA)
+
+    def test_shoot_senescence(self):
+        """Test `_shoot_senescence`.
+
+        Use the function `_shoot_senescence` to transition aboveground live
+        biomass to standing dead. Test that the calculated value matches
+        value calculated by hand.
+
+        Raises:
+            AssertionError if `_shoot_senescence` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        prev_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
+        cur_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
+
+        # known values
+        bgwfunc = 0.88
+        aglivc = 32.653
+        stdedc = 4.4683
+        aglive_1 = 0.3
+        aglive_2 = 0.1
+        stdede_1 = 0.25
+        stdede_2 = 0.05
+        crpstg_1 = 0
+        crpstg_2 = 0
+
+        current_month = 1
+        veg_trait_table = {
+            1: {
+                'senescence_month': '1',
+                'fsdeth_1': 0.2,
+                'fsdeth_2': 0.75,
+                'fsdeth_3': 0.2,
+                'fsdeth_4': 150.,
+                'vlossp': 0.15,
+                'crprtf_1': 0,
+                'crprtf_2': 0,
+            },
+            2: {
+                'senescence_month': '4',
+                'fsdeth_1': 0.1,
+                'fsdeth_2': 0.8,
+                'fsdeth_3': 0.17,
+                'fsdeth_4': 200.,
+                'vlossp': 0.15,
+                'crprtf_1': 0.1,
+                'crprtf_2': 0.05,
+            }
+        }
+        pft_id_set = set([key for key in veg_trait_table.iterkeys()])
+        prev_sv_reg = {
+            'aglivc_1_path': os.path.join(prev_sv_dir, 'aglivc_1.tif'),
+            'stdedc_1_path': os.path.join(prev_sv_dir, 'stdedc_1.tif'),
+            'aglive_1_1_path': os.path.join(prev_sv_dir, 'aglive_1_1.tif'),
+            'aglive_2_1_path': os.path.join(prev_sv_dir, 'aglive_2_1.tif'),
+            'stdede_1_1_path': os.path.join(prev_sv_dir, 'stdede_1_1.tif'),
+            'stdede_2_1_path': os.path.join(prev_sv_dir, 'stdede_2_1.tif'),
+            'crpstg_1_1_path': os.path.join(prev_sv_dir, 'crpstg_1_1.tif'),
+            'crpstg_2_1_path': os.path.join(prev_sv_dir, 'crpstg_2_1.tif'),
+
+            'aglivc_2_path': os.path.join(prev_sv_dir, 'aglivc_2.tif'),
+            'stdedc_2_path': os.path.join(prev_sv_dir, 'stdedc_2.tif'),
+            'aglive_1_2_path': os.path.join(prev_sv_dir, 'aglive_1_2.tif'),
+            'aglive_2_2_path': os.path.join(prev_sv_dir, 'aglive_2_2.tif'),
+            'stdede_1_2_path': os.path.join(prev_sv_dir, 'stdede_1_2.tif'),
+            'stdede_2_2_path': os.path.join(prev_sv_dir, 'stdede_2_2.tif'),
+            'crpstg_1_2_path': os.path.join(prev_sv_dir, 'crpstg_1_2.tif'),
+            'crpstg_2_2_path': os.path.join(prev_sv_dir, 'crpstg_2_2.tif'),
+        }
+        create_constant_raster(prev_sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(prev_sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(prev_sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(prev_sv_reg['aglive_2_1_path'], aglive_2)
+        create_constant_raster(prev_sv_reg['stdede_1_1_path'], stdede_1)
+        create_constant_raster(prev_sv_reg['stdede_2_1_path'], stdede_2)
+        create_constant_raster(prev_sv_reg['crpstg_1_1_path'], crpstg_1)
+        create_constant_raster(prev_sv_reg['crpstg_2_1_path'], crpstg_2)
+
+        create_constant_raster(prev_sv_reg['aglivc_2_path'], aglivc)
+        create_constant_raster(prev_sv_reg['stdedc_2_path'], stdedc)
+        create_constant_raster(prev_sv_reg['aglive_1_2_path'], aglive_1)
+        create_constant_raster(prev_sv_reg['aglive_2_2_path'], aglive_2)
+        create_constant_raster(prev_sv_reg['stdede_1_2_path'], stdede_1)
+        create_constant_raster(prev_sv_reg['stdede_2_2_path'], stdede_2)
+        create_constant_raster(prev_sv_reg['crpstg_1_2_path'], crpstg_1)
+        create_constant_raster(prev_sv_reg['crpstg_2_2_path'], crpstg_2)
+
+        sv_reg = {
+            'aglivc_1_path': os.path.join(cur_sv_dir, 'aglivc_1.tif'),
+            'stdedc_1_path': os.path.join(cur_sv_dir, 'stdedc_1.tif'),
+            'aglive_1_1_path': os.path.join(cur_sv_dir, 'aglive_1_1.tif'),
+            'aglive_2_1_path': os.path.join(cur_sv_dir, 'aglive_2_1.tif'),
+            'stdede_1_1_path': os.path.join(cur_sv_dir, 'stdede_1_1.tif'),
+            'stdede_2_1_path': os.path.join(cur_sv_dir, 'stdede_2_1.tif'),
+            'crpstg_1_1_path': os.path.join(cur_sv_dir, 'crpstg_1_1.tif'),
+            'crpstg_2_1_path': os.path.join(cur_sv_dir, 'crpstg_2_1.tif'),
+
+            'aglivc_2_path': os.path.join(cur_sv_dir, 'aglivc_2.tif'),
+            'stdedc_2_path': os.path.join(cur_sv_dir, 'stdedc_2.tif'),
+            'aglive_1_2_path': os.path.join(cur_sv_dir, 'aglive_1_2.tif'),
+            'aglive_2_2_path': os.path.join(cur_sv_dir, 'aglive_2_2.tif'),
+            'stdede_1_2_path': os.path.join(cur_sv_dir, 'stdede_1_2.tif'),
+            'stdede_2_2_path': os.path.join(cur_sv_dir, 'stdede_2_2.tif'),
+            'crpstg_1_2_path': os.path.join(cur_sv_dir, 'crpstg_1_2.tif'),
+            'crpstg_2_2_path': os.path.join(cur_sv_dir, 'crpstg_2_2.tif'),
+        }
+        month_reg = {
+            'bgwfunc': os.path.join(self.workspace_dir, 'bgwfunc.tif'),
+        }
+        create_constant_raster(month_reg['bgwfunc'], bgwfunc)
+
+        # known modified state variables
+        aglivc_after_1 = 8.16325
+        stdedc_after_1 = 28.95805
+        aglive_1_after_1 = 0.075
+        aglive_2_after_1 = 0.025
+        stdede_1_after_1 = 0.44125
+        stdede_2_after_1 = 0.125
+        crpstg_1_after_1 = 0
+        crpstg_2_after_1 = 0
+
+        aglivc_after_2 = 32.261164
+        stdedc_after_2 = 4.860136
+        aglive_1_after_2 = 0.2964
+        aglive_2_after_2 = 0.0988
+        stdede_1_after_2 = 0.252754
+        stdede_2_after_2 = 0.05114
+        crpstg_1_after_2 = 0.000306
+        crpstg_2_after_2 = 0.00006
+
+        forage._shoot_senescence(
+            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
+            current_month)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], aglivc_after_1 - tolerance,
+            aglivc_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdedc_1_path'], stdedc_after_1 - tolerance,
+            stdedc_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], aglive_1_after_1 - tolerance,
+            aglive_1_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], aglive_2_after_1 - tolerance,
+            aglive_2_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_1_1_path'], stdede_1_after_1 - tolerance,
+            stdede_1_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_2_1_path'], stdede_2_after_1 - tolerance,
+            stdede_2_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_1_path'], crpstg_1_after_1 - tolerance,
+            crpstg_1_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_1_path'], crpstg_2_after_1 - tolerance,
+            crpstg_2_after_1 + tolerance, _SV_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_2_path'], aglivc_after_2 - tolerance,
+            aglivc_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdedc_2_path'], stdedc_after_2 - tolerance,
+            stdedc_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_2_path'], aglive_1_after_2 - tolerance,
+            aglive_1_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_2_path'], aglive_2_after_2 - tolerance,
+            aglive_2_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_1_2_path'], stdede_1_after_2 - tolerance,
+            stdede_1_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_2_2_path'], stdede_2_after_2 - tolerance,
+            stdede_2_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_2_path'], crpstg_1_after_2 - tolerance,
+            crpstg_1_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_2_path'], crpstg_2_after_2 - tolerance,
+            crpstg_2_after_2 + tolerance, _SV_NODATA)
