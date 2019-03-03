@@ -2673,9 +2673,41 @@ def _calc_favail_P(sv_reg, param_val_dict):
         gdal.GDT_Float32, _IC_NODATA)
 
 
+def _calc_avail_mineral_nutrient(pft_param_dict, sv_reg, iel, target_path):
+    """Calculate one mineral nutrient available to one plant functional type.
+
+    The mineral nutrient available to a plant functional type is calculated
+    from the mineral nutrient content of soil layers accessible by that
+    plant function type.
+
+    Parameters:
+        pft_param_dict (dict): map of key, value pairs giving the values of
+            parameters for this plant functional type
+            (i.e., veg_trait_table[pft_i] for this pft_i)
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month
+        iel (int): integer index for current nutrient (1=N, 2=P)
+        target_path (string): path to raster to contain available mineral
+            nutrient for this plant functional type and nutrient
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    nlay = int(pft_param_dict['nlaypg'])
+    mineral_raster_list = [
+        sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
+            1, nlay + 1)]
+    raster_list_sum(
+        mineral_raster_list, _SV_NODATA, target_path, _TARGET_NODATA,
+        nodata_remove=True)
+
+
 def _calc_available_nutrient(
         pft_i, iel, pft_param_dict, sv_reg, site_param_table, site_index_path,
-        favail_path, tgprod_path, eavail_path):
+        availm_path, favail_path, tgprod_path, eavail_path):
     """Calculate nutrient available to a plant functional type.
 
     The nutrient available is the sum of mineral nutrient (N or P) in soil
@@ -2692,6 +2724,8 @@ def _calc_available_nutrient(
         sv_reg (dict): map of key, path pairs giving paths to state
             variables for the current month
         site_index_path (string): path to site spatial index raster
+        availm_path (string): path to raster containing available mineral
+            nutrient for the given plant functional type and nutrient
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
         favail_path (string): path to raster containing the appropriate value
@@ -2733,6 +2767,7 @@ def _calc_available_nutrient(
             (rictrl != _IC_NODATA) &
             (~numpy.isclose(bglivc, _SV_NODATA)) &
             (riint != _IC_NODATA) &
+            (availm != _TARGET_NODATA) &
             (favail != _IC_NODATA) &
             (~numpy.isclose(crpstg, _SV_NODATA)))
 
@@ -2786,10 +2821,6 @@ def _calc_available_nutrient(
 
     # temporary intermediate rasters for calculating available nutrient
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
-    temp_val_dict = {}
-    for val in ['availm']:
-        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-
     param_val_dict = {}
     for val in ['rictrl', 'riint']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -2808,21 +2839,12 @@ def _calc_available_nutrient(
             site_index_path, target_path, gdal.GDT_Float32,
             [_IC_NODATA], fill_value_list=[fill_val])
 
-    nlay = int(pft_param_dict['nlaypg'])
-    mineral_raster_list = [
-        sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
-            1, nlay + 1)]
-    raster_list_sum(
-        mineral_raster_list, _SV_NODATA, temp_val_dict['availm'],
-        _TARGET_NODATA, nodata_remove=True)
-
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             param_val_dict['rictrl'],
             sv_reg['bglivc_{}_path'.format(pft_i)],
             param_val_dict['riint'],
-            temp_val_dict['availm'],
-            favail_path,
+            availm_path, favail_path,
             sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]],
         calc_eavail, eavail_path,
         gdal.GDT_Float32, _TARGET_NODATA)
@@ -3607,7 +3629,7 @@ def _root_shoot_ratio(
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for pft_i in do_PFT:
-        for val in ['fracrc_p', 'fracrc']:
+        for val in ['fracrc_p', 'fracrc', 'availm']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
         for iel in [1, 2]:
@@ -3692,10 +3714,15 @@ def _root_shoot_ratio(
                 param_val_dict['prbmx_2_{}_{}'.format(pft_i, iel)],
                 year_reg['annual_precip_path'], month_reg,
                 pft_i, iel)
+            # sum of mineral nutrient in accessible soil layers
+            _calc_avail_mineral_nutrient(
+                veg_trait_table[pft_i], prev_sv_reg, iel,
+                temp_val_dict['availm_{}'.format(pft_i)])
             # eavail_iel, available nutrient
             _calc_available_nutrient(
                 pft_i, iel, veg_trait_table[pft_i], prev_sv_reg,
                 site_param_table, aligned_inputs['site_index'],
+                temp_val_dict['availm_{}'.format(pft_i)],
                 param_val_dict['favail_{}'.format(iel)],
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])

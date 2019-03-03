@@ -2005,7 +2005,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -3377,12 +3377,6 @@ class foragetests(unittest.TestCase):
             'crpstg_2_{}_path'.format(pft_i): os.path.join(
                 self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i)),
         }
-        for iel in [1, 2]:
-            for lyr in xrange(1, 11):
-                sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
-                    self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
-                create_random_raster(
-                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)], 0, 5)
 
         site_param_table = {
             1: {
@@ -3393,6 +3387,7 @@ class foragetests(unittest.TestCase):
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         favail_path = os.path.join(self.workspace_dir, 'favail.tif')
         tgprod_path = os.path.join(self.workspace_dir, 'tgprod.tif')
+        availm_path = os.path.join(self.workspace_dir, 'availm.tif')
 
         create_random_raster(site_index_path, 1, 1)
         create_random_raster(sv_reg['bglivc_{}_path'.format(pft_i)], 90, 180)
@@ -3400,6 +3395,7 @@ class foragetests(unittest.TestCase):
         create_random_raster(sv_reg['crpstg_2_{}_path'.format(pft_i)], 0, 1)
         create_random_raster(favail_path, 0, 1)
         create_random_raster(tgprod_path, 0, 675)
+        create_random_raster(availm_path, 0, 55)
 
         eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
 
@@ -3409,7 +3405,8 @@ class foragetests(unittest.TestCase):
         for iel in [1, 2]:
             forage._calc_available_nutrient(
                 pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-                site_index_path, favail_path, tgprod_path, eavail_path)
+                site_index_path, availm_path, favail_path, tgprod_path,
+                eavail_path)
 
             self.assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
@@ -3417,15 +3414,15 @@ class foragetests(unittest.TestCase):
 
         insert_nodata_values_into_raster(site_index_path, _TARGET_NODATA)
         insert_nodata_values_into_raster(
-            sv_reg['minerl_1_1_path'], _TARGET_NODATA)
-        insert_nodata_values_into_raster(
             sv_reg['bglivc_{}_path'.format(pft_i)], _TARGET_NODATA)
         insert_nodata_values_into_raster(tgprod_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(availm_path, _TARGET_NODATA)
 
         for iel in [1, 2]:
             forage._calc_available_nutrient(
                 pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-                site_index_path, favail_path, tgprod_path, eavail_path)
+                site_index_path, availm_path, favail_path, tgprod_path,
+                eavail_path)
 
             self.assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
@@ -3439,11 +3436,7 @@ class foragetests(unittest.TestCase):
             sv_reg['crpstg_2_{}_path'.format(pft_i)], 0.8, 0.8)
         create_random_raster(favail_path, 0.3, 0.3)
         create_random_raster(tgprod_path, 300, 300)
-
-        for iel in [1, 2]:
-            for lyr in xrange(1, 11):
-                create_random_raster(
-                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)], 1, 1)
+        create_random_raster(availm_path, 4, 4)
 
         pft_param_dict['snfxmx_1'] = 0.4
         pft_param_dict['nlaypg'] = 4
@@ -3459,7 +3452,8 @@ class foragetests(unittest.TestCase):
         eavail_path = os.path.join(self.workspace_dir, 'eavail_N.tif')
         forage._calc_available_nutrient(
             pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-            site_index_path, favail_path, tgprod_path, eavail_path)
+            site_index_path, availm_path, favail_path, tgprod_path,
+            eavail_path)
 
         self.assert_all_values_in_raster_within_range(
             eavail_path, known_N_avail - tolerance,
@@ -3469,7 +3463,8 @@ class foragetests(unittest.TestCase):
         eavail_path = os.path.join(self.workspace_dir, 'eavail_P.tif')
         forage._calc_available_nutrient(
             pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-            site_index_path, favail_path, tgprod_path, eavail_path)
+            site_index_path, availm_path, favail_path, tgprod_path,
+            eavail_path)
 
         self.assert_all_values_in_raster_within_range(
             eavail_path, known_P_avail - tolerance,
