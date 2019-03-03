@@ -2454,7 +2454,7 @@ def _potential_production(
 
         Returns:
             tgprod_pot_prod, total above- and belowground potential biomass
-                production
+                production (g biomass)
         """
         valid_mask = (
             (prdx_1 != _IC_NODATA) &
@@ -2699,8 +2699,7 @@ def _calc_available_nutrient(
             directly as user input, but for phosphorus, it must be calculated
             from other parameters.
         tgprod_path (string): path to raster containing total potential
-            production limited by shortwave radiation, temperature, and
-            moisture
+            production (g biomass)
         eavail_path (string): path to location to store the result, nutrient
             available to the plant functional type
 
@@ -2765,10 +2764,11 @@ def _calc_available_nutrient(
             snfxmx (numpy.ndarray): parameter, maximum rate of symbiotic
                 nitrogen fixation
             tgprod (numpy.ndarray): derived, total above- and belowground
-                potential production
+                potential production (g biomass)
 
         Returns:
             eavail, total N available including N fixed by the plant
+
         """
         valid_mask = (
             (eavail_prior != _TARGET_NODATA) &
@@ -3517,9 +3517,9 @@ def calc_final_tgprod_rtsh(
         gremb_path (string): path to raster containing the parameter
             gremb, the grazing effect multiplier
         tgprod_path (string): path to raster containing final total
-            potential production
+            potential production (g biomass)
         rtsh_path (string): path to raster containing final root:shoot
-            ratio
+            ratio of potential production
 
     Modifies:
         The raster indicated by tgprod_path
@@ -3560,9 +3560,9 @@ def _root_shoot_ratio(
         veg_trait_table, prev_sv_reg, year_reg, month_reg):
     """Calculate final potential production and root:shoot ratio.
 
-    Final potential production and root:shoot ratio is calculated according
-    to nutrient availability and demand for the nutrient, and the impact of
-    defoliation by herbivores. CropDynC.f
+    Final potential biomass production and root:shoot ratio is calculated
+    according to nutrient availability and demand for the nutrient, and the
+    impact of defoliation by herbivores. CropDynC.f
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
@@ -3582,13 +3582,14 @@ def _root_shoot_ratio(
             calculated values that are shared between submodels
 
     Modifies:
-        The raster indicated by `month_reg['tgprod_<PFT>']` for each
-            plant functional type (PFT)
+        The raster indicated by `month_reg['tgprod_<PFT>']`, total potential
+            production (g biomass) for each plant functional type (PFT)
         The raster indicated by `month_reg['rtsh_<PFT>']` for each
             plant functional type (PFT)
 
     Returns:
         None
+
     """
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
