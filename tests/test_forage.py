@@ -1710,26 +1710,176 @@ def agdrat_point(anps, tca, pcemic_1_iel, pcemic_2_iel, pcemic_3_iel):
 
 
 def fsfunc_point(minerl_1_2, pslsrb, sorpmx):
-        """Calculate the fraction of mineral P that is in solution.
+    """Calculate the fraction of mineral P that is in solution.
 
-        The fraction of P in solution is influenced by two soil properties:
-        the maximum sorption potential of the soil and sorption affinity.
+    The fraction of P in solution is influenced by two soil properties:
+    the maximum sorption potential of the soil and sorption affinity.
+
+    Parameters:
+        minerl_1_2 (float): state variable, surface mineral P
+        pslsrb (float): parameter, P sorption affinity
+        sorpmx (float): parameter, maximum P sorption of the soil
+
+    Returns:
+        fsol, fraction of P in solution
+    """
+    if minerl_1_2 == 0:
+        return 0
+    c = sorpmx * (2. - pslsrb) / 2.
+    b = sorpmx - minerl_1_2 + c
+    labile = (-b + numpy.sqrt(b * b + 4 * c * minerl_1_2)) / 2.
+    fsol = labile / minerl_1_2
+    return fsol
+
+
+def calc_nutrient_limitation_point(return_type):
+    """Calculate new production limited by nutrient availability.
+
+    Parameters:
+        return_type (string): flag indicating whether to return
+
+    Returns:
+        the function `_nutrlm`
+    """
+    def _nutrlm(
+            potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+            cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+            cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+            cerat_min_above_2, cerat_min_below_2):
+        """Calculate C, N and P in new production given nutrient availability.
+
+        Point-based implementation of `calc_nutrient_limitation`, Nutrlm.f.
 
         Parameters:
-            minerl_1_2 (float): state variable, surface mineral P
-            pslsrb (float): parameter, P sorption affinity
-            sorpmx (float): parameter, maximum P sorption of the soil
+            potenc (float): potential production of C calculated by root:shoot
+                ratio submodel. remember this is tgprod_pot_prod / 2.5
+            rtsh (float): root/shoot ratio
+            eavail_1: available N calculated by _calc_available_nutrient()
+                (includes predicted N fixation)
+            eavail_2: available P calculated by _calc_available_nutrient()
+            snfxmx_1 (float): parameter, maximum symbiotic N fixation rate
+            cerat_max_above_1 (cercrp from Growth.f): max C/N ratio of new
+                aboveground growth, calculated once per model timestep
+            cerat_max_below_1: max C/N ratio of new belowground growth,
+                calculated once per model timestep
+            cerat_max_above_2 (cercrp from Growth.f): max C/P ratio of new
+                aboveground growth, calculated once per model timestep
+            cerat_max_below_2: max C/P ratio of new belowground growth,
+                calculated once per model timestep
+            cerat_min_above_1 (cercrp from Growth.f): min C/N ratio of new
+                aboveground growth, calculated once per model timestep
+            cerat_min_below_1: min C/N ratio of new belowground growth,
+                calculated once per model timestep
+            cerat_min_above_2 (cercrp from Growth.f): min C/P ratio of new
+                aboveground growth, calculated once per model timestep
+            cerat_min_below_2: min C/P ratio of new belowground growth,
+                calculated once per model timestep
 
         Returns:
-            fsol, fraction of P in solution
+            cprodl, total C production limited by nutrient availability, if
+                return_type is 'c_production'
+            eup_above_1, N in new aboveground production, if return_type is
+                'eup_above_1'
+            eup_below_1, N in new belowground production, if return_type is
+                'eup_below_1'
+            eup_above_2, P in new aboveground production, if return_type is
+                'eup_above_2'
+            eup_below_2, P in new belowground production, if return_type is
+                'eup_below_2'
+            plantNfix, N fixation that actually occurs, if return_type is
+                'plantNfix'
         """
-        if minerl_1_2 == 0:
-            return 0
-        c = sorpmx * (2. - pslsrb) / 2.
-        b = sorpmx - minerl_1_2 + c
-        labile = (-b + numpy.sqrt(b * b + 4 * c * minerl_1_2)) / 2.
-        fsol = labile / minerl_1_2
-        return fsol
+        cfrac_below = rtsh / (rtsh + 1.)
+        cfrac_above = 1. - cfrac_below
+
+        # min/max eci is indexed to aboveground only or belowground only
+        maxeci_above_1 = 1. / cerat_min_above_1
+        mineci_above_1 = 1. / cerat_max_above_1
+        maxeci_below_1 = 1. / cerat_min_below_1
+        mineci_below_1 = 1. / cerat_max_below_1
+
+        maxeci_above_2 = 1. / cerat_min_above_2
+        mineci_above_2 = 1. / cerat_max_above_2
+        maxeci_below_2 = 1. / cerat_min_below_2
+        mineci_below_2 = 1. / cerat_max_below_2
+
+        # maxec is average e/c ratio across aboveground and belowground
+        maxec_1 = cfrac_below * maxeci_below_1 + cfrac_above * maxeci_above_1
+        maxec_2 = cfrac_below * maxeci_below_2 + cfrac_above * maxeci_above_2
+
+        # calculate cpbe_1, N/C ratio according to demand and supply
+        demand_1 = potenc * maxec_1
+        if eavail_1 > demand_1:
+            # if supply is sufficient, E/C ratio of new production is the max
+            # demanded
+            ecfor_above_1 = maxeci_above_1  # line 75
+            ecfor_below_1 = maxeci_below_1
+        else:
+            # supply is insufficient; E/C ratio of new production is
+            # proportional to the ratio of supply to demand
+            ecfor_above_1 = (
+                mineci_above_1 +
+                (maxeci_above_1 - mineci_above_1) *
+                eavail_1 / demand_1)
+            ecfor_below_1 = (
+                mineci_below_1 +
+                (maxeci_below_1 - mineci_below_1) *
+                eavail_1 / demand_1)
+        cpbe_1 = cfrac_below * ecfor_below_1 + cfrac_above * ecfor_above_1
+        c_constrained_1 = eavail_1 / cpbe_1  # C constrained by N
+
+        # calculate cpbe_2, P/C ratio according to demand and supply
+        demand_2 = potenc * maxec_2
+        if eavail_2 > demand_2:
+            # if supply is sufficient, E/C ratio of new production is the max
+            # demanded
+            ecfor_above_2 = maxeci_above_2  # line 75
+            ecfor_below_2 = maxeci_below_2
+        else:
+            # supply is insufficient; E/C ratio of new production is
+            # proportional to the ratio of supply to demand
+            ecfor_above_2 = (
+                mineci_above_2 +
+                (maxeci_above_2 - mineci_above_2) *
+                eavail_2 / demand_2)
+            ecfor_below_2 = (
+                mineci_below_2 +
+                (maxeci_below_2 - mineci_below_2) *
+                eavail_2 / demand_2)
+        cpbe_2 = cfrac_below * ecfor_below_2 + cfrac_above * ecfor_above_2
+        c_constrained_2 = eavail_2 / cpbe_2  # C constrained by P
+
+        # C production limited by nutrient availability
+        cprodl = min(potenc, c_constrained_1, c_constrained_2)
+        # calculate N and P in new production; this will be taken up from
+        # soil mineral content and crop storage
+        # lines 214-223 Nutrlm.f
+        eup_above_1 = cprodl * cfrac_above * ecfor_above_1
+        eup_below_1 = cprodl * cfrac_below * ecfor_below_1
+        eprodl_1 = eup_above_1 + eup_below_1
+
+        eup_above_2 = cprodl * cfrac_above * ecfor_above_2
+        eup_below_2 = cprodl * cfrac_below * ecfor_below_2
+
+        # "prevent precision error" line 235 Nutrlm.f
+        maxNfix = snfxmx_1 * cprodl
+        if (eprodl_1 - (eavail_1 + maxNfix) > 0.05):
+            eprodl_1 = eavail_1 + maxNfix
+        plantNfix = max(eprodl_1 - eavail_1, 0.)
+
+        if return_type == 'c_production':
+            return cprodl
+        elif return_type == 'eup_above_1':
+            return eup_above_1
+        elif return_type == 'eup_below_1':
+            return eup_below_1
+        elif return_type == 'eup_above_2':
+            return eup_above_2
+        elif return_type == 'eup_below_2':
+            return eup_below_2
+        elif return_type == 'plantNfix':
+            return plantNfix
+    return _nutrlm
 
 
 class foragetests(unittest.TestCase):
@@ -1855,7 +2005,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -9135,3 +9285,78 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             sv_reg['crpstg_2_2_path'], crpstg_2_after_2 - tolerance,
             crpstg_2_after_2 + tolerance, _SV_NODATA)
+
+    def test_calc_nutrient_limitation(self):
+        """Test `calc_nutrient_limitation`.
+
+        Use the function `calc_nutrient_limitation` to calculate C, N and P in
+        new production limited by nutrient availability. Test that calculated
+        values match values calculated by point-based version.
+
+        Raises:
+            AssertionError if `calc_nutrient_limitation` does not match value
+                calculated by point-based version.
+
+        Returns:
+            None
+        """
+        # known values, eavail_2 > demand_2
+        potenc = 200.1
+        rtsh = 0.59
+        eavail_1 = 200.5
+        eavail_2 = 62
+        snfxmx_1 = 0.03
+        cerat_max_above_1 = 8
+        cerat_max_below_1 = 11
+        cerat_max_above_2 = 7
+        cerat_max_below_2 = 6
+        cerat_min_above_1 = 3
+        cerat_min_below_1 = 5
+        cerat_min_above_2 = 2
+        cerat_min_below_2 = 2.5
+
+        c_production = calc_nutrient_limitation_point(
+            'c_production')(
+                potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+                cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+                cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+                cerat_min_above_2, cerat_min_below_2)
+        eup_above_1 = calc_nutrient_limitation_point(
+            'eup_above_1')(
+                potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+                cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+                cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+                cerat_min_above_2, cerat_min_below_2)
+        eup_below_1 = calc_nutrient_limitation_point(
+            'eup_below_1')(
+                potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+                cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+                cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+                cerat_min_above_2, cerat_min_below_2)
+        eup_above_2 = calc_nutrient_limitation_point(
+            'eup_above_2')(
+                potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+                cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+                cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+                cerat_min_above_2, cerat_min_below_2)
+        eup_below_2 = calc_nutrient_limitation_point(
+            'eup_below_2')(
+                potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+                cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+                cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+                cerat_min_above_2, cerat_min_below_2)
+        plantNfix = calc_nutrient_limitation_point(
+            'plantNfix')(
+                potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+                cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+                cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+                cerat_min_above_2, cerat_min_below_2)
+
+        # test values for P only
+        c_production_known = 172.222418488863
+        eup_above_2_known = 41.367670329147
+        eup_below_2_known = 20.632329670853
+
+        self.assertAlmostEqual(c_production, c_production_known)
+        self.assertAlmostEqual(eup_above_2, eup_above_2_known)
+        self.assertAlmostEqual(eup_below_2, eup_below_2_known)
