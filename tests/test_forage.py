@@ -1944,6 +1944,7 @@ def nutrient_uptake_point(
         bglive_iel = bglive_iel + uptake_storage_below
 
     # uptake from each soil layer in proportion to its contribution to availm
+    minerl_dict_copy = minerl_dict.copy()
     for lyr in xrange(1, nlay + 1):
         if minerl_dict['minerl_{}_iel'.format(lyr)] > 0:
             if iel == 2:
@@ -1954,7 +1955,7 @@ def nutrient_uptake_point(
             minerl_uptake_lyr = (
                 uptake_soil * minerl_dict['minerl_{}_iel'.format(lyr)] * fsol /
                 availm)
-            minerl_dict['minerl_{}_iel'.format(lyr)] = (
+            minerl_dict_copy['minerl_{}_iel'.format(lyr)] = (
                 minerl_dict['minerl_{}_iel'.format(lyr)] -
                 (minerl_uptake_lyr * pft_percent_cover))
             uptake_minerl_lyr_above = (
@@ -1974,13 +1975,13 @@ def nutrient_uptake_point(
         'aglive_iel': aglive_iel,
         'bglive_iel': bglive_iel,
         'storage_iel': storage_iel,
-        'minerl_1_iel': minerl_dict['minerl_1_iel'],
-        'minerl_2_iel': minerl_dict['minerl_2_iel'],
-        'minerl_3_iel': minerl_dict['minerl_3_iel'],
-        'minerl_4_iel': minerl_dict['minerl_4_iel'],
-        'minerl_5_iel': minerl_dict['minerl_5_iel'],
-        'minerl_6_iel': minerl_dict['minerl_6_iel'],
-        'minerl_7_iel': minerl_dict['minerl_7_iel'],
+        'minerl_1_iel': minerl_dict_copy['minerl_1_iel'],
+        'minerl_2_iel': minerl_dict_copy['minerl_2_iel'],
+        'minerl_3_iel': minerl_dict_copy['minerl_3_iel'],
+        'minerl_4_iel': minerl_dict_copy['minerl_4_iel'],
+        'minerl_5_iel': minerl_dict_copy['minerl_5_iel'],
+        'minerl_6_iel': minerl_dict_copy['minerl_6_iel'],
+        'minerl_7_iel': minerl_dict_copy['minerl_7_iel'],
     }
     return result_dict
 
@@ -2108,7 +2109,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -9446,6 +9447,9 @@ class foragetests(unittest.TestCase):
         Returns:
             None
         """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
         # known values: iel=1, some uptake from soil, some plant N fixation
         iel = 1.
         nlay = 4
@@ -9472,6 +9476,7 @@ class foragetests(unittest.TestCase):
 
         aglive_iel_known = 116.963350513545
         bglive_iel_known = 148.636649486455
+        storage_iel_known = 0.
         minerl_1_iel_known = 9.55513725490196
         minerl_2_iel_known = 12.4216784313726
         minerl_3_iel_known = 19.1102745098039
@@ -9485,10 +9490,13 @@ class foragetests(unittest.TestCase):
             eup_below_iel, storage_iel, plantNfix, pslsrb, sorpmx, aglive_iel,
             bglive_iel, minerl_dict)
 
+        # test point results against known values calculated by hand
         self.assertAlmostEqual(
             point_results['aglive_iel'], aglive_iel_known)
         self.assertAlmostEqual(
             point_results['bglive_iel'], bglive_iel_known)
+        self.assertAlmostEqual(
+            point_results['storage_iel'], storage_iel_known)
         self.assertAlmostEqual(
             point_results['minerl_1_iel'], minerl_1_iel_known)
         self.assertAlmostEqual(
@@ -9503,6 +9511,99 @@ class foragetests(unittest.TestCase):
             point_results['minerl_6_iel'], minerl_6_iel_known)
         self.assertAlmostEqual(
             point_results['minerl_7_iel'], minerl_7_iel_known)
+
+        # raster-based inputs
+        pft_i = 1
+        percent_cover_path = os.path.join(self.workspace_dir, 'perc_cover.tif')
+        eup_above_iel_path = os.path.join(self.workspace_dir, 'eup_above.tif')
+        eup_below_iel_path = os.path.join(self.workspace_dir, 'eup_below.tif')
+        plantNfix_path = os.path.join(self.workspace_dir, 'plantNfix.tif')
+        availm_path = os.path.join(self.workspace_dir, 'availm.tif')
+        eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
+
+        sv_reg = {
+            'aglive_{}_{}_path'.format(iel, pft_i): os.path.join(
+                self.workspace_dir, 'aglive.tif'),
+            'bglive_{}_{}_path'.format(iel, pft_i): os.path.join(
+                self.workspace_dir, 'bglive.tif'),
+            'crpstg_{}_{}_path'.format(iel, pft_i): os.path.join(
+                self.workspace_dir, 'crpstg.tif'),
+            'minerl_1_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_1.tif'),
+            'minerl_2_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_2.tif'),
+            'minerl_3_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_3.tif'),
+            'minerl_4_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_4.tif'),
+            'minerl_5_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_5.tif'),
+            'minerl_6_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_6.tif'),
+            'minerl_7_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_7.tif'),
+        }
+        create_constant_raster(percent_cover_path, percent_cover)
+        create_constant_raster(eup_above_iel_path, eup_above_iel)
+        create_constant_raster(eup_below_iel_path, eup_below_iel)
+        create_constant_raster(plantNfix_path, plantNfix)
+        create_constant_raster(availm_path, availm)
+        create_constant_raster(eavail_path, eavail)
+        create_constant_raster(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], aglive_iel)
+        create_constant_raster(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], bglive_iel)
+        create_constant_raster(
+            sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], storage_iel)
+        for lyr in xrange(1, 8):
+            create_constant_raster(
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                minerl_dict['minerl_{}_iel'.format(lyr)])
+
+        forage.nutrient_uptake(
+            iel, nlay, percent_cover_path, eup_above_iel_path,
+            eup_below_iel_path, plantNfix_path, availm_path, eavail_path,
+            sv_reg, pft_i)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+            point_results['aglive_iel'] - tolerance,
+            point_results['aglive_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+            point_results['bglive_iel'] - tolerance,
+            point_results['bglive_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
+            point_results['storage_iel'] - tolerance,
+            point_results['storage_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_{}_path'.format(iel)],
+            point_results['minerl_1_iel'] - tolerance,
+            point_results['minerl_1_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_2_{}_path'.format(iel)],
+            point_results['minerl_2_iel'] - tolerance,
+            point_results['minerl_2_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_3_{}_path'.format(iel)],
+            point_results['minerl_3_iel'] - tolerance,
+            point_results['minerl_3_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_4_{}_path'.format(iel)],
+            point_results['minerl_4_iel'] - tolerance,
+            point_results['minerl_4_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_5_{}_path'.format(iel)],
+            point_results['minerl_5_iel'] - tolerance,
+            point_results['minerl_5_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_6_{}_path'.format(iel)],
+            point_results['minerl_6_iel'] - tolerance,
+            point_results['minerl_6_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_7_{}_path'.format(iel)],
+            point_results['minerl_7_iel'] - tolerance,
+            point_results['minerl_7_iel'] + tolerance, _SV_NODATA)
 
     def test_restrict_potential_growth(self):
         """Test `restrict_potential_growth`.

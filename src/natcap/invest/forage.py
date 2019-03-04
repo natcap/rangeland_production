@@ -8123,7 +8123,7 @@ def _death_and_partition(
                 gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
-                    prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
+                    prev_sv_reg['stdedc_{}_path'.format(pft_i)],
                     param_val_dict['fallrt']]],
                 calc_fall_standing_dead, temp_val_dict['delta_c'],
                 gdal.GDT_Float32, _TARGET_NODATA)
@@ -8533,3 +8533,380 @@ def c_uptake_belowground(bglivc, cprodl, rtsh):
     modified_bglivc[valid_mask] = (
         bglivc[valid_mask] + c_prod_belowground[valid_mask])
     return modified_bglivc
+
+
+def calc_uptake_source(return_type):
+    """Calculate uptake of nutrient from available sources."""
+    def _uptake(
+            eavail_iel, eup_above_iel, eup_below_iel, plantNfix, storage_iel,
+            iel):
+        """Calculate N or P taken up from one source.
+
+        Given the N or P predicted to flow into new above- and belowground
+        production, calculate how much of that nutrient will be taken from the
+        crop storage pool and how much will be taken from soil.  For N, some of
+        the necessary uptake maybe also come from symbiotic N fixation.
+
+        Parameters:
+            eavail_iel (numpy.ndarray): derived, total iel available to this
+                plant functional type
+            eup_above_iel (numpy.ndarray): derived, iel in new aboveground
+                production
+            eup_below_iel (numpy.ndarray): derived, iel in new belowground
+                production
+            plantNfix (numpy.ndarray): derived, symbiotic N fixed by this plant
+                functional type
+            storage_iel (numpy.ndarray): state variable, iel in crop storage
+                pool
+            iel (integer): index identifying N or P
+
+        Returns:
+            uptake_storage, uptake from crop storage pool, if return_type is
+                'uptake_storage'
+            uptake_soil, uptake from mineral content of soil layers accessible
+                by the plant function type, if return_type is 'uptake_soil'
+            uptake_Nfix, uptake from symbiotically fixed nitrogen, if
+                return_type is 'uptake_Nfix'
+        """
+        valid_mask = (
+            (eup_above_iel != _TARGET_NODATA) &
+            (eup_below_iel != _TARGET_NODATA) &
+            (plantNfix != _TARGET_NODATA) &
+            (~numpy.isclose(storage_iel, _SV_NODATA)))
+        eprodl_iel = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        eprodl_iel[:] = _TARGET_NODATA
+        eprodl_iel[valid_mask] = (
+            eup_above_iel[valid_mask] + eup_below_iel[valid_mask])
+
+        uptake_storage = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        uptake_storage[:] = _TARGET_NODATA
+        uptake_soil = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        uptake_soil[:] = _TARGET_NODATA
+        uptake_Nfix = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        uptake_Nfix[:] = _TARGET_NODATA
+
+        storage_sufficient_mask = ((eprodl_iel <= storage_iel) & valid_mask)
+        uptake_storage[valid_mask] = 0.
+        uptake_storage[storage_sufficient_mask] = (
+            eprodl_iel[storage_sufficient_mask])
+        uptake_soil[storage_sufficient_mask] = 0.
+        uptake_Nfix[storage_sufficient_mask] = 0.
+
+        insuff_mask = ((eprodl_iel > storage_iel) & valid_mask)
+        uptake_storage[insuff_mask] = storage_iel[insuff_mask]
+        if iel == 1:
+            uptake_soil[insuff_mask] = numpy.minimum(
+                (eprodl_iel[insuff_mask] - storage_iel[insuff_mask] -
+                    plantNfix[insuff_mask]),
+                (eavail_iel[insuff_mask] - storage_iel[insuff_mask] -
+                    plantNfix[insuff_mask]))
+            uptake_Nfix[insuff_mask] = plantNfix[insuff_mask]
+        else:
+            uptake_soil[insuff_mask] = (
+                eprodl_iel[insuff_mask] - storage_iel[insuff_mask])
+
+        if return_type == 'uptake_storage':
+            return uptake_storage
+        elif return_type == 'uptake_soil':
+            return uptake_soil
+        elif return_type == 'uptake_Nfix':
+            return uptake_Nfix
+    return _uptake
+
+
+def calc_aboveground_uptake(total_uptake, eup_above_iel, eup_below_iel):
+    """Calculate uptake of nutrient apportioned to aboveground biomass.
+
+    Given the total amount of iel (N or P) taken up from one source, the amount
+    of uptake that is apportioned to aboveground biomass is calculated from the
+    proportion of demand from above- and belowground growth.
+
+    Parameters:
+        total_uptake (numpy.ndarray): derived, uptake of iel from one source
+        eup_above_iel (numpy.ndarray): derived, iel in new aboveground growth
+        eup_below_iel (numpy.ndarray): derived, iel in new belowground growth
+
+    Returns:
+        uptake_above, uptake from one source that is apportioned to aboveground
+            biomass
+    """
+    valid_mask = (
+        (total_uptake != _TARGET_NODATA) &
+        (eup_above_iel != _TARGET_NODATA) &
+        (eup_below_iel != _TARGET_NODATA))
+    uptake_above = numpy.empty(total_uptake.shape, dtype=numpy.float32)
+    uptake_above[valid_mask] = (
+        total_uptake[valid_mask] * (
+            eup_above_iel[valid_mask] /
+            (eup_above_iel[valid_mask] + eup_below_iel[valid_mask])))
+    return uptake_above
+
+
+def calc_belowground_uptake(total_uptake, eup_above_iel, eup_below_iel):
+    """Calculate uptake of nutrient apportioned to _belowground biomass.
+
+    Given the total amount of iel (N or P) taken up from one source, the amount
+    of uptake that is apportioned to belowground biomass is calculated from
+    the proportion of demand from above- and belowground growth.
+
+    Parameters:
+        total_uptake (numpy.ndarray): derived, uptake of iel from one source
+        eup_above_iel (numpy.ndarray): derived, iel in new aboveground growth
+        eup_below_iel (numpy.ndarray): derived, iel in new belowground growth
+
+    Returns:
+        uptake_below, uptake from one source that is apportioned to belowground
+            biomass
+    """
+    valid_mask = (
+        (total_uptake != _TARGET_NODATA) &
+        (eup_above_iel != _TARGET_NODATA) &
+        (eup_below_iel != _TARGET_NODATA))
+    uptake_below = numpy.empty(total_uptake.shape, dtype=numpy.float32)
+    uptake_below[valid_mask] = (
+        total_uptake[valid_mask] * (
+            eup_below_iel[valid_mask] /
+            (eup_above_iel[valid_mask] + eup_below_iel[valid_mask])))
+    return uptake_below
+
+
+def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
+    """Calculate uptake of mineral iel from one soil layer.
+
+    Uptake of mineral iel (N or P) from each soil layer into new growth
+    is done according to the proportion of total mineral iel contributed
+    by that layer.
+
+    Parameters:
+        uptake_soil (numpy.ndarray): derived, total uptake of N or P
+            from soil
+        minerl_lyr_iel (numpy.ndarray): state variable, mineral iel in
+            this soil layer
+        fsol (numpy.ndarray): derived, fraction of iel in solution
+        availm (numpy.ndarray): derived, sum of mineral iel across
+            soil layers accessible by this plant functional type
+
+    Returns:
+        minerl_uptake_lyr, uptake of iel from this soil layer
+    """
+    valid_mask = (
+        (uptake_soil != _TARGET_NODATA) &
+        (~numpy.isclose(minerl_lyr_iel, _SV_NODATA)) &
+        (fsol != _TARGET_NODATA) &
+        (availm != _TARGET_NODATA))
+    minerl_uptake_lyr = numpy.empty(uptake_soil.shape, dtype=numpy.float32)
+    minerl_uptake_lyr[valid_mask] = (
+        uptake_soil[valid_mask] * minerl_lyr_iel[valid_mask] *
+        fsol[valid_mask] / availm[valid_mask])
+    return minerl_uptake_lyr
+
+
+def nutrient_uptake(
+        iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
+        plantNfix_path, availm_path, eavail_path, sv_reg, pft_i):
+    """Do uptake of N or P from soil and crop storage to aglive and bglive.
+
+    Perform the flows of iel from crop storage pool, soil mineral pools, and
+    symbiotic N fixation into new above- and belowground biomass. N and P taken
+    up from the soil by one plant functional type are weighted by the percent
+    cover of that functional type. Lines 124-156, Restrp.f, lines 186-226,
+    Growth.f
+
+    Parameters:
+        iel (int): index identifying N (iel=1) or P (iel=2)
+        nlay (int): number of soil layers accessible by this plant functional
+            type
+        percent_cover_path (string): path to raster containing percent cover of
+            this plant functional type
+        eup_above_iel_path (string): path to raster containing iel in new
+            aboveground production
+        eup_below_iel_path (string): path to raster containing iel in new
+            belowground production
+        plantNfix_path (string): path to raster giving symbiotic N fixed by
+            this plant functional type
+        availm_path (string): path to raster giving the sum of mineral iel
+            across soil layers accessible by this plant functional type
+        eavail_path (string): path to raster giving total iel available to
+            this plant functional type
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        pft_i (int): index identifying the current pft
+
+    Modifies:
+        The rasters indicated by
+            sv_reg['aglive_<iel>_<pft>_path'], iel in aboveground live biomass,
+                for the given iel and current pft
+            sv_reg['bglive_<iel>_<pft>_path'], iel in belowground live biomass,
+                for the given iel and current pft
+            sv_reg['crpstg_<iel>_<pft>_path'], iel in crop storage, for the
+                given iel and current pft
+            sv_reg['minerl_<layer>_<iel>'], iel in the soil mineral pool, for
+                each soil layer accessible by the current pft ([1:nlay])
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'uptake_storage', 'uptake_soil', 'uptake_Nfix', 'statv_temp',
+            'uptake_above', 'uptake_below', 'fsol', 'minerl_uptake_lyr',
+            'uptake_weighted']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    pft_nodata = pygeoprocessing.get_raster_info(
+        percent_cover_path)['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            eavail_path, eup_above_iel_path, eup_below_iel_path,
+            plantNfix_path, sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]] +
+        [(iel, 'raw')],
+        calc_uptake_source('uptake_storage'), temp_val_dict['uptake_storage'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            eavail_path, eup_above_iel_path, eup_below_iel_path,
+            plantNfix_path, sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]] +
+        [(iel, 'raw')],
+        calc_uptake_source('uptake_soil'), temp_val_dict['uptake_soil'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    if iel == 1:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                eavail_path, eup_above_iel_path, eup_below_iel_path,
+                plantNfix_path,
+                sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]] +
+            [(iel, 'raw')],
+            calc_uptake_source('uptake_Nfix'), temp_val_dict['uptake_Nfix'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # uptake from crop storage into aboveground and belowground live
+    shutil.copyfile(
+        sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
+        temp_val_dict['statv_temp'])
+    raster_difference(
+        temp_val_dict['statv_temp'], _SV_NODATA,
+        temp_val_dict['uptake_storage'], _TARGET_NODATA,
+        sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['uptake_storage'], eup_above_iel_path,
+            eup_below_iel_path]],
+        calc_aboveground_uptake, temp_val_dict['uptake_above'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    shutil.copyfile(
+        sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+        temp_val_dict['statv_temp'])
+    raster_sum(
+        temp_val_dict['statv_temp'], _SV_NODATA,
+        temp_val_dict['uptake_above'], _TARGET_NODATA,
+        sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['uptake_storage'], eup_above_iel_path,
+            eup_below_iel_path]],
+        calc_belowground_uptake, temp_val_dict['uptake_below'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    shutil.copyfile(
+        sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+        temp_val_dict['statv_temp'])
+    raster_sum(
+        temp_val_dict['statv_temp'], _SV_NODATA,
+        temp_val_dict['uptake_below'], _TARGET_NODATA,
+        sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # uptake from each soil layer in proportion to its contribution to availm
+    for lyr in xrange(1, nlay + 1):
+        if iel == 2:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    sv_reg['minerl_1_2_path'],
+                    param_val_dict['sorpmx'],
+                    param_val_dict['pslsrb']]],
+                fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32,
+                _TARGET_NODATA)
+        else:
+            pygeoprocessing.new_raster_from_base(
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['fsol'],
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[1.])
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['uptake_soil'],
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                temp_val_dict['fsol'], availm_path]],
+            calc_minerl_uptake_lyr, temp_val_dict['minerl_uptake_lyr'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # uptake removed from soil is weighted by pft % cover
+        raster_multiplication(
+            percent_cover_path, pft_nodata,
+            temp_val_dict['minerl_uptake_lyr'], _TARGET_NODATA,
+            temp_val_dict['uptake_weighted'], _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+            temp_val_dict['statv_temp'])
+        raster_difference(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_weighted'], _TARGET_NODATA,
+            sv_reg['minerl_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+
+        # uptake from minerl iel in lyr into above and belowground live
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['minerl_uptake_lyr'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_aboveground_uptake, temp_val_dict['uptake_above'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_above'], _TARGET_NODATA,
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['minerl_uptake_lyr'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_belowground_uptake, temp_val_dict['uptake_below'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_below'], _TARGET_NODATA,
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # uptake from N fixation into above and belowground live
+    if iel == 1:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['uptake_Nfix'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_aboveground_uptake, temp_val_dict['uptake_above'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_above'], _TARGET_NODATA,
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['uptake_Nfix'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_belowground_uptake, temp_val_dict['uptake_below'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_below'], _TARGET_NODATA,
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
