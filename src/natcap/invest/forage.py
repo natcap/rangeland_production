@@ -8472,7 +8472,7 @@ def c_uptake_aboveground(aglivc, cprodl, rtsh):
 
     Given total C predicted to flow into new growth and the root:shoot ratio
     of new growth, perform the flow of C from the atmosphere into aboveground
-    live biomass. Lines 137-184 Growth.f
+    live biomass. Lines 137-146 Growth.f
 
     Parameters:
         aglivc (numpy.ndarray): state variable, existing C in aboveground live
@@ -8499,3 +8499,37 @@ def c_uptake_aboveground(aglivc, cprodl, rtsh):
     modified_aglivc[valid_mask] = (
         aglivc[valid_mask] + c_prod_aboveground[valid_mask])
     return modified_aglivc
+
+
+def c_uptake_belowground(bglivc, cprodl, rtsh):
+    """Do uptake of C from atmosphere to belowground live biomass.
+
+    Given total C predicted to flow into new growth and the root:shoot ratio
+    of new growth, perform the flow of C from the atmosphere into belowground
+    live biomass.  Lines 148-156 Growth.f
+
+    Parameters:
+        bglivc (numpy.ndarray): state variable, existing C in belowground live
+            biomass
+        cprodl (numpy.ndarray): derived, c production limited by nutrient
+            availability
+        rtsh (numpy.ndarray): derived, root/shoot ratio of new production
+
+    Returns:
+        modified_bglivc, modified C in belowground live biomass
+    """
+    valid_mask = (
+        (~numpy.isclose(bglivc, _SV_NODATA)) &
+        (cprodl != _TARGET_NODATA) &
+        (rtsh != _TARGET_NODATA))
+
+    c_prod_belowground = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    c_prod_belowground[:] = _TARGET_NODATA
+    c_prod_belowground[valid_mask] = (
+        cprodl[valid_mask] * (rtsh[valid_mask] / (rtsh[valid_mask] + 1.)))
+
+    modified_bglivc = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    modified_bglivc[:] = _SV_NODATA
+    modified_bglivc[valid_mask] = (
+        bglivc[valid_mask] + c_prod_belowground[valid_mask])
+    return modified_bglivc
