@@ -8465,3 +8465,37 @@ def restrict_potential_growth(potenc, availm_1, availm_2, snfxmx_1):
         valid_mask)
     potenc_lim_minerl[growth_mask] = potenc[growth_mask]
     return potenc_lim_minerl
+
+
+def c_uptake_aboveground(aglivc, cprodl, rtsh):
+    """Do uptake of C from atmosphere to aboveground live biomass.
+
+    Given total C predicted to flow into new growth and the root:shoot ratio
+    of new growth, perform the flow of C from the atmosphere into aboveground
+    live biomass. Lines 137-184 Growth.f
+
+    Parameters:
+        aglivc (numpy.ndarray): state variable, existing C in aboveground live
+            biomass
+        cprodl (numpy.ndarray): derived, c production limited by nutrient
+            availability
+        rtsh (numpy.ndarray): derived, root/shoot ratio of new production
+
+    Returns:
+        modified_aglivc, modified C in aboveground live biomass
+    """
+    valid_mask = (
+        (~numpy.isclose(aglivc, _SV_NODATA)) &
+        (cprodl != _TARGET_NODATA) &
+        (rtsh != _TARGET_NODATA))
+
+    c_prod_aboveground = numpy.empty(aglivc.shape, dtype=numpy.float32)
+    c_prod_aboveground[:] = _TARGET_NODATA
+    c_prod_aboveground[valid_mask] = (
+        cprodl[valid_mask] * (1. - rtsh[valid_mask] / (rtsh[valid_mask] + 1.)))
+
+    modified_aglivc = numpy.empty(aglivc.shape, dtype=numpy.float32)
+    modified_aglivc[:] = _SV_NODATA
+    modified_aglivc[valid_mask] = (
+        aglivc[valid_mask] + c_prod_aboveground[valid_mask])
+    return modified_aglivc

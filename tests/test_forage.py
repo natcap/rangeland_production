@@ -9594,3 +9594,48 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
             potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+    def test_c_uptake_aboveground(self):
+        """Test `c_uptake_aboveground`.
+
+        Use the function `c_uptake_aboveground` to add new biomass production
+        to C in aboveground live biomass.  Test that the function matches
+        values calcualted by hand.
+
+        Raises:
+            AssertionError if`c_uptake_aboveground` does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (3, 3)
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc = 100.3
+        cprodl = 20.2
+        rtsh = 0.6
+        modified_aglivc = 112.925
+
+        # array-based inputs
+        aglivc_ar = numpy.full(array_shape, aglivc)
+        cprodl_ar = numpy.full(array_shape, cprodl)
+        rtsh_ar = numpy.full(array_shape, rtsh)
+
+        modified_aglivc_ar = forage.c_uptake_aboveground(
+            aglivc_ar, cprodl_ar, rtsh_ar)
+        self.assert_all_values_in_array_within_range(
+            modified_aglivc_ar, modified_aglivc - tolerance,
+            modified_aglivc + tolerance, _SV_NODATA)
+
+        insert_nodata_values_into_array(aglivc_ar, _SV_NODATA)
+        insert_nodata_values_into_array(cprodl_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtsh_ar, _TARGET_NODATA)
+
+        modified_aglivc_ar = forage.c_uptake_aboveground(
+            aglivc_ar, cprodl_ar, rtsh_ar)
+        self.assert_all_values_in_array_within_range(
+            modified_aglivc_ar, modified_aglivc - tolerance,
+            modified_aglivc + tolerance, _SV_NODATA)
