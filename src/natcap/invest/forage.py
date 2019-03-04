@@ -8397,3 +8397,71 @@ def _shoot_senescence(
                 prev_sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
                 _SV_NODATA, temp_val_dict['to_stdede'], _TARGET_NODATA,
                 sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+
+def convert_biomass_to_C(biomass_path, c_path):
+    """Convert from grams of biomass to grams of carbon.
+
+    The root:shoot submodel calculates potential growth in units of grams of
+    biomass, but the growth submodel calculates actual growth from that
+    potential growth in units of grams of carbon.  Convert biomass to carbon
+    using a conversion factor of 2.5.
+
+    Parameters:
+        biomass_path (string): path to raster containing grams of
+            biomass
+        c_path (string): path to raster that should contain the equivalent
+            grams of carbon
+
+    Modifies:
+        the raster indicated by `c_path`
+
+    Returns:
+        None
+    """
+    def convert_op(biomass):
+        """Convert grams of biomass to grams of carbon."""
+        valid_mask = (biomass != _TARGET_NODATA)
+        carbon = numpy.empty(biomass.shape, dtype=numpy.float32)
+        carbon[:] = _TARGET_NODATA
+        carbon[valid_mask] = biomass[valid_mask] / 2.5
+        return carbon
+    pygeoprocessing.raster_calculator(
+        [(biomass_path, 1)], convert_op, c_path, gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+
+def restrict_potential_growth(potenc, availm_1, availm_2, snfxmx_1):
+    """Restrict potential growth according to mineral nutrients.
+
+    Limit potential growth by the availability of mineral N and P. Growth only
+    occurs if there is some availability of both mineral elements. Line 63
+    Restrp.f
+
+    Parameters:
+        potenc (numpy.ndarray): potential C production (g C)
+        availm_1 (numpy.ndarray): derived, total mineral N available to this
+            pft
+        availm_2 (numpy.ndarray): derived, total mineral P available to this
+            pft
+        snfxmx_1 (numpy.ndarray): parameter, maximum symbiotic N fixation rate
+
+    Returns:
+        potenc_lim_minerl, potential C production limited by availability of
+            mineral nutrients
+    """
+    valid_mask = (
+        (potenc != _TARGET_NODATA) &
+        (availm_1 != _TARGET_NODATA) &
+        (availm_2 != _TARGET_NODATA) &
+        (snfxmx_1 != _IC_NODATA))
+    potenc_lim_minerl = numpy.empty(potenc.shape, dtype=numpy.float32)
+    potenc_lim_minerl[:] = _TARGET_NODATA
+    potenc_lim_minerl[valid_mask] = 0
+
+    growth_mask = (
+        ((availm_1 > 0) | (snfxmx_1 > 0)) &
+        (availm_2 > 0) &
+        valid_mask)
+    potenc_lim_minerl[growth_mask] = potenc[growth_mask]
+    return potenc_lim_minerl

@@ -9503,3 +9503,94 @@ class foragetests(unittest.TestCase):
             point_results['minerl_6_iel'], minerl_6_iel_known)
         self.assertAlmostEqual(
             point_results['minerl_7_iel'], minerl_7_iel_known)
+
+    def test_restrict_potential_growth(self):
+        """Test `restrict_potential_growth`.
+
+        Use the function `restrict_potential_growth` to restrict potential
+        growth according to the availability of mineral N and P. Test that
+        calculated growth matches values calculated by hand.
+
+        Raises:
+            AssertionError if restrict_potential_growth does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (3, 3)
+        tolerance = 0.00000001
+
+        # known inputs: no available mineral N
+        potenc = 100
+        availm_1 = 0.
+        availm_2 = 20.
+        snfxmx_1 = 0.
+        potenc_lim_minerl = 0.
+
+        # array-based inputs
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+        # N supplied by N fixation
+        potenc = 100.
+        availm_1 = 0.
+        availm_2 = 20.
+        snfxmx_1 = 10.
+        potenc_lim_minerl = potenc
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+        # N supplied by mineral source
+        potenc = 100.
+        availm_1 = 10.
+        availm_2 = 20.
+        snfxmx_1 = 0.
+        potenc_lim_minerl = potenc
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+        # no available P
+        potenc = 100.
+        availm_1 = 10.
+        availm_2 = 0.
+        snfxmx_1 = 0.
+        potenc_lim_minerl = 0.
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
