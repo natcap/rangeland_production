@@ -9399,28 +9399,32 @@ class foragetests(unittest.TestCase):
         Returns:
             None
         """
-        # known values, eavail_2 > demand_2
+        from natcap.invest import forage
+        array_shape = (3, 3)
+        tolerance = 0.00001
+
+        # known values, eavail_2 > demand_2 and P is limiting nutrient
         potenc = 200.1
         rtsh = 0.59
         eavail_1 = 200.5
         eavail_2 = 62
         snfxmx_1 = 0.03
-        cerat_max_above_1 = 8
-        cerat_max_below_1 = 11
-        cerat_max_above_2 = 7
-        cerat_max_below_2 = 6
-        cerat_min_above_1 = 3
-        cerat_min_below_1 = 5
-        cerat_min_above_2 = 2
-        cerat_min_below_2 = 2.5
+        cercrp_max_above_1 = 8
+        cercrp_max_below_1 = 11
+        cercrp_max_above_2 = 7
+        cercrp_max_below_2 = 6
+        cercrp_min_above_1 = 3
+        cercrp_min_below_1 = 5
+        cercrp_min_above_2 = 2
+        cercrp_min_below_2 = 2.5
 
         point_results = calc_nutrient_limitation_point(
             potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
-            cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
-            cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
-            cerat_min_above_2, cerat_min_below_2)
+            cercrp_max_above_1, cercrp_max_below_1, cercrp_max_above_2,
+            cercrp_max_below_2, cercrp_min_above_1, cercrp_min_below_1,
+            cercrp_min_above_2, cercrp_min_below_2)
 
-        # test values for P only
+        # test values for P only against values calculated by hand
         c_production_known = 172.222418488863
         eup_above_2_known = 41.367670329147
         eup_below_2_known = 20.632329670853
@@ -9431,6 +9435,270 @@ class foragetests(unittest.TestCase):
             point_results['eup_above_2'], eup_above_2_known)
         self.assertAlmostEqual(
             point_results['eup_below_2'], eup_below_2_known)
+
+        # array-based inputs
+        potenc_ar = numpy.full(array_shape, potenc)
+        rtsh_ar = numpy.full(array_shape, rtsh)
+        eavail_1_ar = numpy.full(array_shape, eavail_1)
+        eavail_2_ar = numpy.full(array_shape, eavail_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+        cercrp_max_above_1_ar = numpy.full(array_shape, cercrp_max_above_1)
+        cercrp_max_below_1_ar = numpy.full(array_shape, cercrp_max_below_1)
+        cercrp_max_above_2_ar = numpy.full(array_shape, cercrp_max_above_2)
+        cercrp_max_below_2_ar = numpy.full(array_shape, cercrp_max_below_2)
+        cercrp_min_above_1_ar = numpy.full(array_shape, cercrp_min_above_1)
+        cercrp_min_below_1_ar = numpy.full(array_shape, cercrp_min_below_1)
+        cercrp_min_above_2_ar = numpy.full(array_shape, cercrp_min_above_2)
+        cercrp_min_below_2_ar = numpy.full(array_shape, cercrp_min_below_2)
+
+        cprodl_ar = forage.calc_nutrient_limitation(
+            'cprodl')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_1_ar = forage.calc_nutrient_limitation(
+            'eup_above_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_1_ar = forage.calc_nutrient_limitation(
+            'eup_below_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_2_ar = forage.calc_nutrient_limitation(
+            'eup_above_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_2_ar = forage.calc_nutrient_limitation(
+            'eup_below_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        plantNfix_ar = forage.calc_nutrient_limitation(
+            'plantNfix')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            cprodl_ar, point_results['c_production'] - tolerance,
+            point_results['c_production'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_1_ar, point_results['eup_above_1'] - tolerance,
+            point_results['eup_above_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_1_ar, point_results['eup_below_1'] - tolerance,
+            point_results['eup_below_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_2_ar, point_results['eup_above_2'] - tolerance,
+            point_results['eup_above_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_2_ar, point_results['eup_below_2'] - tolerance,
+            point_results['eup_below_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            plantNfix_ar, point_results['plantNfix'] - tolerance,
+            point_results['plantNfix'] + tolerance, _TARGET_NODATA)
+
+        # known values, eavail_1 < demand_1 and N is limiting nutrient
+        potenc = 200.1
+        rtsh = 0.59
+        eavail_1 = 10.1
+        eavail_2 = 62
+        snfxmx_1 = 0.003
+        cercrp_max_above_1 = 8
+        cercrp_max_below_1 = 11
+        cercrp_max_above_2 = 7
+        cercrp_max_below_2 = 6
+        cercrp_min_above_1 = 3
+        cercrp_min_below_1 = 5
+        cercrp_min_above_2 = 2
+        cercrp_min_below_2 = 2.5
+
+        point_results = calc_nutrient_limitation_point(
+            potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+            cercrp_max_above_1, cercrp_max_below_1, cercrp_max_above_2,
+            cercrp_max_below_2, cercrp_min_above_1, cercrp_min_below_1,
+            cercrp_min_above_2, cercrp_min_below_2)
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        rtsh_ar = numpy.full(array_shape, rtsh)
+        eavail_1_ar = numpy.full(array_shape, eavail_1)
+        eavail_2_ar = numpy.full(array_shape, eavail_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+        cercrp_max_above_1_ar = numpy.full(array_shape, cercrp_max_above_1)
+        cercrp_max_below_1_ar = numpy.full(array_shape, cercrp_max_below_1)
+        cercrp_max_above_2_ar = numpy.full(array_shape, cercrp_max_above_2)
+        cercrp_max_below_2_ar = numpy.full(array_shape, cercrp_max_below_2)
+        cercrp_min_above_1_ar = numpy.full(array_shape, cercrp_min_above_1)
+        cercrp_min_below_1_ar = numpy.full(array_shape, cercrp_min_below_1)
+        cercrp_min_above_2_ar = numpy.full(array_shape, cercrp_min_above_2)
+        cercrp_min_below_2_ar = numpy.full(array_shape, cercrp_min_below_2)
+
+        cprodl_ar = forage.calc_nutrient_limitation(
+            'cprodl')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_1_ar = forage.calc_nutrient_limitation(
+            'eup_above_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_1_ar = forage.calc_nutrient_limitation(
+            'eup_below_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_2_ar = forage.calc_nutrient_limitation(
+            'eup_above_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_2_ar = forage.calc_nutrient_limitation(
+            'eup_below_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        plantNfix_ar = forage.calc_nutrient_limitation(
+            'plantNfix')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            cprodl_ar, point_results['c_production'] - tolerance,
+            point_results['c_production'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_1_ar, point_results['eup_above_1'] - tolerance,
+            point_results['eup_above_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_1_ar, point_results['eup_below_1'] - tolerance,
+            point_results['eup_below_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_2_ar, point_results['eup_above_2'] - tolerance,
+            point_results['eup_above_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_2_ar, point_results['eup_below_2'] - tolerance,
+            point_results['eup_below_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            plantNfix_ar, point_results['plantNfix'] - tolerance,
+            point_results['plantNfix'] + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(potenc_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtsh_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(eavail_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(eavail_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(snfxmx_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(cercrp_max_below_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(cercrp_min_above_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(cercrp_min_below_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(cercrp_max_above_1_ar, _TARGET_NODATA)
+
+        cprodl_ar = forage.calc_nutrient_limitation(
+            'cprodl')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_1_ar = forage.calc_nutrient_limitation(
+            'eup_above_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_1_ar = forage.calc_nutrient_limitation(
+            'eup_below_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_2_ar = forage.calc_nutrient_limitation(
+            'eup_above_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_2_ar = forage.calc_nutrient_limitation(
+            'eup_below_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        plantNfix_ar = forage.calc_nutrient_limitation(
+            'plantNfix')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            cprodl_ar, point_results['c_production'] - tolerance,
+            point_results['c_production'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_1_ar, point_results['eup_above_1'] - tolerance,
+            point_results['eup_above_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_1_ar, point_results['eup_below_1'] - tolerance,
+            point_results['eup_below_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_2_ar, point_results['eup_above_2'] - tolerance,
+            point_results['eup_above_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_2_ar, point_results['eup_below_2'] - tolerance,
+            point_results['eup_below_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            plantNfix_ar, point_results['plantNfix'] - tolerance,
+            point_results['plantNfix'] + tolerance, _TARGET_NODATA)
 
     def test_nutrient_uptake(self):
         """Test `nutrient_uptake`.

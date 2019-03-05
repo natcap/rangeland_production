@@ -8910,3 +8910,225 @@ def nutrient_uptake(
             temp_val_dict['statv_temp'], _SV_NODATA,
             temp_val_dict['uptake_below'], _TARGET_NODATA,
             sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+
+def calc_nutrient_limitation(return_type):
+    """Calculate C, N, and P in new production given nutrient availability."""
+    def _nutrlm(
+            potenc, rtsh, eavail_1, eavail_2, snfxmx_1, cercrp_max_above_1,
+            cercrp_max_below_1, cercrp_max_above_2, cercrp_max_below_2,
+            cercrp_min_above_1, cercrp_min_below_1, cercrp_min_above_2,
+            cercrp_min_below_2):
+        """Calculate new production limited by N and P.
+
+        Growth of new biomass is limited by the availability of N and P.
+        Compare nutrient availability to the demand for each nutrient, which
+        differs between above- and belowground production. Nutrlm.f
+
+        Parameters:
+        potenc (numpy.ndarray): derived, potential production of C calculated
+            by root:shoot ratio submodel
+        rtsh (numpy.ndarray): derived, root/shoot ratio of new production
+        eavail_1 (numpy.ndarray): derived, available N (includes predicted
+            symbiotic N fixation)
+        eavail_2 (numpy.ndarray): derived, available P
+        snfxmx_1 (numpy.ndarray): parameter, maximum symbiotic N fixation rate
+        cercrp_max_above_1 (numpy.ndarray): max C/N ratio of new aboveground
+            growth
+        cercrp_max_below_1 (numpy.ndarray): max C/N ratio of new belowground
+            growth
+        cercrp_max_above_2 (numpy.ndarray): max C/P ratio of new aboveground
+            growth
+        cercrp_max_below_2 (numpy.ndarray): max C/P ratio of new belowground
+            growth
+        cercrp_min_above_1 (numpy.ndarray): min C/N ratio of new aboveground
+            growth
+        cercrp_min_below_1 (numpy.ndarray): min C/N ratio of new belowground
+            growth
+        cercrp_min_above_2 (numpy.ndarray): min C/P ratio of new aboveground
+            growth
+        cercrp_min_below_2 (numpy.ndarray): min C/P ratio of new belowground
+            growth
+
+        Returns:
+            cprodl, total C production limited by nutrient availability,
+                if return_type is 'cprodl'
+            eup_above_1, N in new aboveground production, if return_type is
+                'eup_above_1'
+            eup_below_1, N in new belowground production, if return_type is
+                'eup_below_1'
+            eup_above_2, P in new aboveground production, if return_type is
+                'eup_above_2'
+            eup_below_2, P in new belowground production, if return_type is
+                'eup_below_2'
+            plantNfix, N fixation that actually occurs, if return_type is
+                'plantNfix'
+        """
+        valid_mask = (
+            (potenc != _TARGET_NODATA) &
+            (rtsh != _TARGET_NODATA) &
+            (eavail_1 != _TARGET_NODATA) &
+            (eavail_2 != _TARGET_NODATA) &
+            (snfxmx_1 != _IC_NODATA) &
+            (cercrp_max_above_1 != _TARGET_NODATA) &
+            (cercrp_max_below_1 != _TARGET_NODATA) &
+            (cercrp_max_above_2 != _TARGET_NODATA) &
+            (cercrp_max_below_2 != _TARGET_NODATA) &
+            (cercrp_min_above_1 != _TARGET_NODATA) &
+            (cercrp_min_below_1 != _TARGET_NODATA) &
+            (cercrp_min_above_2 != _TARGET_NODATA) &
+            (cercrp_min_below_2 != _TARGET_NODATA))
+        cfrac_below = numpy.empty(potenc.shape, dtype=numpy.float32)
+        cfrac_below[valid_mask] = (
+            rtsh[valid_mask] / (rtsh[valid_mask] + 1.))
+        cfrac_above = numpy.empty(potenc.shape, dtype=numpy.float32)
+        cfrac_above[valid_mask] = 1. - cfrac_below[valid_mask]
+
+        # maxec is average e/c ratio across aboveground and belowground
+        # maxeci is indexed to aboveground only or belowground only
+        maxeci_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxeci_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+
+        maxeci_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxeci_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+
+        maxeci_above_1[valid_mask] = 1. / cercrp_min_above_1[valid_mask]
+        mineci_above_1[valid_mask] = 1. / cercrp_max_above_1[valid_mask]
+        maxeci_below_1[valid_mask] = 1. / cercrp_min_below_1[valid_mask]
+        mineci_below_1[valid_mask] = 1. / cercrp_max_below_1[valid_mask]
+
+        maxeci_above_2[valid_mask] = 1. / cercrp_min_above_2[valid_mask]
+        mineci_above_2[valid_mask] = 1. / cercrp_max_above_2[valid_mask]
+        maxeci_below_2[valid_mask] = 1. / cercrp_min_below_2[valid_mask]
+        mineci_below_2[valid_mask] = 1. / cercrp_max_below_2[valid_mask]
+
+        maxec_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxec_1[valid_mask] = (
+            cfrac_below[valid_mask] * maxeci_below_1[valid_mask] +
+            cfrac_above[valid_mask] * maxeci_above_1[valid_mask])
+        maxec_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxec_2[valid_mask] = (
+            cfrac_below[valid_mask] * maxeci_below_2[valid_mask] +
+            cfrac_above[valid_mask] * maxeci_above_2[valid_mask])
+
+        # N/C ratio in new production according to demand and supply
+        demand_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        demand_1[valid_mask] = potenc[valid_mask] * maxec_1[valid_mask]
+
+        ecfor_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_above_1[valid_mask] = (
+            mineci_above_1[valid_mask] +
+            (maxeci_above_1[valid_mask] - mineci_above_1[valid_mask]) *
+            eavail_1[valid_mask] / demand_1[valid_mask])
+        ecfor_below_1[valid_mask] = (
+            mineci_below_1[valid_mask] +
+            (maxeci_below_1[valid_mask] - mineci_below_1[valid_mask]) *
+            eavail_1[valid_mask] / demand_1[valid_mask])
+
+        sufficient_mask = ((eavail_1 > demand_1) & valid_mask)
+        ecfor_above_1[sufficient_mask] = maxeci_above_1[sufficient_mask]
+        ecfor_below_1[sufficient_mask] = maxeci_below_1[sufficient_mask]
+
+        # caculate C production limited by N supply
+        c_constrained_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        c_constrained_1[valid_mask] = (
+            eavail_1[valid_mask] / (
+                cfrac_below[valid_mask] * ecfor_below_1[valid_mask] +
+                cfrac_above[valid_mask] * ecfor_above_1[valid_mask]))
+
+        # P/C ratio in new production according to demand and supply
+        demand_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        demand_2[valid_mask] = potenc[valid_mask] * maxec_2[valid_mask]
+
+        ecfor_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_above_2[valid_mask] = (
+            mineci_above_2[valid_mask] +
+            (maxeci_above_2[valid_mask] - mineci_above_2[valid_mask]) *
+            eavail_2[valid_mask] / demand_2[valid_mask])
+        ecfor_below_2[valid_mask] = (
+            mineci_below_2[valid_mask] +
+            (maxeci_below_2[valid_mask] - mineci_below_2[valid_mask]) *
+            eavail_2[valid_mask] / demand_2[valid_mask])
+
+        sufficient_mask = ((eavail_2 > demand_2) & valid_mask)
+        ecfor_above_2[sufficient_mask] = maxeci_above_2[sufficient_mask]
+        ecfor_below_2[sufficient_mask] = maxeci_below_2[sufficient_mask]
+
+        # caculate C production limited by P supply
+        c_constrained_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        c_constrained_2[valid_mask] = (
+            eavail_2[valid_mask] / (
+                cfrac_below[valid_mask] * ecfor_below_2[valid_mask] +
+                cfrac_above[valid_mask] * ecfor_above_2[valid_mask]))
+
+        # C production limited by both N and P
+        cprodl = numpy.empty(potenc.shape, dtype=numpy.float32)
+        cprodl[:] = _TARGET_NODATA
+        cprodl[valid_mask] = numpy.minimum(
+            c_constrained_1[valid_mask],
+            c_constrained_2[valid_mask])
+        cprodl[valid_mask] = numpy.minimum(
+            cprodl[valid_mask], potenc[valid_mask])
+
+        # N uptake into new production, given limited C production
+        eup_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_above_1[:] = _TARGET_NODATA
+        eup_below_1[:] = _TARGET_NODATA
+
+        eup_above_1[valid_mask] = (
+            cprodl[valid_mask] * cfrac_above[valid_mask] *
+            ecfor_above_1[valid_mask])
+        eup_below_1[valid_mask] = (
+            cprodl[valid_mask] * cfrac_below[valid_mask] *
+            ecfor_below_1[valid_mask])
+
+        # P uptake into new production, given limited C production
+        eup_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_above_2[:] = _TARGET_NODATA
+        eup_below_2[:] = _TARGET_NODATA
+
+        eup_above_2[valid_mask] = (
+            cprodl[valid_mask] * cfrac_above[valid_mask] *
+            ecfor_above_2[valid_mask])
+        eup_below_2[valid_mask] = (
+            cprodl[valid_mask] * cfrac_below[valid_mask] *
+            ecfor_below_2[valid_mask])
+
+        # Calculate N fixation that occurs to subsidize needed N supply
+        maxNfix = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxNfix[valid_mask] = snfxmx_1[valid_mask] * potenc[valid_mask]
+
+        eprodl_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eprodl_1[valid_mask] = (
+            eup_above_1[valid_mask] + eup_below_1[valid_mask])
+        Nfix_mask = (
+            (eprodl_1 - (eavail_1 + maxNfix) > 0.05) &
+            valid_mask)
+        eprodl_1[Nfix_mask] = eavail_1[Nfix_mask] + maxNfix[Nfix_mask]
+
+        plantNfix = numpy.empty(potenc.shape, dtype=numpy.float32)
+        plantNfix[:] = _TARGET_NODATA
+        plantNfix[valid_mask] = numpy.maximum(
+            eprodl_1[valid_mask] - eavail_1[valid_mask], 0.)
+
+        if return_type == 'cprodl':
+            return cprodl
+        elif return_type == 'eup_above_1':
+            return eup_above_1
+        elif return_type == 'eup_below_1':
+            return eup_below_1
+        elif return_type == 'eup_above_2':
+            return eup_above_2
+        elif return_type == 'eup_below_2':
+            return eup_below_2
+        elif return_type == 'plantNfix':
+            return plantNfix
+    return _nutrlm
