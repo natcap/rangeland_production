@@ -3639,8 +3639,8 @@ def _root_shoot_ratio(
         for iel in [1, 2]:
             for val in ['eavail', 'demand']:
                 temp_val_dict[
-                    '{}_{}_{}'.format(val, pft_i, iel)] = os.path.join(
-                        temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
+                    '{}_{}_{}'.format(val, iel, pft_i)] = os.path.join(
+                        temp_dir, '{}_{}_{}.tif'.format(val, iel, pft_i))
 
     # temporary parameter rasters for root:shoot submodel
     param_val_dict = {}
@@ -3674,9 +3674,9 @@ def _root_shoot_ratio(
                     'pramn_1', 'pramn_2', 'pramx_1', 'pramx_2', 'prbmn_1',
                     'prbmn_2', 'prbmx_1', 'prbmx_2']:
                 target_path = os.path.join(
-                    temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
+                    temp_dir, '{}_{}_{}.tif'.format(val, iel, pft_i))
                 param_val_dict[
-                    '{}_{}_{}'.format(val, pft_i, iel)] = target_path
+                    '{}_{}_{}'.format(val, iel, pft_i)] = target_path
                 fill_val = veg_trait_table[pft_i]['{}_{}'.format(val, iel)]
                 pygeoprocessing.new_raster_from_base(
                     aligned_inputs['site_index'], target_path,
@@ -3705,19 +3705,17 @@ def _root_shoot_ratio(
             gdal.GDT_Float32, _TARGET_NODATA)
         for iel in [1, 2]:
             # persistent ratios used here and in plant growth submodel
-            # TODO check order of formatted values:
-            # double check should not be .format(iel, pft_i)
             calc_ce_ratios(
-                param_val_dict['pramn_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['pramn_2_{}_{}'.format(pft_i, iel)],
+                param_val_dict['pramn_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['pramn_2_{}_{}'.format(iel, pft_i)],
                 prev_sv_reg['aglivc_{}_path'.format(pft_i)],
                 param_val_dict['biomax_{}'.format(pft_i)],
-                param_val_dict['pramx_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['pramx_2_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmn_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmn_2_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmx_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmx_2_{}_{}'.format(pft_i, iel)],
+                param_val_dict['pramx_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['pramx_2_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmn_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmn_2_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmx_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmx_2_{}_{}'.format(iel, pft_i)],
                 year_reg['annual_precip_path'], month_reg,
                 pft_i, iel)
             # sum of mineral nutrient in accessible soil layers
@@ -3731,22 +3729,22 @@ def _root_shoot_ratio(
                 temp_val_dict['availm_{}'.format(pft_i)],
                 param_val_dict['favail_{}'.format(iel)],
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
-                temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
+                temp_val_dict['eavail_{}_{}'.format(iel, pft_i)])
             # demand_iel, demand for the nutrient
             _calc_nutrient_demand(
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 temp_val_dict['fracrc_p_{}'.format(pft_i)],
                 month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
                 month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
-                temp_val_dict['demand_{}_{}'.format(pft_i, iel)])
+                temp_val_dict['demand_{}_{}'.format(iel, pft_i)])
         # revised fraction of carbon allocated to roots
         calc_revised_fracrc(
             param_val_dict['frtcindx_{}'.format(pft_i)],
             temp_val_dict['fracrc_p_{}'.format(pft_i)],
-            temp_val_dict['eavail_{}_1'.format(pft_i)],
-            temp_val_dict['eavail_{}_2'.format(pft_i)],
-            temp_val_dict['demand_{}_1'.format(pft_i)],
-            temp_val_dict['demand_{}_2'.format(pft_i)],
+            temp_val_dict['eavail_1_{}'.format(pft_i)],
+            temp_val_dict['eavail_2_{}'.format(pft_i)],
+            temp_val_dict['demand_1_{}'.format(pft_i)],
+            temp_val_dict['demand_2_{}'.format(pft_i)],
             month_reg['h2ogef_1_{}'.format(pft_i)],
             param_val_dict['cfrtcw_1_{}'.format(pft_i)],
             param_val_dict['cfrtcw_2_{}'.format(pft_i)],
