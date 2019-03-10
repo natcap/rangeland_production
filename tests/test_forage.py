@@ -13,7 +13,7 @@ from osgeo import gdal
 
 import pygeoprocessing
 
-SAMPLE_DATA = "C:/Users/ginge/Documents/NatCap/sample_inputs"
+SAMPLE_DATA = "C:/Users/ginge/Dropbox/sample_inputs"
 REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 PROCESSING_DIR = None
 
@@ -2109,7 +2109,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -9788,6 +9788,8 @@ class foragetests(unittest.TestCase):
         plantNfix_path = os.path.join(self.workspace_dir, 'plantNfix.tif')
         availm_path = os.path.join(self.workspace_dir, 'availm.tif')
         eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
+        pslsrb_path = os.path.join(self.workspace_dir, 'pslsrb.tif')
+        sorpmx_path = os.path.join(self.workspace_dir, 'sorpmx.tif')
 
         sv_reg = {
             'aglive_{}_{}_path'.format(iel, pft_i): os.path.join(
@@ -9827,11 +9829,13 @@ class foragetests(unittest.TestCase):
             create_constant_raster(
                 sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                 minerl_dict['minerl_{}_iel'.format(lyr)])
+        create_constant_raster(pslsrb_path, pslsrb)
+        create_constant_raster(sorpmx_path, sorpmx)
 
         forage.nutrient_uptake(
             iel, nlay, percent_cover_path, eup_above_iel_path,
             eup_below_iel_path, plantNfix_path, availm_path, eavail_path,
-            sv_reg, pft_i)
+            sv_reg, pft_i, pslsrb_path, sorpmx_path)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
             point_results['aglive_iel'] - tolerance,
@@ -10008,3 +10012,259 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_array_within_range(
             modified_aglivc_ar, modified_aglivc - tolerance,
             modified_aglivc + tolerance, _SV_NODATA)
+
+    def test_new_growth(self):
+        """Test `_new_growth`.
+
+        Use the function `new_growth` to calculate growth of new above and
+        belowground biomass. Test that state variables for plant functional
+        types scheduled to senesce do not experience new growth. Test that
+        above and belowground biomass increases for plant functional types
+        not scheduled to senesce.
+
+        Raises:
+            AssertionError if `new_growth` produces change in biomass for
+                pft scheduled to senesce
+            AssertionError if `new_growth` fails to produce change in biomass
+                for pft not scheduled to senesce
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known values
+        initial_aglivc = 25.72
+        initial_bglivc = 156.4
+        initial_aglive_1 = 0.41
+        initial_aglive_2 = 0.32
+        initial_bglive_1 = 3.281
+        initial_bglive_2 = 0.372
+        initial_crpstg_1 = 0.03
+        initial_crpstg_2 = 0.01
+        initial_minerl_1 = 6.33
+        initial_minerl_2 = 14.38
+
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'pft_2': os.path.join(self.workspace_dir, 'pft_2.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 0.3)
+        create_constant_raster(aligned_inputs['pft_2'], 0.6)
+        site_param_table = {
+            1: {
+                'favail_1': 0.9,
+                'favail_4': 0.2,
+                'favail_5': 0.5,
+                'favail_6': 2.3,
+                'rictrl': 0.013,
+                'riint': 0.65,
+                'sorpmx': 2,
+                'pslsrb': 1,
+            }
+        }
+        veg_trait_table = {
+            1: {
+                'snfxmx_1': 0.03,
+                'senescence_month': '3',
+                'nlaypg': 5,
+            },
+            2: {
+                'snfxmx_1': 0.004,
+                'senescence_month': '5',
+                'nlaypg': 3,
+            }
+        }
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+            'minerl_2_1_path': os.path.join(
+                self.workspace_dir, 'minerl_2_1.tif'),
+            'minerl_3_1_path': os.path.join(
+                self.workspace_dir, 'minerl_3_1.tif'),
+            'minerl_4_1_path': os.path.join(
+                self.workspace_dir, 'minerl_4_1.tif'),
+            'minerl_5_1_path': os.path.join(
+                self.workspace_dir, 'minerl_5_1.tif'),
+            'minerl_1_2_path': os.path.join(
+                self.workspace_dir, 'minerl_1_2.tif'),
+            'minerl_2_2_path': os.path.join(
+                self.workspace_dir, 'minerl_2_2.tif'),
+            'minerl_3_2_path': os.path.join(
+                self.workspace_dir, 'minerl_3_2.tif'),
+            'minerl_4_2_path': os.path.join(
+                self.workspace_dir, 'minerl_4_2.tif'),
+            'minerl_5_2_path': os.path.join(
+                self.workspace_dir, 'minerl_5_2.tif'),
+        }
+        for lyr in xrange(1, 6):
+            create_constant_raster(
+                sv_reg['minerl_{}_1_path'.format(lyr)],
+                initial_minerl_1)
+            create_constant_raster(
+                sv_reg['minerl_{}_2_path'.format(lyr)],
+                initial_minerl_2)
+        for pft_i in [1, 2]:
+            sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglivc_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['aglivc_{}_path'.format(pft_i)], initial_aglivc)
+            sv_reg['bglivc_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'bglivc_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['bglivc_{}_path'.format(pft_i)], initial_bglivc)
+            sv_reg['aglive_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglive_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['aglive_1_{}_path'.format(pft_i)], initial_aglive_1)
+            sv_reg['aglive_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglive_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['aglive_2_{}_path'.format(pft_i)], initial_aglive_2)
+            sv_reg['bglive_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'bglive_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['bglive_1_{}_path'.format(pft_i)], initial_bglive_1)
+            sv_reg['bglive_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'bglive_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['bglive_2_{}_path'.format(pft_i)], initial_bglive_2)
+            sv_reg['crpstg_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_1_{}_path'.format(pft_i)], initial_crpstg_1)
+            sv_reg['crpstg_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_2_{}_path'.format(pft_i)], initial_crpstg_2)
+            sv_reg['crpstg_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_1_{}_path'.format(pft_i)], initial_crpstg_1)
+            sv_reg['crpstg_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_2_{}_path'.format(pft_i)], initial_crpstg_2)
+
+        month_reg = {
+            'tgprod_pot_prod_1': os.path.join(
+                self.workspace_dir, 'tgprod_pot_prod_1.tif'),
+            'rtsh_1': os.path.join(
+                self.workspace_dir, 'rtsh_1.tif'),
+            'tgprod_pot_prod_2': os.path.join(
+                self.workspace_dir, 'tgprod_pot_prod_2.tif'),
+            'rtsh_2': os.path.join(
+                self.workspace_dir, 'rtsh_2.tif'),
+        }
+        for pft_i in [1, 2]:
+            for iel in [1, 2]:
+                month_reg['cercrp_min_above_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_min_above_{}_{}.tif'.format(
+                        iel, pft_i))
+                month_reg['cercrp_max_above_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_max_above_{}_{}.tif'.format(
+                        iel, pft_i))
+                month_reg['cercrp_min_below_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_min_below_{}_{}.tif'.format(
+                        iel, pft_i))
+                month_reg['cercrp_max_below_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_max_below_{}_{}.tif'.format(
+                        iel, pft_i))
+        create_constant_raster(month_reg['tgprod_pot_prod_1'], 426.04)
+        create_constant_raster(month_reg['rtsh_1'], 0.3)
+        create_constant_raster(month_reg['tgprod_pot_prod_2'], 341.04)
+        create_constant_raster(month_reg['rtsh_2'], 0.6)
+        for pft_i in [1, 2]:
+            for iel in [1, 2]:
+                create_constant_raster(
+                    month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
+                    30.2)
+                create_constant_raster(
+                    month_reg['cercrp_max_above_{}_{}'.format(iel, pft_i)],
+                    94.2)
+                create_constant_raster(
+                    month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
+                    37.1)
+                create_constant_raster(
+                    month_reg['cercrp_max_below_{}_{}'.format(iel, pft_i)],
+                    56.29)
+
+        pft_id_set = set([1, 2])
+        current_month = 3
+
+        forage._new_growth(
+            pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+            sv_reg, month_reg, current_month)
+
+        # no growth for pft 1
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], initial_aglivc - tolerance,
+            initial_aglivc + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['bglivc_1_path'], initial_bglivc - tolerance,
+            initial_bglivc + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], initial_aglive_1 - tolerance,
+            initial_aglive_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], initial_aglive_2 - tolerance,
+            initial_aglive_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_1_path'], initial_crpstg_1 - tolerance,
+            initial_crpstg_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_1_path'], initial_crpstg_2 - tolerance,
+            initial_crpstg_2 + tolerance, _SV_NODATA)
+
+        # growth expected for pft 2
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_2_path'], initial_aglivc + 10,
+            initial_aglivc + 100, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['bglivc_2_path'], initial_bglivc + 10,
+            initial_bglivc + 100, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_2_path'], initial_aglive_1 + 0.5,
+            initial_aglive_1 + 10, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_2_path'], initial_aglive_2 + 0.5,
+            initial_aglive_2 + 10, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_2_path'], -tolerance, tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_2_path'], -tolerance, tolerance, _SV_NODATA)
+
+        # uptake expected from mineral layers 1-3
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], 0, initial_minerl_1 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_2_1_path'], 0, initial_minerl_1 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_3_1_path'], 0, initial_minerl_1 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_2_path'], 0, initial_minerl_2 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_2_2_path'], 0, initial_minerl_2 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_3_2_path'], 0, initial_minerl_2 - 0.2, _SV_NODATA)
+
+        # no uptake expected from mineral layers 4-5
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_4_1_path'], initial_minerl_1 - tolerance,
+            initial_minerl_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_5_1_path'], initial_minerl_1 - tolerance,
+            initial_minerl_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_4_2_path'], initial_minerl_2 - tolerance,
+            initial_minerl_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_5_2_path'], initial_minerl_2 - tolerance,
+            initial_minerl_2 + tolerance, _SV_NODATA)

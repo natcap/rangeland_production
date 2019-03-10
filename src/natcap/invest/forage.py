@@ -707,6 +707,10 @@ def execute(args):
             pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
             current_month)
 
+        _new_growth(
+            pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+            sv_reg, month_reg, current_month)
+
 
 def raster_multiplication(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
@@ -3701,6 +3705,8 @@ def _root_shoot_ratio(
             gdal.GDT_Float32, _TARGET_NODATA)
         for iel in [1, 2]:
             # persistent ratios used here and in plant growth submodel
+            # TODO check order of formatted values:
+            # double check should not be .format(iel, pft_i)
             calc_ce_ratios(
                 param_val_dict['pramn_1_{}_{}'.format(pft_i, iel)],
                 param_val_dict['pramn_2_{}_{}'.format(pft_i, iel)],
@@ -6647,6 +6653,13 @@ def _decomposition(
             sv_reg['{}_path'.format(state_var)])
         delta_sv_dict[state_var] = os.path.join(
             temp_dir, '{}.tif'.format(state_var))
+    # surface mineral N in sv_reg was initialized by _monthly_N_fixation;
+    # copy other layers to current sv_reg here
+    for lyr in xrange(2, nlayer_max + 1):
+        state_var = 'minerl_{}_1'.format(lyr)
+        shutil.copyfile(
+            prev_sv_reg['{}_path'.format(state_var)],
+            sv_reg['{}_path'.format(state_var)])
     for compartment in ['strlig']:
         for lyr in [1, 2]:
             state_var = '{}_{}'.format(compartment, lyr)
@@ -8703,7 +8716,8 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
 
 def nutrient_uptake(
         iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
-        plantNfix_path, availm_path, eavail_path, sv_reg, pft_i):
+        plantNfix_path, availm_path, eavail_path, sv_reg, pft_i,
+        pslsrb_path, sorpmx_path):
     """Do uptake of N or P from soil and crop storage to aglive and bglive.
 
     Perform the flows of iel from crop storage pool, soil mineral pools, and
@@ -8731,6 +8745,10 @@ def nutrient_uptake(
         sv_reg (dict): map of key, path pairs giving paths to state variables
             for the current month
         pft_i (int): index identifying the current pft
+        pslsrb_path (string): path to raster giving pslsrb paramter, slope term
+            controlling fraction of mineral P that is labile
+        sorpmx_path (string): path to raster giving sorpmx paramter, maximum P
+            sorption potential
 
     Modifies:
         The rasters indicated by
@@ -8740,8 +8758,8 @@ def nutrient_uptake(
                 for the given iel and current pft
             sv_reg['crpstg_<iel>_<pft>_path'], iel in crop storage, for the
                 given iel and current pft
-            sv_reg['minerl_<layer>_<iel>'], iel in the soil mineral pool, for
-                each soil layer accessible by the current pft ([1:nlay])
+            sv_reg['minerl_<layer>_<iel>_path'], iel in the soil mineral pool,
+                for each soil layer accessible by the current pft ([1:nlay])
 
     Returns:
         None
@@ -8754,6 +8772,7 @@ def nutrient_uptake(
             'uptake_weighted']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
 
+    # calculate uptake from crop storage
     pft_nodata = pygeoprocessing.get_raster_info(
         percent_cover_path)['nodata'][0]
     pygeoprocessing.raster_calculator(
@@ -8763,6 +8782,7 @@ def nutrient_uptake(
         [(iel, 'raw')],
         calc_uptake_source('uptake_storage'), temp_val_dict['uptake_storage'],
         gdal.GDT_Float32, _TARGET_NODATA)
+    # calculate uptake from soil
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             eavail_path, eup_above_iel_path, eup_below_iel_path,
@@ -8771,6 +8791,7 @@ def nutrient_uptake(
         calc_uptake_source('uptake_soil'), temp_val_dict['uptake_soil'],
         gdal.GDT_Float32, _TARGET_NODATA)
     if iel == 1:
+        # calculate uptake from symbiotically fixed N
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 eavail_path, eup_above_iel_path, eup_below_iel_path,
@@ -8780,7 +8801,7 @@ def nutrient_uptake(
             calc_uptake_source('uptake_Nfix'), temp_val_dict['uptake_Nfix'],
             gdal.GDT_Float32, _TARGET_NODATA)
 
-    # uptake from crop storage into aboveground and belowground live
+    # do uptake from crop storage into aboveground and belowground live
     shutil.copyfile(
         sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
         temp_val_dict['statv_temp'])
@@ -8821,9 +8842,8 @@ def nutrient_uptake(
         if iel == 2:
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
-                    sv_reg['minerl_1_2_path'],
-                    param_val_dict['sorpmx'],
-                    param_val_dict['pslsrb']]],
+                    sv_reg['minerl_1_2_path'], sorpmx_path,
+                    pslsrb_path]],
                 fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32,
                 _TARGET_NODATA)
         else:
@@ -9132,3 +9152,272 @@ def calc_nutrient_limitation(return_type):
         elif return_type == 'plantNfix':
             return plantNfix
     return _nutrlm
+
+
+def _new_growth(
+        pft_id_set, aligned_inputs, site_param_table, veg_trait_table, sv_reg,
+        month_reg, current_month):
+    """Growth of new aboveground and belowground biomass.
+
+    Add new growth to aboveground and belowground live biomass. C is taken up
+    from the atmosphere, while N and P are taken up from the crop storage pool,
+    soil mineral N and P content, and symbiotic N fixation. N and P taken up
+    from the soil are weighted by the percent cover of the plant functional
+    type.
+
+    Parameters:
+        pft_id_set (set): set of integers identifying plant functional types
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including percent cover of each plant
+            functional type
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+
+    Modifies:
+        The rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+            sv_reg['bglivc_<pft>_path'] for each pft
+            sv_reg['bglive_1_<pft>_path'] for each pft
+            sv_reg['bglive_2_<pft>_path'] for each pft
+            sv_reg['crpstg_1_<pft>_path'] for each pft
+            sv_reg['crpstg_2_<pft>_path'] for each pft
+            sv_reg['minerl_{layer}_1_path'] for each soil layer
+            sv_reg['minerl_{layer}_2_path'] for each soil layer
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['statv_temp']:
+        target_path = os.path.join(
+            temp_dir, '{}.tif'.format(val))
+        temp_val_dict['{}'.format(val)] = target_path
+    for val in [
+            'availm_1', 'availm_2', 'eavail_1', 'eavail_2', 'potenc',
+            'potenc_lim_minerl', 'cprodl', 'eup_above_1', 'eup_below_1',
+            'eup_above_2', 'eup_below_2', 'plantNfix']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            temp_val_dict['{}_{}'.format(val, pft_i)] = target_path
+
+    param_val_dict = {}
+    # site-level parameters
+    for val in [
+            'favail_1', 'favail_4', 'favail_5', 'favail_6', 'pslsrb',
+            'sorpmx']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    param_val_dict['favail_2'] = os.path.join(temp_dir, 'favail_2.tif')
+    _calc_favail_P(sv_reg, param_val_dict)
+
+    # pft-level parameters
+    for pft_i in pft_id_set:
+        for val in ['snfxmx_1']:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                sv_reg['aglivc_{}_path'.format(pft_i)], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+
+    for pft_i in pft_id_set:
+        if str(current_month) != veg_trait_table[pft_i]['senescence_month']:
+            # calculate available nutrients for all pfts prior to
+            # performing uptake
+            for iel in [1, 2]:
+                _calc_avail_mineral_nutrient(
+                    veg_trait_table[pft_i], sv_reg, iel,
+                    temp_val_dict['availm_{}_{}'.format(iel, pft_i)])
+    for pft_i in pft_id_set:
+        # growth only occurs in months when senescence not scheduled
+        if str(current_month) != veg_trait_table[pft_i]['senescence_month']:
+            # calculate available nutrients
+            for iel in [1, 2]:
+                # eavail_iel, available nutrient
+                _calc_available_nutrient(
+                    pft_i, iel, veg_trait_table[pft_i], sv_reg,
+                    site_param_table, aligned_inputs['site_index'],
+                    temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
+                    param_val_dict['favail_{}'.format(iel)],
+                    month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                    temp_val_dict['eavail_{}_{}'.format(iel, pft_i)])
+
+            # convert from grams of biomass to grams of carbon
+            convert_biomass_to_C(
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                temp_val_dict['potenc_{}'.format(pft_i)])
+
+            # restrict potential growth by availability of N and P
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_{}'.format(pft_i)],
+                    temp_val_dict['availm_1_{}'.format(pft_i)],
+                    temp_val_dict['availm_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)]]],
+                restrict_potential_growth,
+                temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('cprodl'),
+                temp_val_dict['cprodl_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_above_1'),
+                temp_val_dict['eup_above_1_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_below_1'),
+                temp_val_dict['eup_below_1_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_above_2'),
+                temp_val_dict['eup_above_2_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_below_2'),
+                temp_val_dict['eup_below_2_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('plantNfix'),
+                temp_val_dict['plantNfix_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+
+            # uptake of C into new aboveground production
+            shutil.copyfile(
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                temp_val_dict['statv_temp'])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['statv_temp'],
+                    temp_val_dict['cprodl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)]]],
+                c_uptake_aboveground, sv_reg['aglivc_{}_path'.format(pft_i)],
+                gdal.GDT_Float32, _SV_NODATA)
+
+            # uptake of C into new belowground production
+            shutil.copyfile(
+                sv_reg['bglivc_{}_path'.format(pft_i)],
+                temp_val_dict['statv_temp'])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['statv_temp'],
+                    temp_val_dict['cprodl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)]]],
+                c_uptake_belowground, sv_reg['bglivc_{}_path'.format(pft_i)],
+                gdal.GDT_Float32, _SV_NODATA)
+
+            # uptake of N and P into new above- and belowground production
+            for iel in [1, 2]:
+                nutrient_uptake(
+                    iel, int(veg_trait_table[pft_i]['nlaypg']),
+                    aligned_inputs['pft_{}'.format(pft_i)],
+                    temp_val_dict['eup_above_{}_{}'.format(iel, pft_i)],
+                    temp_val_dict['eup_below_{}_{}'.format(iel, pft_i)],
+                    temp_val_dict['plantNfix_{}'.format(pft_i)],
+                    temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
+                    temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
+                    sv_reg, pft_i, param_val_dict['pslsrb'],
+                    param_val_dict['sorpmx'])
