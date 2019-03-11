@@ -1,5 +1,4 @@
 """InVEST SDR model tests."""
-
 import unittest
 import tempfile
 import shutil
@@ -8,21 +7,19 @@ import os
 import numpy
 from osgeo import ogr
 from osgeo import osr
-from natcap.invest.pygeoprocessing_0_3_3.testing import scm
 
 SAMPLE_DATA = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'invest-data',
-    'Base_Data', 'Freshwater')
+    os.path.dirname(__file__), '..', 'data', 'invest-test-data', 'sdr',
+    'input')
 REGRESSION_DATA = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'invest-test-data',
-    'sdr')
+    os.path.dirname(__file__), '..', 'data', 'invest-test-data', 'sdr')
 
 
 class SDRTests(unittest.TestCase):
     """Regression tests for InVEST SDR model."""
 
     def setUp(self):
-        """Initalize SDRRegression tests."""
+        """Initialize SDRRegression tests."""
         self.workspace_dir = tempfile.mkdtemp()
 
     def tearDown(self):
@@ -35,13 +32,13 @@ class SDRTests(unittest.TestCase):
         args = {
             'biophysical_table_path': os.path.join(
                 SAMPLE_DATA, 'biophysical_table.csv'),
-            'dem_path': os.path.join(SAMPLE_DATA, 'dem'),
+            'dem_path': os.path.join(SAMPLE_DATA, 'dem.tif'),
             'erodibility_path': os.path.join(
                 SAMPLE_DATA, 'erodibility_SI_clip.tif'),
-            'erosivity_path': os.path.join(SAMPLE_DATA, 'erosivity'),
+            'erosivity_path': os.path.join(SAMPLE_DATA, 'erosivity.tif'),
             'ic_0_param': '0.5',
             'k_param': '2',
-            'lulc_path': os.path.join(SAMPLE_DATA, 'landuse_90'),
+            'lulc_path': os.path.join(SAMPLE_DATA, 'landuse_90.tif'),
             'sdr_max': '0.8',
             'threshold_flow_accumulation': '1000',
             'watersheds_path': os.path.join(SAMPLE_DATA, 'watersheds.shp'),
@@ -49,32 +46,26 @@ class SDRTests(unittest.TestCase):
         }
         return args
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_sdr_validation(self):
         """SDR test regular validation."""
         from natcap.invest import sdr
 
         # use predefined directory so test can clean up files during teardown
-        args = SDRTests.generate_base_args(
-            self.workspace_dir)
+        args = SDRTests.generate_base_args(self.workspace_dir)
         args['drainage_path'] = os.path.join(
             REGRESSION_DATA, 'sample_drainage.tif')
         validate_result = sdr.validate(args, limit_to=None)
         self.assertFalse(
-            validate_result,
+            validate_result,  # List should be empty if validation passes
             "expected no failed validations instead got %s" % str(
                 validate_result))
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_sdr_validation_wrong_types(self):
         """SDR test validation for wrong GIS types."""
         from natcap.invest import sdr
 
         # use predefined directory so test can clean up files during teardown
-        args = SDRTests.generate_base_args(
-            self.workspace_dir)
+        args = SDRTests.generate_base_args(self.workspace_dir)
         # swap watershed and dem for different types
         args['dem_path'], args['watersheds_path'] = (
             args['watersheds_path'], args['dem_path'])
@@ -84,10 +75,8 @@ class SDRTests(unittest.TestCase):
             "expected failed validations instead didn't get any")
         self.assertTrue(all(
             [x[1] in ['not a raster', 'not a vector']
-            for x in validate_result]))
+             for x in validate_result]))
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_sdr_validation_missing_key(self):
         """SDR test validation that's missing keys."""
         from natcap.invest import sdr
@@ -99,8 +88,6 @@ class SDRTests(unittest.TestCase):
         self.assertTrue(
             'The following keys were expected' in str(context.exception))
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_sdr_validation_key_no_value(self):
         """SDR test validation that's missing a value on a key."""
         from natcap.invest import sdr
@@ -114,8 +101,6 @@ class SDRTests(unittest.TestCase):
             validate_result,
             'expected a validation error but didn\'t get one')
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_sdr_validation_watershed_missing_ws_id(self):
         """SDR test validation notices missing `ws_id` field on watershed."""
         from natcap.invest import sdr
@@ -150,9 +135,6 @@ class SDRTests(unittest.TestCase):
             'expected a `ws_id` validation error, but got %s' % (
                 validate_result))
 
-
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_sdr_validation_watershed_missing_ws_id_value(self):
         """SDR test validation notices bad value in `ws_id` watershed."""
         from natcap.invest import sdr
@@ -188,9 +170,6 @@ class SDRTests(unittest.TestCase):
             'expected an invalid `ws_id` value but got %s' % (
                 validate_result))
 
-
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_base_regression(self):
         """SDR base regression test on sample data.
 
@@ -201,8 +180,7 @@ class SDRTests(unittest.TestCase):
         from natcap.invest import sdr
 
         # use predefined directory so test can clean up files during teardown
-        args = SDRTests.generate_base_args(
-            self.workspace_dir)
+        args = SDRTests.generate_base_args(self.workspace_dir)
         # make args explicit that this is a base run of SWY
         sdr.execute(args)
 
@@ -212,8 +190,6 @@ class SDRTests(unittest.TestCase):
             os.path.join(args['workspace_dir'], 'watershed_results_sdr.shp'),
             os.path.join(REGRESSION_DATA, 'agg_results_base.csv'))
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_output_exists_regression(self):
         """SDR test case where an output shapefile already exists.
 
@@ -224,8 +200,7 @@ class SDRTests(unittest.TestCase):
         from natcap.invest import sdr
 
         # use predefined directory so test can clean up files during teardown
-        args = SDRTests.generate_base_args(
-            self.workspace_dir)
+        args = SDRTests.generate_base_args(self.workspace_dir)
 
         # copy AOI on top of where the output shapefile should reside
         shutil.copy(
@@ -240,8 +215,6 @@ class SDRTests(unittest.TestCase):
             os.path.join(args['workspace_dir'], 'watershed_results_sdr.shp'),
             os.path.join(REGRESSION_DATA, 'agg_results_base.csv'))
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_drainage_regression(self):
         """SDR drainage layer regression test on sample data.
 
@@ -252,8 +225,7 @@ class SDRTests(unittest.TestCase):
         from natcap.invest import sdr
 
         # use predefined directory so test can clean up files during teardown
-        args = SDRTests.generate_base_args(
-            self.workspace_dir)
+        args = SDRTests.generate_base_args(self.workspace_dir)
         args['drainage_path'] = os.path.join(
             REGRESSION_DATA, 'sample_drainage.tif')
         sdr.execute(args)
@@ -264,8 +236,6 @@ class SDRTests(unittest.TestCase):
             os.path.join(args['workspace_dir'], 'watershed_results_sdr.shp'),
             os.path.join(REGRESSION_DATA, 'agg_results_drainage.csv'))
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_base_usle_c_too_large(self):
         """SDR test exepected exception for USLE_C > 1.0."""
         from natcap.invest import sdr
@@ -279,8 +249,6 @@ class SDRTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sdr.execute(args)
 
-    @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_base_usle_p_nan(self):
         """SDR test expected exception for USLE_P not a number."""
         from natcap.invest import sdr

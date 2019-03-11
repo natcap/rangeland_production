@@ -15,12 +15,14 @@ import contextlib
 import functools
 import datetime
 import codecs
+import multiprocessing
+import threading
 
 from qtpy import QtWidgets
 from qtpy import QtCore
 from qtpy import QtGui
-import natcap.invest
 import qtawesome
+import natcap.invest
 
 from . import inputs
 from . import usage
@@ -56,6 +58,11 @@ _DATASTACK_SAVE_OPTS = {
         'savefile': _DATASTACK_BASE_FILENAME % 'tar.gz',
     }
 }
+# To create a QSettings object, call this with the model label as the only
+# argument.  Example:  settings = SETTINGS_TEMPLATE('My Model')
+SETTINGS_TEMPLATE = functools.partial(
+    QtCore.QSettings, QtCore.QSettings.IniFormat, QtCore.QSettings.UserScope,
+    'Natural Capital Project')
 
 
 @contextlib.contextmanager
@@ -76,14 +83,18 @@ def wait_on_signal(signal, timeout=250):
 
 
 def is_probably_datastack(filepath):
-    """Check to see if the file provided is probably a datastack.
+    """Check to see if the path provided is probably a datastack.
 
     Parameters:
-        filepath (string): A path to a file on disk.
+        filepath (string): A path to a location on disk.
 
     Returns:
-        True if the filepath is likely to be a datastack.  False otherwise.
+        True if the path is likely to be a datastack.  False otherwise.
     """
+    # If the filepath provided is a directory, it's not a datastack.
+    if os.path.isdir(filepath):
+        return False
+
     # Does the extension indicate that it's probably a datastack?
     if filepath.endswith((datastack.DATASTACK_EXTENSION,
                           datastack.PARAMETER_SET_EXTENSION)):
@@ -410,6 +421,50 @@ class SettingsDialog(OptionsDialog):
             'logging/logfile', 'NOTSET', unicode))
         self._global_opts_container.add_input(self.logfile_logging_level)
 
+        self.taskgraph_logging_level = inputs.Dropdown(
+            label='Taskgraph logging threshold',
+            helptext=('The minimum logging level for taskgraph messages to be '
+                      'displayed in either the logfile or the UI.  Log '
+                      'messages with a level lower than this will not be '
+                      'written to the logfile. Default: ERROR'),
+            options=logging_options)
+        self.taskgraph_logging_level.set_value(inputs.INVEST_SETTINGS.value(
+            'logging/taskgraph', 'ERROR', unicode))
+        self._global_opts_container.add_input(self.taskgraph_logging_level)
+
+        # Taskgraph n_workers settings.
+        # Using a dropdown to avoid the need to validate.
+        n_workers_values = {
+            'Synchronous (-1)': '-1',
+            'Threaded task management (0)': '0'}
+        n_workers_values.update(dict(('%s CPUs' % n, str(n)) for n in range(
+            1, multiprocessing.cpu_count()*2)))
+        self.taskgraph_n_workers = inputs.Dropdown(
+            label='Taskgraph n_workers parameter',
+            helptext=('For models that are implemented with taskgraph, this '
+                      'is provided to the graph at creation.  The default '
+                      'value of -1 is best for most users, as this will '
+                      'eliminate the risk of deadlocks and improve the '
+                      'coherency of the logfile. Allowed values are<ul> '
+                      '<li>-1: Synchronous task execution (most reliable) </li>'
+                      '<li>0: Tasks execute in the main process, but use '
+                      'threaded task management. </li>'
+                      '<li><em>n</em>: Where <em>n</em> is a positive integer, '
+                      'taskgraph will execute tasks in <em>n</em> processes. '
+                      'This can yield a nice speedup, but incurs a risk of '
+                      'deadlock.</li>'
+                      '</ul>Regardless of this value, all models that are '
+                      'taskgraph-enabled take advantage of '
+                      'avoided recomputation. To see if a model uses '
+                      "taskgraph, take a look at the User's Guide chapter "
+                      'for the model, or inspect the source code.'),
+            options=[pair[0] for pair in sorted(
+                n_workers_values.items(), key=lambda x: int(x[1]))],
+            return_value_map=n_workers_values)
+        self.taskgraph_n_workers.set_value(inputs.INVEST_SETTINGS.value(
+            'taskgraph/n_workers', '-1', unicode))
+        self._global_opts_container.add_input(self.taskgraph_n_workers)
+
     def postprocess(self, exitcode):
         """Save the settings from the dialog.
 
@@ -428,6 +483,12 @@ class SettingsDialog(OptionsDialog):
             inputs.INVEST_SETTINGS.setValue(
                 'logging/logfile',
                 self.logfile_logging_level.value())
+            inputs.INVEST_SETTINGS.setValue(
+                'logging/taskgraph',
+                self.taskgraph_logging_level.value())
+            inputs.INVEST_SETTINGS.setValue(
+                'taskgraph/n_workers',
+                self.taskgraph_n_workers.value())
 
 
 class AboutDialog(QtWidgets.QDialog):
@@ -478,8 +539,6 @@ class AboutDialog(QtWidgets.QDialog):
                 ('PyInstaller', 'GPL', 'http://pyinstaller.org'),
                 ('GDAL', 'MIT and others', 'http://gdal.org'),
                 ('matplotlib', 'BSD', 'http://matplotlib.org'),
-                ('natcap.versioner', 'BSD',
-                 'http://bitbucket.org/jdouglass/versioner'),
                 ('numpy', 'BSD', 'http://numpy.org'),
                 ('pyamg', 'BSD', 'http://github.com/pyamg/pyamg'),
                 ('pygeoprocessing', 'BSD',
@@ -1154,7 +1213,6 @@ class InVESTModel(QtWidgets.QMainWindow):
 
         self.form = inputs.Form(parent=self)
         self._central_widget.layout().addWidget(self.form)
-        self.run_dialog = inputs.FileSystemRunDialog()
 
         # start with workspace and suffix inputs
         self.workspace = inputs.Folder(args_key='workspace_dir',
@@ -1175,17 +1233,14 @@ class InVESTModel(QtWidgets.QMainWindow):
             label='Results suffix (optional)',
             validator=self.validator)
         self.suffix.textfield.setMaximumWidth(150)
+
         self.add_input(self.workspace)
         self.add_input(self.suffix)
-
         self.form.submitted.connect(self.execute_model)
 
         # Settings files
-        self.settings = QtCore.QSettings(
-            QtCore.QSettings.IniFormat,
-            QtCore.QSettings.UserScope,
-            'Natural Capital Project',
-            self.label)
+        self.settings = SETTINGS_TEMPLATE(self.label)
+        LOGGER.info('Model settings stored in %s', self.settings.fileName())
 
         # Menu items.
         self.file_menu = QtWidgets.QMenu('&File', parent=self)
@@ -1249,7 +1304,8 @@ class InVESTModel(QtWidgets.QMainWindow):
         self.open_menu.clear()
         self.open_file_action = self.open_menu.addAction(
             qtawesome.icon('fa.arrow-circle-o-up'),
-            'L&oad datastack, parameter set or logfile...', self.load_datastack,
+            'L&oad datastack, parameter set or logfile...',
+            self.load_datastack,
             QtGui.QKeySequence(QtGui.QKeySequence.Open))
         self.open_menu.addSeparator()
 
@@ -1261,7 +1317,7 @@ class InVESTModel(QtWidgets.QMainWindow):
 
             time_obj = datetime.datetime.strptime(timestamp,
                                                   '%Y-%m-%dT%H:%M:%S.%f')
-            if time_obj .date() == datetime.date.today():
+            if time_obj.date() == datetime.date.today():
                 date_label = 'Today at %s' % time_obj.strftime('%H:%M')
             else:
                 date_label = time_obj.strftime('%Y-%m-%d at %H:%m')
@@ -1317,7 +1373,7 @@ class InVESTModel(QtWidgets.QMainWindow):
         # store the new value.
         recently_opened_datastacks = json.loads(
             self.settings.value('recent_datastacks', '{}'))
-        timestamp = datetime.datetime.now().isoformat()
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
 
         recently_opened_datastacks[datastack_path] = timestamp
 
@@ -1488,13 +1544,31 @@ class InVESTModel(QtWidgets.QMainWindow):
             if button_pressed != QtWidgets.QMessageBox.Yes:
                 return
 
+        # This is the thread that the UI is executing within.
+        ui_thread_name = threading.current_thread().name
+
         def _logged_target():
+            if 'n_workers' in args:
+                raise RuntimeError(
+                    'n_workers defined in args. It should not be defined.')
+
+            args['n_workers'] = inputs.INVEST_SETTINGS.value(
+                'taskgraph/n_workers', -1)
+
             name = getattr(self, 'label', self.target.__module__)
             logfile_log_level = getattr(logging, inputs.INVEST_SETTINGS.value(
                 'logging/logfile', 'NOTSET'))
+
+            taskgraph_log_level = getattr(
+                logging, inputs.INVEST_SETTINGS.value('logging/taskgraph', 'ERROR'))
+            logging.getLogger('taskgraph').setLevel(taskgraph_log_level)
+
+            threads_to_exclude = [usage._USAGE_LOGGING_THREAD_NAME]
+
             with utils.prepare_workspace(args['workspace_dir'],
                                          name,
-                                         logging_level=logfile_log_level):
+                                         logging_level=logfile_log_level,
+                                         exclude_threads=threads_to_exclude):
                 with usage.log_run(self.target.__module__, args):
                     LOGGER.log(datastack.ARGS_LOG_LEVEL,
                                'Starting model with parameters: \n%s',
