@@ -6105,10 +6105,6 @@ def remove_leached_iel(
         orgflow[valid_mask] = cleach[valid_mask] / rceof1_2[valid_mask]
         return orgflow
 
-        rceof1_2 = som1c_2 / som1e_2_2 * 35
-        orgflow_2 = cleach / rceof1_2
-        return orgflow
-
     with tempfile.NamedTemporaryFile(
             prefix='operand_temp', delete=False,
             dir=PROCESSING_DIR) as operand_temp_file:
