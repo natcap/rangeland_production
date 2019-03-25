@@ -13,7 +13,7 @@ from osgeo import gdal
 
 import pygeoprocessing
 
-SAMPLE_DATA = "C:/Users/ginge/Documents/NatCap/sample_inputs"
+SAMPLE_DATA = "C:/Users/ginge/Dropbox/sample_inputs"
 REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 PROCESSING_DIR = None
 
@@ -131,11 +131,9 @@ def insert_nodata_values_into_raster(target_raster, nodata_value):
     os.remove(prior_copy)
 
 
-def create_constant_raster(target_path, fill_value):
+def create_constant_raster(target_path, fill_value, n_cols=1, n_rows=1):
     """Create a single-pixel raster with value `fill_value`."""
     geotransform = [0, 1, 0, 44.5, 0, 1]
-    n_cols = 1
-    n_rows = 1
     n_bands = 1
     datatype = gdal.GDT_Float32
     projection = osr.SpatialReference()
@@ -1205,7 +1203,7 @@ def decomposition_point(
             tcflow = (
                 state_var['som1c_2'] * defac * params['dec3_2'] *
                 pp_reg['eftext'] * anerb * 0.020833 * pheff_metab)
-            co2los = tcflow * params['p1co2_2']
+            co2los = tcflow * pp_reg['p1co2_2']
             d_som1c_2 -= tcflow
             # respiration, line 179 Somdec.f
             mnrflo_1 = co2los * state_var['som1e_2_1'] / state_var['som1c_2']
@@ -1712,26 +1710,280 @@ def agdrat_point(anps, tca, pcemic_1_iel, pcemic_2_iel, pcemic_3_iel):
 
 
 def fsfunc_point(minerl_1_2, pslsrb, sorpmx):
-        """Calculate the fraction of mineral P that is in solution.
+    """Calculate the fraction of mineral P that is in solution.
 
-        The fraction of P in solution is influenced by two soil properties:
-        the maximum sorption potential of the soil and sorption affinity.
+    The fraction of P in solution is influenced by two soil properties:
+    the maximum sorption potential of the soil and sorption affinity.
 
-        Parameters:
-            minerl_1_2 (float): state variable, surface mineral P
-            pslsrb (float): parameter, P sorption affinity
-            sorpmx (float): parameter, maximum P sorption of the soil
+    Parameters:
+        minerl_1_2 (float): state variable, surface mineral P
+        pslsrb (float): parameter, P sorption affinity
+        sorpmx (float): parameter, maximum P sorption of the soil
 
-        Returns:
-            fsol, fraction of P in solution
-        """
-        if minerl_1_2 == 0:
-            return 0
-        c = sorpmx * (2. - pslsrb) / 2.
-        b = sorpmx - minerl_1_2 + c
-        labile = (-b + numpy.sqrt(b * b + 4 * c * minerl_1_2)) / 2.
-        fsol = labile / minerl_1_2
-        return fsol
+    Returns:
+        fsol, fraction of P in solution
+    """
+    if minerl_1_2 == 0:
+        return 0
+    c = sorpmx * (2. - pslsrb) / 2.
+    b = sorpmx - minerl_1_2 + c
+    labile = (-b + numpy.sqrt(b * b + 4 * c * minerl_1_2)) / 2.
+    fsol = labile / minerl_1_2
+    return fsol
+
+
+def calc_nutrient_limitation_point(
+        potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+        cerat_max_above_1, cerat_max_below_1, cerat_max_above_2,
+        cerat_max_below_2, cerat_min_above_1, cerat_min_below_1,
+        cerat_min_above_2, cerat_min_below_2):
+    """Calculate C, N and P in new production given nutrient availability.
+
+    Point-based implementation of `calc_nutrient_limitation`, Nutrlm.f.
+
+    Parameters:
+        potenc (float): potential production of C calculated by root:shoot
+            ratio submodel. remember this is tgprod_pot_prod / 2.5
+        rtsh (float): root/shoot ratio
+        eavail_1: available N calculated by _calc_available_nutrient()
+            (includes predicted N fixation)
+        eavail_2: available P calculated by _calc_available_nutrient()
+        snfxmx_1 (float): parameter, maximum symbiotic N fixation rate
+        cerat_max_above_1 (cercrp from Growth.f): max C/N ratio of new
+            aboveground growth, calculated once per model timestep
+        cerat_max_below_1: max C/N ratio of new belowground growth,
+            calculated once per model timestep
+        cerat_max_above_2 (cercrp from Growth.f): max C/P ratio of new
+            aboveground growth, calculated once per model timestep
+        cerat_max_below_2: max C/P ratio of new belowground growth,
+            calculated once per model timestep
+        cerat_min_above_1 (cercrp from Growth.f): min C/N ratio of new
+            aboveground growth, calculated once per model timestep
+        cerat_min_below_1: min C/N ratio of new belowground growth,
+            calculated once per model timestep
+        cerat_min_above_2 (cercrp from Growth.f): min C/P ratio of new
+            aboveground growth, calculated once per model timestep
+        cerat_min_below_2: min C/P ratio of new belowground growth,
+            calculated once per model timestep
+
+    Returns:
+        a dictionary of values indexed by the following keys:
+            'c_production', total C production limited by nutrient
+                availability
+            'eup_above_1', N in new aboveground production
+            'eup_below_1', N in new belowground production
+            'eup_above_2', P in new aboveground production
+            'eup_below_2', P in new belowground production
+            'plantNfix', N fixation that actually occurs
+    """
+    cfrac_below = rtsh / (rtsh + 1.)
+    cfrac_above = 1. - cfrac_below
+
+    # min/max eci is indexed to aboveground only or belowground only
+    maxeci_above_1 = 1. / cerat_min_above_1
+    mineci_above_1 = 1. / cerat_max_above_1
+    maxeci_below_1 = 1. / cerat_min_below_1
+    mineci_below_1 = 1. / cerat_max_below_1
+
+    maxeci_above_2 = 1. / cerat_min_above_2
+    mineci_above_2 = 1. / cerat_max_above_2
+    maxeci_below_2 = 1. / cerat_min_below_2
+    mineci_below_2 = 1. / cerat_max_below_2
+
+    # maxec is average e/c ratio across aboveground and belowground
+    maxec_1 = cfrac_below * maxeci_below_1 + cfrac_above * maxeci_above_1
+    maxec_2 = cfrac_below * maxeci_below_2 + cfrac_above * maxeci_above_2
+
+    # calculate cpbe_1, N/C ratio according to demand and supply
+    demand_1 = potenc * maxec_1
+    if eavail_1 > demand_1:
+        # if supply is sufficient, E/C ratio of new production is the max
+        # demanded
+        ecfor_above_1 = maxeci_above_1  # line 75
+        ecfor_below_1 = maxeci_below_1
+    else:
+        # supply is insufficient; E/C ratio of new production is
+        # proportional to the ratio of supply to demand
+        ecfor_above_1 = (
+            mineci_above_1 +
+            (maxeci_above_1 - mineci_above_1) *
+            eavail_1 / demand_1)
+        ecfor_below_1 = (
+            mineci_below_1 +
+            (maxeci_below_1 - mineci_below_1) *
+            eavail_1 / demand_1)
+    cpbe_1 = cfrac_below * ecfor_below_1 + cfrac_above * ecfor_above_1
+    c_constrained_1 = eavail_1 / cpbe_1  # C constrained by N
+
+    # calculate cpbe_2, P/C ratio according to demand and supply
+    demand_2 = potenc * maxec_2
+    if eavail_2 > demand_2:
+        # if supply is sufficient, E/C ratio of new production is the max
+        # demanded
+        ecfor_above_2 = maxeci_above_2  # line 75
+        ecfor_below_2 = maxeci_below_2
+    else:
+        # supply is insufficient; E/C ratio of new production is
+        # proportional to the ratio of supply to demand
+        ecfor_above_2 = (
+            mineci_above_2 +
+            (maxeci_above_2 - mineci_above_2) *
+            eavail_2 / demand_2)
+        ecfor_below_2 = (
+            mineci_below_2 +
+            (maxeci_below_2 - mineci_below_2) *
+            eavail_2 / demand_2)
+    cpbe_2 = cfrac_below * ecfor_below_2 + cfrac_above * ecfor_above_2
+    c_constrained_2 = eavail_2 / cpbe_2  # C constrained by P
+
+    # C production limited by nutrient availability
+    cprodl = min(potenc, c_constrained_1, c_constrained_2)
+    # calculate N and P in new production; this will be taken up from
+    # soil mineral content and crop storage
+    # lines 214-223 Nutrlm.f
+    eup_above_1 = cprodl * cfrac_above * ecfor_above_1
+    eup_below_1 = cprodl * cfrac_below * ecfor_below_1
+    eprodl_1 = eup_above_1 + eup_below_1
+
+    eup_above_2 = cprodl * cfrac_above * ecfor_above_2
+    eup_below_2 = cprodl * cfrac_below * ecfor_below_2
+
+    # "prevent precision error" line 235 Nutrlm.f
+    maxNfix = snfxmx_1 * cprodl
+    if (eprodl_1 - (eavail_1 + maxNfix) > 0.05):
+        eprodl_1 = eavail_1 + maxNfix
+    plantNfix = max(eprodl_1 - eavail_1, 0.)
+
+    result_dict = {
+        'c_production': cprodl,
+        'eup_above_1': eup_above_1,
+        'eup_below_1': eup_below_1,
+        'eup_above_2': eup_above_2,
+        'eup_below_2': eup_below_2,
+        'plantNfix': plantNfix,
+    }
+    return result_dict
+
+
+def nutrient_uptake_point(
+        iel, nlay, availm, eavail_iel, pft_percent_cover, eup_above_iel,
+        eup_below_iel, storage_iel, plantNfix, pslsrb, sorpmx, aglive_iel,
+        bglive_iel, minerl_dict):
+    """Calculate flow of nutrients during plant growth.
+
+    Given the N or P predicted to flow into new above- and belowground
+    production, calculate how much of that nutrient will be taken from the crop
+    storage pool and how much will be taken from soil.  For N, some of the
+    necessary uptake also comes from N fixation performed by the plant.
+    N and P taken up from the soil by one plant functional type are weighted by
+    the percent cover of that functional type.
+    Lines 124-156, Restrp.f, lines 186-226 Growth.f
+
+    Parameters:
+        iel (int): index identifying N or P
+        nlay (int): number of soil layers accessible to this plant functional
+            type
+        availm (float): total available mineral in soil layers accessible to
+            this plant functional type
+        eavail_iel (float): available iel calculated by
+            _calc_available_nutrient()
+        pft_percent_cover (float): percent cover of this plant functional type
+        eup_above_iel (float): iel to be allocated to new aboveground
+            production
+        eup_below_iel (float_: iel to be allocated to new belowground
+            production
+        storage_iel: state variable, crpstg_iel
+        plantNfix (float): symbiotic N fixed by this plant functional type
+            (calculated in `calc_nutrient_limitation`)
+        pslsrb (float): parameter, P sorption affinity
+        sorpmx (float): parameter, maximum P sorption of the soil
+        aglive_iel: state variable, iel in aboveground live biomass
+        bglive_iel: state variable, iel in belowground live biomass
+        minerl_dict (dict): dictionary of of state variables:
+            minerl_1_iel: state variable, iel in soil layer 1
+            minerl_2_iel: state variable, iel in soil layer 2
+            minerl_3_iel: state variable, iel in soil layer 3
+            minerl_4_iel: state variable, iel in soil layer 4
+            minerl_5_iel: state variable, iel in soil layer 5
+            minerl_6_iel: state variable, iel in soil layer 6
+            minerl_7_iel: state variable, iel in soil layer 7
+
+    Returns:
+        dictionary of values indexed by the following keys:
+            aglive_iel: modified iel in aboveground live biomass
+            bglive_iel: modified iel in belowground live biomass
+            storage_iel: modified iel in crop storage
+            minerl_1_iel: modified iel in soil layer 1
+            minerl_2_iel: modified iel in soil layer 2
+            minerl_3_iel: modified iel in soil layer 3
+            minerl_4_iel: modified iel in soil layer 4
+            minerl_5_iel: modified iel in soil layer 5
+            minerl_6_iel: modified iel in soil layer 6
+            minerl_7_iel: modified iel in soil layer 7
+    """
+    eprodl_iel = eup_above_iel + eup_below_iel
+    if eprodl_iel < storage_iel:
+        uptake_storage = eprodl_iel
+        uptake_soil = 0
+    else:
+        uptake_storage = storage_iel
+        if iel == 1:
+            uptake_soil = min(
+                (eprodl_iel - storage_iel - plantNfix),
+                (eavail_iel - storage_iel - plantNfix))
+            uptake_Nfix = plantNfix
+        else:
+            uptake_soil = eprodl_iel - storage_iel
+
+    # uptake from crop storage into aboveground and belowground live
+    if storage_iel > 0:
+        storage_iel = storage_iel - uptake_storage
+        uptake_storage_above = uptake_storage * (eup_above_iel / eprodl_iel)
+        uptake_storage_below = uptake_storage * (eup_below_iel / eprodl_iel)
+        aglive_iel = aglive_iel + uptake_storage_above
+        bglive_iel = bglive_iel + uptake_storage_below
+
+    # uptake from each soil layer in proportion to its contribution to availm
+    minerl_dict_copy = minerl_dict.copy()
+    for lyr in xrange(1, nlay + 1):
+        if minerl_dict['minerl_{}_iel'.format(lyr)] > 0:
+            if iel == 2:
+                fsol = fsfunc_point(
+                    minerl_dict['minerl_1_iel'], pslsrb, sorpmx)
+            else:
+                fsol = 1.
+            minerl_uptake_lyr = (
+                uptake_soil * minerl_dict['minerl_{}_iel'.format(lyr)] * fsol /
+                availm)
+            minerl_dict_copy['minerl_{}_iel'.format(lyr)] = (
+                minerl_dict['minerl_{}_iel'.format(lyr)] -
+                (minerl_uptake_lyr * pft_percent_cover))
+            uptake_minerl_lyr_above = (
+                minerl_uptake_lyr * (eup_above_iel / eprodl_iel))
+            uptake_minerl_lyr_below = (
+                minerl_uptake_lyr * (eup_below_iel / eprodl_iel))
+            aglive_iel = aglive_iel + uptake_minerl_lyr_above
+            bglive_iel = bglive_iel + uptake_minerl_lyr_below
+
+    # uptake from N fixation
+    if (iel == 1) & (plantNfix > 0):
+        uptake_Nfix_above = uptake_Nfix * (eup_above_iel / eprodl_iel)
+        uptake_Nfix_below = uptake_Nfix * (eup_below_iel / eprodl_iel)
+        aglive_iel = aglive_iel + uptake_Nfix_above
+        bglive_iel = bglive_iel + uptake_Nfix_below
+    result_dict = {
+        'aglive_iel': aglive_iel,
+        'bglive_iel': bglive_iel,
+        'storage_iel': storage_iel,
+        'minerl_1_iel': minerl_dict_copy['minerl_1_iel'],
+        'minerl_2_iel': minerl_dict_copy['minerl_2_iel'],
+        'minerl_3_iel': minerl_dict_copy['minerl_3_iel'],
+        'minerl_4_iel': minerl_dict_copy['minerl_4_iel'],
+        'minerl_5_iel': minerl_dict_copy['minerl_5_iel'],
+        'minerl_6_iel': minerl_dict_copy['minerl_6_iel'],
+        'minerl_7_iel': minerl_dict_copy['minerl_7_iel'],
+    }
+    return result_dict
 
 
 class foragetests(unittest.TestCase):
@@ -2555,15 +2807,15 @@ class foragetests(unittest.TestCase):
     def test_yearly_tasks(self):
         """Test `_yearly_tasks`.
 
-        Use `_yearly_tasks` to calculate annual precipitation and annual
-        atmospheric N deposition from random inputs. Test that the function
-        fails if fewer than 12 months of precipitation are supplied. Test that
-        the function fails if the dates of precipitation inputs do not fill
-        the 12 months surrounding the current month. Test that annual
-        precipitation falls inside the range [0, 72]. Test that annual
-        atmospheric N deposition falls inside the range [0, 37]. Introduce
-        nodata values into input rasters and test that atmospheric N deposition
-        remains within the specified range.
+        Use `_yearly_tasks` to calculate annual precipitation, annual
+        atmospheric N deposition, and the fraction of residue which is lignin
+        from random inputs. Test that the function fails if fewer than 12
+        months of precipitation are supplied. Test that the function fails if
+        the dates of precipitation inputs do not fill the 12 months surrounding
+        the current month. Test that annual precipitation falls inside the
+        range [0, 72]. Test that annual atmospheric N deposition falls inside
+        the range [0, 37]. Introduce nodata values into input rasters and test
+        that atmospheric N deposition remains within the specified range.
 
         Raises:
             AssertionError if `_yearly_tasks` does not fail with fewer than 12
@@ -2579,29 +2831,46 @@ class foragetests(unittest.TestCase):
         from natcap.invest import forage
 
         month_index = numpy.random.randint(0, 100)
-        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         site_param_table = {
             1: {
                 'epnfa_1': numpy.random.uniform(0, 1),
                 'epnfa_2': numpy.random.uniform(0, 0.5),
+
                 }
             }
-
+        veg_trait_table = {
+            1: {
+                'fligni_1_1': 0.02,
+                'fligni_2_1': 0.0012,
+                'fligni_1_2': 0.26,
+                'fligni_2_2': -0.0015,
+            }
+        }
+        pft_id_set = [1]
         complete_aligned_inputs = {
             'precip_{}'.format(month): os.path.join(
                 self.workspace_dir, 'precip_{}.tif'.format(month)) for
             month in xrange(month_index, month_index + 12)
         }
+        complete_aligned_inputs['site_index'] = os.path.join(
+            self.workspace_dir, 'site_index.tif')
 
         year_reg = {
             'annual_precip_path': os.path.join(
                 self.workspace_dir, 'annual_precip.tif'),
-            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif')
+            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif'),
+            'pltlig_above_1': os.path.join(
+                self.workspace_dir, 'pltlig_above.tif'),
+            'pltlig_below_1': os.path.join(
+                self.workspace_dir, 'pltlig_below.tif'),
         }
 
-        create_random_raster(site_index_path, 1, 1)
-        for key, path in complete_aligned_inputs.iteritems():
-            create_random_raster(path, 0, 6)
+        create_random_raster(complete_aligned_inputs['site_index'], 1, 1)
+        precip_keys = [
+            'precip_{}'.format(month) for month in
+            xrange(month_index, month_index + 12)]
+        for key in precip_keys:
+            create_random_raster(complete_aligned_inputs[key], 0, 6)
 
         # fewer than 12 months of precip rasters
         modified_inputs = complete_aligned_inputs.copy()
@@ -2609,8 +2878,8 @@ class foragetests(unittest.TestCase):
             numpy.random.randint(month_index, month_index + 12)))
         with self.assertRaises(ValueError):
             forage._yearly_tasks(
-                site_index_path, site_param_table, modified_inputs,
-                month_index, year_reg)
+                modified_inputs, site_param_table, veg_trait_table,
+                month_index, year_reg, pft_id_set)
 
         # 12 months of precip rasters supplied, but outside 12 month window of
         # current month
@@ -2618,8 +2887,8 @@ class foragetests(unittest.TestCase):
             'precip_{}.tif'.format(month_index + 13))
         with self.assertRaises(ValueError):
             forage._yearly_tasks(
-                site_index_path, site_param_table, modified_inputs,
-                month_index, year_reg)
+                modified_inputs, site_param_table, veg_trait_table,
+                month_index, year_reg, pft_id_set)
 
         # complete intact inputs
         minimum_acceptable_annual_precip = 0
@@ -2631,8 +2900,8 @@ class foragetests(unittest.TestCase):
         Ndep_nodata = _TARGET_NODATA
 
         forage._yearly_tasks(
-            site_index_path, site_param_table, complete_aligned_inputs,
-            month_index, year_reg)
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
         self.assert_all_values_in_raster_within_range(
             year_reg['annual_precip_path'], minimum_acceptable_annual_precip,
             maximum_acceptabe_annual_precip, precip_nodata)
@@ -2640,13 +2909,11 @@ class foragetests(unittest.TestCase):
             year_reg['baseNdep_path'], minimum_acceptable_Ndep,
             maximum_acceptable_Ndep, Ndep_nodata)
 
-        input_raster_list = [site_index_path] + [
-            path for key, path in complete_aligned_inputs.iteritems()]
-        for input_raster in input_raster_list:
+        for key, input_raster in complete_aligned_inputs.iteritems():
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
             forage._yearly_tasks(
-                site_index_path, site_param_table, complete_aligned_inputs,
-                month_index, year_reg)
+                complete_aligned_inputs, site_param_table, veg_trait_table,
+                month_index, year_reg, pft_id_set)
             self.assert_all_values_in_raster_within_range(
                 year_reg['annual_precip_path'],
                 minimum_acceptable_annual_precip,
@@ -2654,6 +2921,71 @@ class foragetests(unittest.TestCase):
             self.assert_all_values_in_raster_within_range(
                 year_reg['baseNdep_path'], minimum_acceptable_Ndep,
                 maximum_acceptable_Ndep, Ndep_nodata)
+
+        # known inputs, fraction of plant residue that is lignin
+        tolerance = 0.0000001
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 0, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above_1'], 0.02 - tolerance, 0.02 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below_1'], 0.26 - tolerance, 0.26 + tolerance,
+            _TARGET_NODATA)
+
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 6, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above_1'], 0.106 - tolerance, 0.1064 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below_1'], 0.152 - tolerance, 0.152 + tolerance,
+            _TARGET_NODATA)
+        for key, input_raster in complete_aligned_inputs.iteritems():
+            insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
+        forage._yearly_tasks(
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above_1'], 0.1064 - tolerance, 0.1064 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below_1'], 0.152 - tolerance, 0.152 + tolerance,
+            _TARGET_NODATA)
+
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 40, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above_1'], 0.5 - tolerance, 0.5 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below_1'], 0.02 - tolerance, 0.02 + tolerance,
+            _TARGET_NODATA)
+
+        for key in precip_keys:
+            create_constant_raster(
+                complete_aligned_inputs[key], 0.03, n_rows=3, n_cols=3)
+        forage._yearly_tasks(
+            complete_aligned_inputs, site_param_table, veg_trait_table,
+            month_index, year_reg, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_above_1'], 0.020432 - tolerance,
+            020432 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            year_reg['pltlig_below_1'], 0.25946 - tolerance,
+            0.25946 + tolerance, _TARGET_NODATA)
 
     def test_reference_evapotranspiration(self):
         """Test `_reference_evapotranspiration`.
@@ -3149,12 +3481,6 @@ class foragetests(unittest.TestCase):
             'crpstg_2_{}_path'.format(pft_i): os.path.join(
                 self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i)),
         }
-        for iel in [1, 2]:
-            for lyr in xrange(1, 11):
-                sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
-                    self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
-                create_random_raster(
-                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)], 0, 5)
 
         site_param_table = {
             1: {
@@ -3165,6 +3491,7 @@ class foragetests(unittest.TestCase):
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
         favail_path = os.path.join(self.workspace_dir, 'favail.tif')
         tgprod_path = os.path.join(self.workspace_dir, 'tgprod.tif')
+        availm_path = os.path.join(self.workspace_dir, 'availm.tif')
 
         create_random_raster(site_index_path, 1, 1)
         create_random_raster(sv_reg['bglivc_{}_path'.format(pft_i)], 90, 180)
@@ -3172,6 +3499,7 @@ class foragetests(unittest.TestCase):
         create_random_raster(sv_reg['crpstg_2_{}_path'.format(pft_i)], 0, 1)
         create_random_raster(favail_path, 0, 1)
         create_random_raster(tgprod_path, 0, 675)
+        create_random_raster(availm_path, 0, 55)
 
         eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
 
@@ -3181,7 +3509,8 @@ class foragetests(unittest.TestCase):
         for iel in [1, 2]:
             forage._calc_available_nutrient(
                 pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-                site_index_path, favail_path, tgprod_path, eavail_path)
+                site_index_path, availm_path, favail_path, tgprod_path,
+                eavail_path)
 
             self.assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
@@ -3189,15 +3518,15 @@ class foragetests(unittest.TestCase):
 
         insert_nodata_values_into_raster(site_index_path, _TARGET_NODATA)
         insert_nodata_values_into_raster(
-            sv_reg['minerl_1_1_path'], _TARGET_NODATA)
-        insert_nodata_values_into_raster(
             sv_reg['bglivc_{}_path'.format(pft_i)], _TARGET_NODATA)
         insert_nodata_values_into_raster(tgprod_path, _TARGET_NODATA)
+        insert_nodata_values_into_raster(availm_path, _TARGET_NODATA)
 
         for iel in [1, 2]:
             forage._calc_available_nutrient(
                 pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-                site_index_path, favail_path, tgprod_path, eavail_path)
+                site_index_path, availm_path, favail_path, tgprod_path,
+                eavail_path)
 
             self.assert_all_values_in_raster_within_range(
                 eavail_path, minimum_acceptable_eavail,
@@ -3211,11 +3540,7 @@ class foragetests(unittest.TestCase):
             sv_reg['crpstg_2_{}_path'.format(pft_i)], 0.8, 0.8)
         create_random_raster(favail_path, 0.3, 0.3)
         create_random_raster(tgprod_path, 300, 300)
-
-        for iel in [1, 2]:
-            for lyr in xrange(1, 11):
-                create_random_raster(
-                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)], 1, 1)
+        create_random_raster(availm_path, 4, 4)
 
         pft_param_dict['snfxmx_1'] = 0.4
         pft_param_dict['nlaypg'] = 4
@@ -3231,7 +3556,8 @@ class foragetests(unittest.TestCase):
         eavail_path = os.path.join(self.workspace_dir, 'eavail_N.tif')
         forage._calc_available_nutrient(
             pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-            site_index_path, favail_path, tgprod_path, eavail_path)
+            site_index_path, availm_path, favail_path, tgprod_path,
+            eavail_path)
 
         self.assert_all_values_in_raster_within_range(
             eavail_path, known_N_avail - tolerance,
@@ -3241,7 +3567,8 @@ class foragetests(unittest.TestCase):
         eavail_path = os.path.join(self.workspace_dir, 'eavail_P.tif')
         forage._calc_available_nutrient(
             pft_i, iel, pft_param_dict, sv_reg, site_param_table,
-            site_index_path, favail_path, tgprod_path, eavail_path)
+            site_index_path, availm_path, favail_path, tgprod_path,
+            eavail_path)
 
         self.assert_all_values_in_raster_within_range(
             eavail_path, known_P_avail - tolerance,
@@ -6270,6 +6597,7 @@ class foragetests(unittest.TestCase):
             month_reg = {
                 'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif'),
                 'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+                'bgwfunc': os.path.join(self.workspace_dir, 'bgwfunc.tif'),
             }
             create_random_raster(
                 month_reg['snowmelt'], month_reg_vals['snowmelt'],
@@ -6367,7 +6695,7 @@ class foragetests(unittest.TestCase):
             pp_reg = {
                 'rnewas_1_1_path': os.path.join(
                     self.workspace_dir, 'rnewas_1_1.tif'),
-                'rnewas_1__path': os.path.join(
+                'rnewas_1_2_path': os.path.join(
                     self.workspace_dir, 'rnewas_1_2.tif'),
                 'rnewas_2_1_path': os.path.join(
                     self.workspace_dir, 'rnewas_2_1.tif'),
@@ -6384,8 +6712,8 @@ class foragetests(unittest.TestCase):
             }
             for key in rnew_dict.iterkeys():
                 create_random_raster(
-                    pp_reg[key], rnew_dict[key], rnew_dict[key],
-                    nrows=nrows, ncols=ncols)
+                    pp_reg['{}_path'.format(key)], rnew_dict[key],
+                    rnew_dict[key], nrows=nrows, ncols=ncols)
             pp_reg['eftext_path'] = os.path.join(
                 self.workspace_dir, 'eftext.tif')
             pp_reg['orglch_path'] = os.path.join(
@@ -6394,6 +6722,8 @@ class foragetests(unittest.TestCase):
                 self.workspace_dir, 'fps1s3.tif')
             pp_reg['fps2s3_path'] = os.path.join(
                 self.workspace_dir, 'fps2s3.tif')
+            pp_reg['p1co2_2_path'] = os.path.join(
+                self.workspace_dir, 'p1co2_2.tif')
             create_random_raster(
                 pp_reg['eftext_path'], pp_reg_vals['eftext'],
                 pp_reg_vals['eftext'], nrows=nrows, ncols=ncols)
@@ -6406,6 +6736,9 @@ class foragetests(unittest.TestCase):
             create_random_raster(
                 pp_reg['fps2s3_path'], pp_reg_vals['fps2s3'],
                 pp_reg_vals['fps2s3'], nrows=nrows, ncols=ncols)
+            create_random_raster(
+                pp_reg['p1co2_2_path'], pp_reg_vals['p1co2_2'],
+                pp_reg_vals['p1co2_2'], nrows=nrows, ncols=ncols)
 
             input_dict = {
                 'aligned_inputs': aligned_inputs,
@@ -8309,3 +8642,1629 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             d_som1e_2_iel_path, d_som1e_2_iel_after - tolerance,
             d_som1e_2_iel_after + tolerance, _IC_NODATA)
+
+    def test_partit(self):
+        """Test `partit`.
+
+        Use the function `partit` to partition organic residue into structural
+        and metabolic material.  Test the calculated quantities against values
+        calculated by point-based version defined here.
+
+        Raises:
+            AssertionError if the change in C, N, P, and lignin calculated by
+                `partit` does not match the value calculated by point-based
+                version
+
+        Returns:
+            None
+        """
+        def partit_point(
+                cpart, epart_1, epart_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
+                minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
+                rcestr_1, rcestr_2, strlig_lyr, strucc_lyr, metabc_lyr,
+                struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2):
+            """Partition incoming material into structural and metabolic.
+
+            When organic material is added to the soil, for example as dead
+            biomass falls and becomes litter, or when organic material is added
+            from animal waste, it must be partitioned into structural
+            (STRUCC_lyr) and metabolic (METABC_lyr) material.  This is done
+            according to the ratio of lignin to N in the residue.
+
+            Parameters:
+                cpart (float): C in incoming material
+                epart_1 (float): N in incoming material
+                epart_2 (float): P in incoming material
+                damr_lyr_1 (float): parameter, fraction of N in lyr absorbed by
+                    residue
+                damr_lyr_2 (float): parameter, fraction of P in lyr absorbed by
+                    residue
+                minerl_1_1 (float): state variable, surface mineral N
+                minerl_1_2 (float): state variable, surface mineral P
+                damrmn_1 (float): parameter, minimum C/N ratio allowed in
+                    residue after direct absorption
+                damrmn_2 (float): parameter, minimum C/P ratio allowed in
+                    residue after direct absorption
+                pabres (float): parameter, amount of residue which will give
+                    maximum direct absorption of N
+                frlign (float): fraction of incoming material which is lignin
+                spl_1 (float): parameter, intercept of regression predicting
+                    fraction of residue going to metabolic
+                spl_2 (float): parameter, slope of regression predicting
+                    fraction of residue going to metabolic
+                rcestr_1 (float): parameter, C/N ratio for structural material
+                rcestr_2 (float): parameter, C/P ratio for structural material
+                strlig_lyr (float): state variable, lignin in structural
+                    material in receiving layer
+                strucc_lyr (float): state variable, C in structural material in
+                    lyr
+                metabc_lyr (float): state variable, C in metabolic material in
+                    lyr
+                struce_lyr_1 (float): state variable, N in structural material
+                    in lyr
+                metabe_lyr_1 (float): state variable, N in metabolic material
+                    in lyr
+                struce_lyr_2 (float): state variable, P in structural material
+                    in lyr
+                metabe_lyr_2 (float): state variable, P in metabolic material
+                    in lyr
+
+            Returns:
+                dictionary of values giving modified state variables:
+                    mod_minerl_1_1: modified surface mineral N
+                    mod_minerl_1_2: modified surface mineral P
+                    mod_metabc_lyr: modified METABC_lyr
+                    mod_strucc_lyr: modified STRUCC_lyr
+                    mod_struce_lyr_1: modified STRUCE_lyr_1
+                    mod_metabe_lyr_1: modified METABE_lyr_1
+                    mod_struce_lyr_2: modified STRUCE_lyr_2
+                    mod_metabe_lyr_2: modified METABE_lyr_2
+                    mod_strlig_lyr: modified strlig_lyr
+            """
+            # calculate direct absorption of mineral N by residue
+            if minerl_1_1 < 0:
+                dirabs_1 = 0
+            else:
+                dirabs_1 = damr_lyr_1 * minerl_1_1 * max(cpart / pabres, 1.)
+            # rcetot: C/E ratio of incoming material
+            if (epart_1 + dirabs_1) <= 0:
+                rcetot = 0
+            else:
+                rcetot = cpart/(epart_1 + dirabs_1)
+            if rcetot < damrmn_1:
+                dirabs_1 = max(cpart / damrmn_1 - epart_1, 0.)
+
+            # direct absorption of mineral P by residue
+            if minerl_1_2 < 0:
+                dirabs_2 = 0
+            else:
+                dirabs_2 = damr_lyr_2 * minerl_1_2 * max(cpart / pabres, 1.)
+            # rcetot: C/E ratio of incoming material
+            if (epart_2 + dirabs_2) <= 0:
+                rcetot = 0
+            else:
+                rcetot = cpart/(epart_2 + dirabs_2)
+            if rcetot < damrmn_2:
+                dirabs_2 = max(cpart / damrmn_2 - epart_2, 0.)
+
+            # rlnres: ratio of lignin to N in the incoming material
+            rlnres = frlign / ((epart_1 + dirabs_1) / (cpart * 2.5))
+
+            # frmet: fraction of incoming C that goes to metabolic
+            frmet = spl_1 - spl_2 * rlnres
+            if frlign > (1 - frmet):
+                frmet = (1 - frlign)
+
+            # d_metabe_lyr_iel (caddm) is added to metabc_lyr
+            d_metabc_lyr = cpart * frmet
+
+            # d_strucc_lyr (cadds) is added to strucc_lyr
+            d_strucc_lyr = cpart - d_metabc_lyr
+
+            # d_struce_lyr_1 (eadds_1) is added to STRUCE_lyr_1
+            d_struce_lyr_1 = d_strucc_lyr / rcestr_1
+            # d_metabe_lyr_1 (eaddm_1) is added to METABE_lyr_1
+            d_metabe_lyr_1 = epart_1 + dirabs_1 - d_struce_lyr_1
+
+            # d_struce_lyr_2 (eadds_2) is added to STRUCE_lyr_2
+            d_struce_lyr_2 = d_strucc_lyr / rcestr_2
+            # d_metabe_lyr_2 (eaddm_2) is added to METABE_lyr_2
+            d_metabe_lyr_2 = epart_2 + dirabs_2 - d_struce_lyr_2
+
+            # fligst: fraction of material to structural which is lignin
+            # used to update the state variable strlig_lyr, lignin in
+            # structural material in the given layer
+            fligst = min(frlign / (d_strucc_lyr / cpart), 1.)
+            strlig_lyr_mod = (
+                ((strlig_lyr * strucc_lyr) + (fligst * d_strucc_lyr)) /
+                (strucc_lyr + d_strucc_lyr))
+            d_strlig_lyr = strlig_lyr_mod - strlig_lyr
+
+            result_dict = {
+                'mod_minerl_1_1': minerl_1_1 - dirabs_1,
+                'mod_minerl_1_2': minerl_1_2 - dirabs_2,
+                'mod_metabc_lyr': metabc_lyr + d_metabc_lyr,
+                'mod_strucc_lyr': strucc_lyr + d_strucc_lyr,
+                'mod_struce_lyr_1': struce_lyr_1 + d_struce_lyr_1,
+                'mod_metabe_lyr_1': metabe_lyr_1 + d_metabe_lyr_1,
+                'mod_struce_lyr_2': struce_lyr_2 + d_struce_lyr_2,
+                'mod_metabe_lyr_2': metabe_lyr_2 + d_metabe_lyr_2,
+                'mod_strlig_lyr': strlig_lyr + d_strlig_lyr,
+            }
+            return result_dict
+        from natcap.invest import forage
+        tolerance = 0.0001
+
+        # known inputs
+        cpart = 10.1
+        epart_1 = 0.03131
+        epart_2 = 0.004242
+        damr_lyr_1 = 0.02
+        damr_lyr_2 = 0.02
+        minerl_1_1 = 40.45
+        minerl_1_2 = 24.19
+        damrmn_1 = 15.
+        damrmn_2 = 150.
+        pabres = 100.
+        frlign = 0.3
+        spl_1 = 0.85
+        spl_2 = 0.013
+        rcestr_1 = 200.
+        rcestr_2 = 500.
+        strlig_lyr = 0.224
+        strucc_lyr = 157.976
+        metabc_lyr = 7.7447
+        struce_lyr_1 = 0.8046
+        metabe_lyr_1 = 0.4243
+        struce_lyr_2 = 0.3152
+        metabe_lyr_2 = 0.0555
+
+        # raster inputs
+        cpart_path = os.path.join(self.workspace_dir, 'cpart.tif')
+        epart_1_path = os.path.join(self.workspace_dir, 'epart_1.tif')
+        epart_2_path = os.path.join(self.workspace_dir, 'epart_2.tif')
+        frlign_path = os.path.join(self.workspace_dir, 'frlign.tif')
+        site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
+
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+            'minerl_1_2_path': os.path.join(
+                self.workspace_dir, 'minerl_1_2.tif'),
+            'metabc_1_path': os.path.join(
+                self.workspace_dir, 'metabc.tif'),
+            'strucc_1_path': os.path.join(
+                self.workspace_dir, 'strucc.tif'),
+            'struce_1_1_path': os.path.join(
+                self.workspace_dir, 'struce_1_1.tif'),
+            'metabe_1_1_path': os.path.join(
+                self.workspace_dir, 'metabe_1_1.tif'),
+            'struce_1_2_path': os.path.join(
+                self.workspace_dir, 'struce_1_2.tif'),
+            'metabe_1_2_path': os.path.join(
+                self.workspace_dir, 'metabe_1_2.tif'),
+            'strlig_1_path': os.path.join(self.workspace_dir, 'strlig.tif')
+        }
+
+        create_constant_raster(cpart_path, cpart)
+        create_constant_raster(epart_1_path, epart_1)
+        create_constant_raster(epart_2_path, epart_2)
+        create_constant_raster(frlign_path, frlign)
+        create_constant_raster(site_index_path, 1)
+
+        create_constant_raster(sv_reg['minerl_1_1_path'], minerl_1_1)
+        create_constant_raster(sv_reg['minerl_1_2_path'], minerl_1_2)
+        create_constant_raster(sv_reg['metabc_1_path'], metabc_lyr)
+        create_constant_raster(sv_reg['strucc_1_path'], strucc_lyr)
+        create_constant_raster(sv_reg['struce_1_1_path'], struce_lyr_1)
+        create_constant_raster(sv_reg['metabe_1_1_path'], metabe_lyr_1)
+        create_constant_raster(sv_reg['struce_1_2_path'], struce_lyr_2)
+        create_constant_raster(sv_reg['metabe_1_2_path'], metabe_lyr_2)
+        create_constant_raster(sv_reg['strlig_1_path'], strlig_lyr)
+
+        site_param_table = {
+            1: {
+                'damr_1_1': damr_lyr_1,
+                'damr_1_2': damr_lyr_2,
+                'pabres': pabres,
+                'damrmn_1': damrmn_1,
+                'damrmn_2': damrmn_2,
+                'spl_1': spl_1,
+                'spl_2': spl_2,
+                'rcestr_1': rcestr_1,
+                'rcestr_2': rcestr_2,
+            }
+        }
+        lyr = 1
+
+        point_results_dict = partit_point(
+            cpart, epart_1, epart_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
+            minerl_1_2, damrmn_1, damrmn_2, pabres, frlign, spl_1, spl_2,
+            rcestr_1, rcestr_2, strlig_lyr, strucc_lyr, metabc_lyr,
+            struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2)
+
+        forage.partit(
+            cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
+            site_index_path, site_param_table, lyr)
+
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'],
+            point_results_dict['mod_minerl_1_1'] - tolerance,
+            point_results_dict['mod_minerl_1_1'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_2_path'],
+            point_results_dict['mod_minerl_1_2'] - tolerance,
+            point_results_dict['mod_minerl_1_2'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabc_1_path'],
+            point_results_dict['mod_metabc_lyr'] - tolerance,
+            point_results_dict['mod_metabc_lyr'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strucc_1_path'],
+            point_results_dict['mod_strucc_lyr'] - tolerance,
+            point_results_dict['mod_strucc_lyr'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_1_path'],
+            point_results_dict['mod_struce_lyr_1'] - tolerance,
+            point_results_dict['mod_struce_lyr_1'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_1_path'],
+            point_results_dict['mod_metabe_lyr_1'] - tolerance,
+            point_results_dict['mod_metabe_lyr_1'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_2_path'],
+            point_results_dict['mod_struce_lyr_2'] - tolerance,
+            point_results_dict['mod_struce_lyr_2'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_2_path'],
+            point_results_dict['mod_metabe_lyr_2'] - tolerance,
+            point_results_dict['mod_metabe_lyr_2'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strlig_1_path'],
+            point_results_dict['mod_strlig_lyr'] - 0.003,
+            point_results_dict['mod_strlig_lyr'] + 0.003, _SV_NODATA)
+
+    def test_calc_delta_iel(self):
+        """Test `calc_delta_iel`.
+
+        Use the function `calc_delta_iel` to calculate the change in N or P
+        accompanying a change in C.  Test that the calculated value matches
+        value calculated by hand.
+
+        Raises:
+            AssertionError if the value calculated by `calc_delta_iel` does not
+                match value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.000001
+        array_shape = (10, 10)
+
+        # known inputs
+        c_state_variable = 120.5
+        iel_state_variable = 39.29
+        delta_c = 17.49
+
+        delta_iel = 5.702756
+
+        # array-based inputs
+        c_state_variable_ar = numpy.full(array_shape, c_state_variable)
+        iel_state_variable_ar = numpy.full(array_shape, iel_state_variable)
+        delta_c_ar = numpy.full(array_shape, delta_c)
+
+        delta_iel_ar = forage.calc_delta_iel(
+            c_state_variable_ar, iel_state_variable_ar, delta_c_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_iel_ar, delta_iel - tolerance, delta_iel + tolerance,
+            _TARGET_NODATA)
+
+        insert_nodata_values_into_array(c_state_variable_ar, _SV_NODATA)
+        insert_nodata_values_into_array(iel_state_variable_ar, _SV_NODATA)
+        insert_nodata_values_into_array(delta_c_ar, _TARGET_NODATA)
+
+        delta_iel_ar = forage.calc_delta_iel(
+            c_state_variable_ar, iel_state_variable_ar, delta_c_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_iel_ar, delta_iel - tolerance, delta_iel + tolerance,
+            _TARGET_NODATA)
+
+    def test_calc_fall_standing_dead(self):
+        """Test `calc_fall_standing_dead`.
+
+        Use the function `calc_fall_standing_dead` to calculate the change in C
+        in standing dead as standing dead falls to surface litter. Test that
+        the calculated value matches value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_fall_standing_dead` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        array_shape = (10, 10)
+
+        # known values
+        stdedc = 308.22
+        fallrt = 0.15
+
+        delta_c_standing_dead = 46.233
+
+        # array-based inputs
+        stdedc_ar = numpy.full(array_shape, stdedc)
+        fallrt_ar = numpy.full(array_shape, fallrt)
+
+        delta_c_standing_dead_ar = forage.calc_fall_standing_dead(
+            stdedc_ar, fallrt_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_standing_dead_ar, delta_c_standing_dead - tolerance,
+            delta_c_standing_dead + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(stdedc_ar, _SV_NODATA)
+        insert_nodata_values_into_array(fallrt_ar, _IC_NODATA)
+
+        delta_c_standing_dead_ar = forage.calc_fall_standing_dead(
+            stdedc_ar, fallrt_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_standing_dead_ar, delta_c_standing_dead - tolerance,
+            delta_c_standing_dead + tolerance, _TARGET_NODATA)
+
+    def calc_calc_root_death(self):
+        """Test `calc_root_death`.
+
+        Use the function `calc_root_death` to calculate the change in bglivc
+        with root death. Test that the calculated value matches values
+        calculated by hand.
+
+        Raises:
+            AssertionError if `calc_root_death` does not match value calculated
+                by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        array_shape = (10, 10)
+
+        # known values, temperature sufficient for death
+        average_temperature = 8.
+        rtdtmp = 2.
+        rdr = 0.05
+        avh2o_1 = 0.1183
+        deck5 = 5.
+        bglivc = 123.9065
+
+        delta_c_root_death = 6.05213
+
+        # array-based inputs
+        average_temperature_ar = numpy.full(array_shape, average_temperature)
+        rtdtmp_ar = numpy.full(array_shape, rtdtmp)
+        rdr_ar = numpy.full(array_shape, rdr)
+        avh2o_1_ar = numpy.full(array_shape, avh2o_1)
+        deck5_ar = numpy.full(array_shape, deck5)
+        bglivc_ar = numpy.full(array_shape, bglivc)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
+        insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
+        insert_nodata_values_into_array(bglivc_ar, _SV_NODATA)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        # known values, temperature insufficient for death
+        average_temperature = -1.
+        rtdtmp = 2.
+        rdr = 0.05
+        avh2o_1 = 0.1183
+        deck5 = 5.
+        bglivc = 123.9065
+
+        delta_c_root_death = 0.
+
+        # array-based inputs
+        average_temperature_ar = numpy.full(array_shape, average_temperature)
+        rtdtmp_ar = numpy.full(array_shape, rtdtmp)
+        rdr_ar = numpy.full(array_shape, rdr)
+        avh2o_1_ar = numpy.full(array_shape, avh2o_1)
+        deck5_ar = numpy.full(array_shape, deck5)
+        bglivc_ar = numpy.full(array_shape, bglivc)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
+        insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
+        insert_nodata_values_into_array(bglivc_ar, _SV_NODATA)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        # known values, root death rate limited by default value
+        average_temperature = 8.
+        rtdtmp = 2.
+        rdr = 0.98
+        avh2o_1 = 0.1183
+        deck5 = 5.
+        bglivc = 123.9065
+
+        delta_c_root_death = 117.7112
+
+        # array-based inputs
+        average_temperature_ar = numpy.full(array_shape, average_temperature)
+        rtdtmp_ar = numpy.full(array_shape, rtdtmp)
+        rdr_ar = numpy.full(array_shape, rdr)
+        avh2o_1_ar = numpy.full(array_shape, avh2o_1)
+        deck5_ar = numpy.full(array_shape, deck5)
+        bglivc_ar = numpy.full(array_shape, bglivc)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
+        insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
+        insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
+        insert_nodata_values_into_array(bglivc_ar, _SV_NODATA)
+
+        delta_c_root_death_ar = forage.calc_root_death(
+            average_temperature_ar, rtdtmp_ar, rdr_ar, avh2o_1_ar, deck5_ar,
+            bglivc_ar)
+        self.assert_all_values_in_array_within_range(
+            delta_c_root_death_ar, delta_c_root_death - tolerance,
+            delta_c_root_death + tolerance, _TARGET_NODATA)
+
+    def test_calc_senescence_water_shading(self):
+        """Test `calc_senescence_water_shading`.
+
+        Use the function `calc_senescence_water_shading` to calculate shoot
+        death due to water stress and shading. Test that the calculated value
+        matches value calculated by hand.
+
+        Raises:
+            AssertionError if `calc_senescence_water_shading` does not match
+                value calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        array_shape = (10, 10)
+
+        # known values
+        aglivc = 221.59
+        bgwfunc = 0.88
+        fsdeth_1 = 0.2
+        fsdeth_3 = 0.2
+        fsdeth_4 = 150.
+
+        fdeth = 0.224
+
+        # array-based inputs
+        aglivc_ar = numpy.full(array_shape, aglivc)
+        bgwfunc_ar = numpy.full(array_shape, bgwfunc)
+        fsdeth_1_ar = numpy.full(array_shape, fsdeth_1)
+        fsdeth_3_ar = numpy.full(array_shape, fsdeth_3)
+        fsdeth_4_ar = numpy.full(array_shape, fsdeth_4)
+
+        fdeth_ar = forage.calc_senescence_water_shading(
+            aglivc_ar, bgwfunc_ar, fsdeth_1_ar, fsdeth_3_ar, fsdeth_4_ar)
+        self.assert_all_values_in_array_within_range(
+            fdeth_ar, fdeth - tolerance, fdeth + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(aglivc_ar, _SV_NODATA)
+        insert_nodata_values_into_array(bgwfunc_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(fsdeth_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(fsdeth_3_ar, _IC_NODATA)
+        insert_nodata_values_into_array(fsdeth_4_ar, _IC_NODATA)
+
+        fdeth_ar = forage.calc_senescence_water_shading(
+            aglivc_ar, bgwfunc_ar, fsdeth_1_ar, fsdeth_3_ar, fsdeth_4_ar)
+        self.assert_all_values_in_array_within_range(
+            fdeth_ar, fdeth - tolerance, fdeth + tolerance, _TARGET_NODATA)
+
+    def test_shoot_senescence(self):
+        """Test `_shoot_senescence`.
+
+        Use the function `_shoot_senescence` to transition aboveground live
+        biomass to standing dead. Test that the calculated value matches
+        value calculated by hand.
+
+        Raises:
+            AssertionError if `_shoot_senescence` does not match value
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+        prev_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
+        cur_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
+
+        # known values
+        bgwfunc = 0.88
+        aglivc = 32.653
+        stdedc = 4.4683
+        aglive_1 = 0.3
+        aglive_2 = 0.1
+        stdede_1 = 0.25
+        stdede_2 = 0.05
+        crpstg_1 = 0
+        crpstg_2 = 0
+
+        current_month = 1
+        veg_trait_table = {
+            1: {
+                'senescence_month': '1',
+                'fsdeth_1': 0.2,
+                'fsdeth_2': 0.75,
+                'fsdeth_3': 0.2,
+                'fsdeth_4': 150.,
+                'vlossp': 0.15,
+                'crprtf_1': 0,
+                'crprtf_2': 0,
+            },
+            2: {
+                'senescence_month': '4',
+                'fsdeth_1': 0.1,
+                'fsdeth_2': 0.8,
+                'fsdeth_3': 0.17,
+                'fsdeth_4': 200.,
+                'vlossp': 0.15,
+                'crprtf_1': 0.1,
+                'crprtf_2': 0.05,
+            }
+        }
+        pft_id_set = set([key for key in veg_trait_table.iterkeys()])
+        prev_sv_reg = {
+            'aglivc_1_path': os.path.join(prev_sv_dir, 'aglivc_1.tif'),
+            'stdedc_1_path': os.path.join(prev_sv_dir, 'stdedc_1.tif'),
+            'aglive_1_1_path': os.path.join(prev_sv_dir, 'aglive_1_1.tif'),
+            'aglive_2_1_path': os.path.join(prev_sv_dir, 'aglive_2_1.tif'),
+            'stdede_1_1_path': os.path.join(prev_sv_dir, 'stdede_1_1.tif'),
+            'stdede_2_1_path': os.path.join(prev_sv_dir, 'stdede_2_1.tif'),
+            'crpstg_1_1_path': os.path.join(prev_sv_dir, 'crpstg_1_1.tif'),
+            'crpstg_2_1_path': os.path.join(prev_sv_dir, 'crpstg_2_1.tif'),
+
+            'aglivc_2_path': os.path.join(prev_sv_dir, 'aglivc_2.tif'),
+            'stdedc_2_path': os.path.join(prev_sv_dir, 'stdedc_2.tif'),
+            'aglive_1_2_path': os.path.join(prev_sv_dir, 'aglive_1_2.tif'),
+            'aglive_2_2_path': os.path.join(prev_sv_dir, 'aglive_2_2.tif'),
+            'stdede_1_2_path': os.path.join(prev_sv_dir, 'stdede_1_2.tif'),
+            'stdede_2_2_path': os.path.join(prev_sv_dir, 'stdede_2_2.tif'),
+            'crpstg_1_2_path': os.path.join(prev_sv_dir, 'crpstg_1_2.tif'),
+            'crpstg_2_2_path': os.path.join(prev_sv_dir, 'crpstg_2_2.tif'),
+        }
+        create_constant_raster(prev_sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(prev_sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(prev_sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(prev_sv_reg['aglive_2_1_path'], aglive_2)
+        create_constant_raster(prev_sv_reg['stdede_1_1_path'], stdede_1)
+        create_constant_raster(prev_sv_reg['stdede_2_1_path'], stdede_2)
+        create_constant_raster(prev_sv_reg['crpstg_1_1_path'], crpstg_1)
+        create_constant_raster(prev_sv_reg['crpstg_2_1_path'], crpstg_2)
+
+        create_constant_raster(prev_sv_reg['aglivc_2_path'], aglivc)
+        create_constant_raster(prev_sv_reg['stdedc_2_path'], stdedc)
+        create_constant_raster(prev_sv_reg['aglive_1_2_path'], aglive_1)
+        create_constant_raster(prev_sv_reg['aglive_2_2_path'], aglive_2)
+        create_constant_raster(prev_sv_reg['stdede_1_2_path'], stdede_1)
+        create_constant_raster(prev_sv_reg['stdede_2_2_path'], stdede_2)
+        create_constant_raster(prev_sv_reg['crpstg_1_2_path'], crpstg_1)
+        create_constant_raster(prev_sv_reg['crpstg_2_2_path'], crpstg_2)
+
+        sv_reg = {
+            'aglivc_1_path': os.path.join(cur_sv_dir, 'aglivc_1.tif'),
+            'stdedc_1_path': os.path.join(cur_sv_dir, 'stdedc_1.tif'),
+            'aglive_1_1_path': os.path.join(cur_sv_dir, 'aglive_1_1.tif'),
+            'aglive_2_1_path': os.path.join(cur_sv_dir, 'aglive_2_1.tif'),
+            'stdede_1_1_path': os.path.join(cur_sv_dir, 'stdede_1_1.tif'),
+            'stdede_2_1_path': os.path.join(cur_sv_dir, 'stdede_2_1.tif'),
+            'crpstg_1_1_path': os.path.join(cur_sv_dir, 'crpstg_1_1.tif'),
+            'crpstg_2_1_path': os.path.join(cur_sv_dir, 'crpstg_2_1.tif'),
+
+            'aglivc_2_path': os.path.join(cur_sv_dir, 'aglivc_2.tif'),
+            'stdedc_2_path': os.path.join(cur_sv_dir, 'stdedc_2.tif'),
+            'aglive_1_2_path': os.path.join(cur_sv_dir, 'aglive_1_2.tif'),
+            'aglive_2_2_path': os.path.join(cur_sv_dir, 'aglive_2_2.tif'),
+            'stdede_1_2_path': os.path.join(cur_sv_dir, 'stdede_1_2.tif'),
+            'stdede_2_2_path': os.path.join(cur_sv_dir, 'stdede_2_2.tif'),
+            'crpstg_1_2_path': os.path.join(cur_sv_dir, 'crpstg_1_2.tif'),
+            'crpstg_2_2_path': os.path.join(cur_sv_dir, 'crpstg_2_2.tif'),
+        }
+        month_reg = {
+            'bgwfunc': os.path.join(self.workspace_dir, 'bgwfunc.tif'),
+        }
+        create_constant_raster(month_reg['bgwfunc'], bgwfunc)
+
+        # known modified state variables
+        aglivc_after_1 = 8.16325
+        stdedc_after_1 = 28.95805
+        aglive_1_after_1 = 0.075
+        aglive_2_after_1 = 0.025
+        stdede_1_after_1 = 0.44125
+        stdede_2_after_1 = 0.125
+        crpstg_1_after_1 = 0
+        crpstg_2_after_1 = 0
+
+        aglivc_after_2 = 32.261164
+        stdedc_after_2 = 4.860136
+        aglive_1_after_2 = 0.2964
+        aglive_2_after_2 = 0.0988
+        stdede_1_after_2 = 0.252754
+        stdede_2_after_2 = 0.05114
+        crpstg_1_after_2 = 0.000306
+        crpstg_2_after_2 = 0.00006
+
+        forage._shoot_senescence(
+            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
+            current_month)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], aglivc_after_1 - tolerance,
+            aglivc_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdedc_1_path'], stdedc_after_1 - tolerance,
+            stdedc_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], aglive_1_after_1 - tolerance,
+            aglive_1_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], aglive_2_after_1 - tolerance,
+            aglive_2_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_1_1_path'], stdede_1_after_1 - tolerance,
+            stdede_1_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_2_1_path'], stdede_2_after_1 - tolerance,
+            stdede_2_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_1_path'], crpstg_1_after_1 - tolerance,
+            crpstg_1_after_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_1_path'], crpstg_2_after_1 - tolerance,
+            crpstg_2_after_1 + tolerance, _SV_NODATA)
+
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_2_path'], aglivc_after_2 - tolerance,
+            aglivc_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdedc_2_path'], stdedc_after_2 - tolerance,
+            stdedc_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_2_path'], aglive_1_after_2 - tolerance,
+            aglive_1_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_2_path'], aglive_2_after_2 - tolerance,
+            aglive_2_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_1_2_path'], stdede_1_after_2 - tolerance,
+            stdede_1_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_2_2_path'], stdede_2_after_2 - tolerance,
+            stdede_2_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_2_path'], crpstg_1_after_2 - tolerance,
+            crpstg_1_after_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_2_path'], crpstg_2_after_2 - tolerance,
+            crpstg_2_after_2 + tolerance, _SV_NODATA)
+
+    def test_calc_nutrient_limitation(self):
+        """Test `calc_nutrient_limitation`.
+
+        Use the function `calc_nutrient_limitation` to calculate C, N and P in
+        new production limited by nutrient availability. Test that calculated
+        values match values calculated by point-based version.
+
+        Raises:
+            AssertionError if `calc_nutrient_limitation` does not match value
+                calculated by point-based version.
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (3, 3)
+        tolerance = 0.00001
+
+        # known values, eavail_2 > demand_2 and P is limiting nutrient
+        potenc = 200.1
+        rtsh = 0.59
+        eavail_1 = 200.5
+        eavail_2 = 62
+        snfxmx_1 = 0.03
+        cercrp_max_above_1 = 8
+        cercrp_max_below_1 = 11
+        cercrp_max_above_2 = 7
+        cercrp_max_below_2 = 6
+        cercrp_min_above_1 = 3
+        cercrp_min_below_1 = 5
+        cercrp_min_above_2 = 2
+        cercrp_min_below_2 = 2.5
+
+        point_results = calc_nutrient_limitation_point(
+            potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+            cercrp_max_above_1, cercrp_max_below_1, cercrp_max_above_2,
+            cercrp_max_below_2, cercrp_min_above_1, cercrp_min_below_1,
+            cercrp_min_above_2, cercrp_min_below_2)
+
+        # test values for P only against values calculated by hand
+        c_production_known = 172.222418488863
+        eup_above_2_known = 41.367670329147
+        eup_below_2_known = 20.632329670853
+
+        self.assertAlmostEqual(
+            point_results['c_production'], c_production_known)
+        self.assertAlmostEqual(
+            point_results['eup_above_2'], eup_above_2_known)
+        self.assertAlmostEqual(
+            point_results['eup_below_2'], eup_below_2_known)
+
+        # array-based inputs
+        potenc_ar = numpy.full(array_shape, potenc)
+        rtsh_ar = numpy.full(array_shape, rtsh)
+        eavail_1_ar = numpy.full(array_shape, eavail_1)
+        eavail_2_ar = numpy.full(array_shape, eavail_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+        cercrp_max_above_1_ar = numpy.full(array_shape, cercrp_max_above_1)
+        cercrp_max_below_1_ar = numpy.full(array_shape, cercrp_max_below_1)
+        cercrp_max_above_2_ar = numpy.full(array_shape, cercrp_max_above_2)
+        cercrp_max_below_2_ar = numpy.full(array_shape, cercrp_max_below_2)
+        cercrp_min_above_1_ar = numpy.full(array_shape, cercrp_min_above_1)
+        cercrp_min_below_1_ar = numpy.full(array_shape, cercrp_min_below_1)
+        cercrp_min_above_2_ar = numpy.full(array_shape, cercrp_min_above_2)
+        cercrp_min_below_2_ar = numpy.full(array_shape, cercrp_min_below_2)
+
+        cprodl_ar = forage.calc_nutrient_limitation(
+            'cprodl')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_1_ar = forage.calc_nutrient_limitation(
+            'eup_above_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_1_ar = forage.calc_nutrient_limitation(
+            'eup_below_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_2_ar = forage.calc_nutrient_limitation(
+            'eup_above_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_2_ar = forage.calc_nutrient_limitation(
+            'eup_below_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        plantNfix_ar = forage.calc_nutrient_limitation(
+            'plantNfix')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            cprodl_ar, point_results['c_production'] - tolerance,
+            point_results['c_production'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_1_ar, point_results['eup_above_1'] - tolerance,
+            point_results['eup_above_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_1_ar, point_results['eup_below_1'] - tolerance,
+            point_results['eup_below_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_2_ar, point_results['eup_above_2'] - tolerance,
+            point_results['eup_above_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_2_ar, point_results['eup_below_2'] - tolerance,
+            point_results['eup_below_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            plantNfix_ar, point_results['plantNfix'] - tolerance,
+            point_results['plantNfix'] + tolerance, _TARGET_NODATA)
+
+        # known values, eavail_1 < demand_1 and N is limiting nutrient
+        potenc = 200.1
+        rtsh = 0.59
+        eavail_1 = 10.1
+        eavail_2 = 62
+        snfxmx_1 = 0.003
+        cercrp_max_above_1 = 8
+        cercrp_max_below_1 = 11
+        cercrp_max_above_2 = 7
+        cercrp_max_below_2 = 6
+        cercrp_min_above_1 = 3
+        cercrp_min_below_1 = 5
+        cercrp_min_above_2 = 2
+        cercrp_min_below_2 = 2.5
+
+        point_results = calc_nutrient_limitation_point(
+            potenc, rtsh, eavail_1, eavail_2, snfxmx_1,
+            cercrp_max_above_1, cercrp_max_below_1, cercrp_max_above_2,
+            cercrp_max_below_2, cercrp_min_above_1, cercrp_min_below_1,
+            cercrp_min_above_2, cercrp_min_below_2)
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        rtsh_ar = numpy.full(array_shape, rtsh)
+        eavail_1_ar = numpy.full(array_shape, eavail_1)
+        eavail_2_ar = numpy.full(array_shape, eavail_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+        cercrp_max_above_1_ar = numpy.full(array_shape, cercrp_max_above_1)
+        cercrp_max_below_1_ar = numpy.full(array_shape, cercrp_max_below_1)
+        cercrp_max_above_2_ar = numpy.full(array_shape, cercrp_max_above_2)
+        cercrp_max_below_2_ar = numpy.full(array_shape, cercrp_max_below_2)
+        cercrp_min_above_1_ar = numpy.full(array_shape, cercrp_min_above_1)
+        cercrp_min_below_1_ar = numpy.full(array_shape, cercrp_min_below_1)
+        cercrp_min_above_2_ar = numpy.full(array_shape, cercrp_min_above_2)
+        cercrp_min_below_2_ar = numpy.full(array_shape, cercrp_min_below_2)
+
+        cprodl_ar = forage.calc_nutrient_limitation(
+            'cprodl')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_1_ar = forage.calc_nutrient_limitation(
+            'eup_above_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_1_ar = forage.calc_nutrient_limitation(
+            'eup_below_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_2_ar = forage.calc_nutrient_limitation(
+            'eup_above_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_2_ar = forage.calc_nutrient_limitation(
+            'eup_below_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        plantNfix_ar = forage.calc_nutrient_limitation(
+            'plantNfix')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            cprodl_ar, point_results['c_production'] - tolerance,
+            point_results['c_production'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_1_ar, point_results['eup_above_1'] - tolerance,
+            point_results['eup_above_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_1_ar, point_results['eup_below_1'] - tolerance,
+            point_results['eup_below_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_2_ar, point_results['eup_above_2'] - tolerance,
+            point_results['eup_above_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_2_ar, point_results['eup_below_2'] - tolerance,
+            point_results['eup_below_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            plantNfix_ar, point_results['plantNfix'] - tolerance,
+            point_results['plantNfix'] + tolerance, _TARGET_NODATA)
+
+        insert_nodata_values_into_array(potenc_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtsh_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(eavail_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(eavail_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(snfxmx_1_ar, _IC_NODATA)
+        insert_nodata_values_into_array(cercrp_max_below_1_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(cercrp_min_above_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(cercrp_min_below_2_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(cercrp_max_above_1_ar, _TARGET_NODATA)
+
+        cprodl_ar = forage.calc_nutrient_limitation(
+            'cprodl')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_1_ar = forage.calc_nutrient_limitation(
+            'eup_above_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_1_ar = forage.calc_nutrient_limitation(
+            'eup_below_1')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_above_2_ar = forage.calc_nutrient_limitation(
+            'eup_above_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        eup_below_2_ar = forage.calc_nutrient_limitation(
+            'eup_below_2')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+        plantNfix_ar = forage.calc_nutrient_limitation(
+            'plantNfix')(
+            potenc_ar, rtsh_ar, eavail_1_ar, eavail_2_ar,
+            snfxmx_1_ar,
+            cercrp_max_above_1_ar, cercrp_max_below_1_ar,
+            cercrp_max_above_2_ar, cercrp_max_below_2_ar,
+            cercrp_min_above_1_ar, cercrp_min_below_1_ar,
+            cercrp_min_above_2_ar, cercrp_min_below_2_ar)
+
+        self.assert_all_values_in_array_within_range(
+            cprodl_ar, point_results['c_production'] - tolerance,
+            point_results['c_production'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_1_ar, point_results['eup_above_1'] - tolerance,
+            point_results['eup_above_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_1_ar, point_results['eup_below_1'] - tolerance,
+            point_results['eup_below_1'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_above_2_ar, point_results['eup_above_2'] - tolerance,
+            point_results['eup_above_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            eup_below_2_ar, point_results['eup_below_2'] - tolerance,
+            point_results['eup_below_2'] + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_array_within_range(
+            plantNfix_ar, point_results['plantNfix'] - tolerance,
+            point_results['plantNfix'] + tolerance, _TARGET_NODATA)
+
+    def test_nutrient_uptake(self):
+        """Test `nutrient_uptake`.
+
+        Use the function `nutrient_uptake` to calculate flow of N or P
+        from soil and crop storage to above and belowground live biomass.
+        Test that calculated values match values calculated by point-based
+        version.
+
+        Raises:
+            AssertionError if `nutrient_uptake` does not match values
+                calculated by point-based version
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known values: iel=1, some uptake from soil, some plant N fixation
+        iel = 1.
+        nlay = 4
+        availm = 51.
+        eavail = 54.2
+        percent_cover = 0.4
+        eup_above_iel = 41.367670329147
+        eup_below_iel = 20.632329670853
+        storage_iel = 40.48
+        plantNfix = 8.048
+        pslsrb = 1.
+        sorpmx = 2.
+        aglive_iel = 80.8
+        bglive_iel = 130.6
+        minerl_dict = {
+            'minerl_1_iel': 10.,
+            'minerl_2_iel': 13.,
+            'minerl_3_iel': 20.,
+            'minerl_4_iel': 8.,
+            'minerl_5_iel': 30.,
+            'minerl_6_iel': 22.,
+            'minerl_7_iel': 18.,
+        }
+
+        aglive_iel_known = 116.963350513545
+        bglive_iel_known = 148.636649486455
+        storage_iel_known = 0.
+        minerl_1_iel_known = 9.55513725490196
+        minerl_2_iel_known = 12.4216784313726
+        minerl_3_iel_known = 19.1102745098039
+        minerl_4_iel_known = 7.64410980392157
+        minerl_5_iel_known = 30
+        minerl_6_iel_known = 22
+        minerl_7_iel_known = 18
+
+        point_results = nutrient_uptake_point(
+            iel, nlay, availm, eavail, percent_cover, eup_above_iel,
+            eup_below_iel, storage_iel, plantNfix, pslsrb, sorpmx, aglive_iel,
+            bglive_iel, minerl_dict)
+
+        # test point results against known values calculated by hand
+        self.assertAlmostEqual(
+            point_results['aglive_iel'], aglive_iel_known)
+        self.assertAlmostEqual(
+            point_results['bglive_iel'], bglive_iel_known)
+        self.assertAlmostEqual(
+            point_results['storage_iel'], storage_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_1_iel'], minerl_1_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_2_iel'], minerl_2_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_3_iel'], minerl_3_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_4_iel'], minerl_4_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_5_iel'], minerl_5_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_6_iel'], minerl_6_iel_known)
+        self.assertAlmostEqual(
+            point_results['minerl_7_iel'], minerl_7_iel_known)
+
+        # raster-based inputs
+        pft_i = 1
+        percent_cover_path = os.path.join(self.workspace_dir, 'perc_cover.tif')
+        eup_above_iel_path = os.path.join(self.workspace_dir, 'eup_above.tif')
+        eup_below_iel_path = os.path.join(self.workspace_dir, 'eup_below.tif')
+        plantNfix_path = os.path.join(self.workspace_dir, 'plantNfix.tif')
+        availm_path = os.path.join(self.workspace_dir, 'availm.tif')
+        eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
+        pslsrb_path = os.path.join(self.workspace_dir, 'pslsrb.tif')
+        sorpmx_path = os.path.join(self.workspace_dir, 'sorpmx.tif')
+
+        sv_reg = {
+            'aglive_{}_{}_path'.format(iel, pft_i): os.path.join(
+                self.workspace_dir, 'aglive.tif'),
+            'bglive_{}_{}_path'.format(iel, pft_i): os.path.join(
+                self.workspace_dir, 'bglive.tif'),
+            'crpstg_{}_{}_path'.format(iel, pft_i): os.path.join(
+                self.workspace_dir, 'crpstg.tif'),
+            'minerl_1_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_1.tif'),
+            'minerl_2_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_2.tif'),
+            'minerl_3_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_3.tif'),
+            'minerl_4_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_4.tif'),
+            'minerl_5_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_5.tif'),
+            'minerl_6_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_6.tif'),
+            'minerl_7_{}_path'.format(iel): os.path.join(
+                self.workspace_dir, 'minerl_7.tif'),
+        }
+        create_constant_raster(percent_cover_path, percent_cover)
+        create_constant_raster(eup_above_iel_path, eup_above_iel)
+        create_constant_raster(eup_below_iel_path, eup_below_iel)
+        create_constant_raster(plantNfix_path, plantNfix)
+        create_constant_raster(availm_path, availm)
+        create_constant_raster(eavail_path, eavail)
+        create_constant_raster(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], aglive_iel)
+        create_constant_raster(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], bglive_iel)
+        create_constant_raster(
+            sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], storage_iel)
+        for lyr in xrange(1, 8):
+            create_constant_raster(
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                minerl_dict['minerl_{}_iel'.format(lyr)])
+        create_constant_raster(pslsrb_path, pslsrb)
+        create_constant_raster(sorpmx_path, sorpmx)
+
+        forage.nutrient_uptake(
+            iel, nlay, percent_cover_path, eup_above_iel_path,
+            eup_below_iel_path, plantNfix_path, availm_path, eavail_path,
+            sv_reg, pft_i, pslsrb_path, sorpmx_path)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+            point_results['aglive_iel'] - tolerance,
+            point_results['aglive_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+            point_results['bglive_iel'] - tolerance,
+            point_results['bglive_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
+            point_results['storage_iel'] - tolerance,
+            point_results['storage_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_{}_path'.format(iel)],
+            point_results['minerl_1_iel'] - tolerance,
+            point_results['minerl_1_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_2_{}_path'.format(iel)],
+            point_results['minerl_2_iel'] - tolerance,
+            point_results['minerl_2_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_3_{}_path'.format(iel)],
+            point_results['minerl_3_iel'] - tolerance,
+            point_results['minerl_3_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_4_{}_path'.format(iel)],
+            point_results['minerl_4_iel'] - tolerance,
+            point_results['minerl_4_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_5_{}_path'.format(iel)],
+            point_results['minerl_5_iel'] - tolerance,
+            point_results['minerl_5_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_6_{}_path'.format(iel)],
+            point_results['minerl_6_iel'] - tolerance,
+            point_results['minerl_6_iel'] + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_7_{}_path'.format(iel)],
+            point_results['minerl_7_iel'] - tolerance,
+            point_results['minerl_7_iel'] + tolerance, _SV_NODATA)
+
+    def test_restrict_potential_growth(self):
+        """Test `restrict_potential_growth`.
+
+        Use the function `restrict_potential_growth` to restrict potential
+        growth according to the availability of mineral N and P. Test that
+        calculated growth matches values calculated by hand.
+
+        Raises:
+            AssertionError if restrict_potential_growth does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (3, 3)
+        tolerance = 0.00000001
+
+        # known inputs: no available mineral N
+        potenc = 100
+        availm_1 = 0.
+        availm_2 = 20.
+        snfxmx_1 = 0.
+        potenc_lim_minerl = 0.
+
+        # array-based inputs
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+        # N supplied by N fixation
+        potenc = 100.
+        availm_1 = 0.
+        availm_2 = 20.
+        snfxmx_1 = 10.
+        potenc_lim_minerl = potenc
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+        # N supplied by mineral source
+        potenc = 100.
+        availm_1 = 10.
+        availm_2 = 20.
+        snfxmx_1 = 0.
+        potenc_lim_minerl = potenc
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+        # no available P
+        potenc = 100.
+        availm_1 = 10.
+        availm_2 = 0.
+        snfxmx_1 = 0.
+        potenc_lim_minerl = 0.
+
+        potenc_ar = numpy.full(array_shape, potenc)
+        availm_1_ar = numpy.full(array_shape, availm_1)
+        availm_2_ar = numpy.full(array_shape, availm_2)
+        snfxmx_1_ar = numpy.full(array_shape, snfxmx_1)
+
+        potenc_lim_minerl_ar = forage.restrict_potential_growth(
+            potenc_ar, availm_1_ar, availm_2_ar, snfxmx_1_ar)
+        self.assert_all_values_in_array_within_range(
+            potenc_lim_minerl_ar, potenc_lim_minerl - tolerance,
+            potenc_lim_minerl + tolerance, _TARGET_NODATA)
+
+    def test_c_uptake_aboveground(self):
+        """Test `c_uptake_aboveground`.
+
+        Use the function `c_uptake_aboveground` to add new biomass production
+        to C in aboveground live biomass.  Test that the function matches
+        values calcualted by hand.
+
+        Raises:
+            AssertionError if`c_uptake_aboveground` does not match values
+                calculated by hand
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        array_shape = (3, 3)
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc = 100.3
+        cprodl = 20.2
+        rtsh = 0.6
+        modified_aglivc = 112.925
+
+        # array-based inputs
+        aglivc_ar = numpy.full(array_shape, aglivc)
+        cprodl_ar = numpy.full(array_shape, cprodl)
+        rtsh_ar = numpy.full(array_shape, rtsh)
+
+        modified_aglivc_ar = forage.c_uptake_aboveground(
+            aglivc_ar, cprodl_ar, rtsh_ar)
+        self.assert_all_values_in_array_within_range(
+            modified_aglivc_ar, modified_aglivc - tolerance,
+            modified_aglivc + tolerance, _SV_NODATA)
+
+        insert_nodata_values_into_array(aglivc_ar, _SV_NODATA)
+        insert_nodata_values_into_array(cprodl_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(rtsh_ar, _TARGET_NODATA)
+
+        modified_aglivc_ar = forage.c_uptake_aboveground(
+            aglivc_ar, cprodl_ar, rtsh_ar)
+        self.assert_all_values_in_array_within_range(
+            modified_aglivc_ar, modified_aglivc - tolerance,
+            modified_aglivc + tolerance, _SV_NODATA)
+
+    def test_new_growth(self):
+        """Test `_new_growth`.
+
+        Use the function `new_growth` to calculate growth of new above and
+        belowground biomass. Test that state variables for plant functional
+        types scheduled to senesce do not experience new growth. Test that
+        above and belowground biomass increases for plant functional types
+        not scheduled to senesce.
+
+        Raises:
+            AssertionError if `new_growth` produces change in biomass for
+                pft scheduled to senesce
+            AssertionError if `new_growth` fails to produce change in biomass
+                for pft not scheduled to senesce
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known values
+        initial_aglivc = 25.72
+        initial_bglivc = 156.4
+        initial_aglive_1 = 0.41
+        initial_aglive_2 = 0.32
+        initial_bglive_1 = 3.281
+        initial_bglive_2 = 0.372
+        initial_crpstg_1 = 0.03
+        initial_crpstg_2 = 0.01
+        initial_minerl_1 = 6.33
+        initial_minerl_2 = 14.38
+
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'pft_2': os.path.join(self.workspace_dir, 'pft_2.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 0.3)
+        create_constant_raster(aligned_inputs['pft_2'], 0.6)
+        site_param_table = {
+            1: {
+                'favail_1': 0.9,
+                'favail_4': 0.2,
+                'favail_5': 0.5,
+                'favail_6': 2.3,
+                'rictrl': 0.013,
+                'riint': 0.65,
+                'sorpmx': 2,
+                'pslsrb': 1,
+            }
+        }
+        veg_trait_table = {
+            1: {
+                'snfxmx_1': 0.03,
+                'senescence_month': '3',
+                'nlaypg': 5,
+            },
+            2: {
+                'snfxmx_1': 0.004,
+                'senescence_month': '5',
+                'nlaypg': 3,
+            }
+        }
+        sv_reg = {
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+            'minerl_2_1_path': os.path.join(
+                self.workspace_dir, 'minerl_2_1.tif'),
+            'minerl_3_1_path': os.path.join(
+                self.workspace_dir, 'minerl_3_1.tif'),
+            'minerl_4_1_path': os.path.join(
+                self.workspace_dir, 'minerl_4_1.tif'),
+            'minerl_5_1_path': os.path.join(
+                self.workspace_dir, 'minerl_5_1.tif'),
+            'minerl_1_2_path': os.path.join(
+                self.workspace_dir, 'minerl_1_2.tif'),
+            'minerl_2_2_path': os.path.join(
+                self.workspace_dir, 'minerl_2_2.tif'),
+            'minerl_3_2_path': os.path.join(
+                self.workspace_dir, 'minerl_3_2.tif'),
+            'minerl_4_2_path': os.path.join(
+                self.workspace_dir, 'minerl_4_2.tif'),
+            'minerl_5_2_path': os.path.join(
+                self.workspace_dir, 'minerl_5_2.tif'),
+        }
+        for lyr in xrange(1, 6):
+            create_constant_raster(
+                sv_reg['minerl_{}_1_path'.format(lyr)],
+                initial_minerl_1)
+            create_constant_raster(
+                sv_reg['minerl_{}_2_path'.format(lyr)],
+                initial_minerl_2)
+        for pft_i in [1, 2]:
+            sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglivc_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['aglivc_{}_path'.format(pft_i)], initial_aglivc)
+            sv_reg['bglivc_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'bglivc_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['bglivc_{}_path'.format(pft_i)], initial_bglivc)
+            sv_reg['aglive_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglive_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['aglive_1_{}_path'.format(pft_i)], initial_aglive_1)
+            sv_reg['aglive_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'aglive_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['aglive_2_{}_path'.format(pft_i)], initial_aglive_2)
+            sv_reg['bglive_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'bglive_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['bglive_1_{}_path'.format(pft_i)], initial_bglive_1)
+            sv_reg['bglive_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'bglive_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['bglive_2_{}_path'.format(pft_i)], initial_bglive_2)
+            sv_reg['crpstg_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_1_{}_path'.format(pft_i)], initial_crpstg_1)
+            sv_reg['crpstg_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_2_{}_path'.format(pft_i)], initial_crpstg_2)
+            sv_reg['crpstg_1_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_1_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_1_{}_path'.format(pft_i)], initial_crpstg_1)
+            sv_reg['crpstg_2_{}_path'.format(pft_i)] = os.path.join(
+                self.workspace_dir, 'crpstg_2_{}.tif'.format(pft_i))
+            create_constant_raster(
+                sv_reg['crpstg_2_{}_path'.format(pft_i)], initial_crpstg_2)
+
+        month_reg = {
+            'tgprod_pot_prod_1': os.path.join(
+                self.workspace_dir, 'tgprod_pot_prod_1.tif'),
+            'rtsh_1': os.path.join(
+                self.workspace_dir, 'rtsh_1.tif'),
+            'tgprod_pot_prod_2': os.path.join(
+                self.workspace_dir, 'tgprod_pot_prod_2.tif'),
+            'rtsh_2': os.path.join(
+                self.workspace_dir, 'rtsh_2.tif'),
+        }
+        for pft_i in [1, 2]:
+            for iel in [1, 2]:
+                month_reg['cercrp_min_above_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_min_above_{}_{}.tif'.format(
+                        iel, pft_i))
+                month_reg['cercrp_max_above_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_max_above_{}_{}.tif'.format(
+                        iel, pft_i))
+                month_reg['cercrp_min_below_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_min_below_{}_{}.tif'.format(
+                        iel, pft_i))
+                month_reg['cercrp_max_below_{}_{}'.format(
+                    iel, pft_i)] = os.path.join(
+                    self.workspace_dir, 'cercrp_max_below_{}_{}.tif'.format(
+                        iel, pft_i))
+        create_constant_raster(month_reg['tgprod_pot_prod_1'], 426.04)
+        create_constant_raster(month_reg['rtsh_1'], 0.3)
+        create_constant_raster(month_reg['tgprod_pot_prod_2'], 341.04)
+        create_constant_raster(month_reg['rtsh_2'], 0.6)
+        for pft_i in [1, 2]:
+            for iel in [1, 2]:
+                create_constant_raster(
+                    month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
+                    30.2)
+                create_constant_raster(
+                    month_reg['cercrp_max_above_{}_{}'.format(iel, pft_i)],
+                    94.2)
+                create_constant_raster(
+                    month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
+                    37.1)
+                create_constant_raster(
+                    month_reg['cercrp_max_below_{}_{}'.format(iel, pft_i)],
+                    56.29)
+
+        pft_id_set = set([1, 2])
+        current_month = 3
+
+        forage._new_growth(
+            pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+            sv_reg, month_reg, current_month)
+
+        # no growth for pft 1
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], initial_aglivc - tolerance,
+            initial_aglivc + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['bglivc_1_path'], initial_bglivc - tolerance,
+            initial_bglivc + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], initial_aglive_1 - tolerance,
+            initial_aglive_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], initial_aglive_2 - tolerance,
+            initial_aglive_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_1_path'], initial_crpstg_1 - tolerance,
+            initial_crpstg_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_1_path'], initial_crpstg_2 - tolerance,
+            initial_crpstg_2 + tolerance, _SV_NODATA)
+
+        # growth expected for pft 2
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_2_path'], initial_aglivc + 10,
+            initial_aglivc + 100, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['bglivc_2_path'], initial_bglivc + 10,
+            initial_bglivc + 100, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_2_path'], initial_aglive_1 + 0.5,
+            initial_aglive_1 + 10, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_2_path'], initial_aglive_2 + 0.5,
+            initial_aglive_2 + 10, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_1_2_path'], -tolerance, tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['crpstg_2_2_path'], -tolerance, tolerance, _SV_NODATA)
+
+        # uptake expected from mineral layers 1-3
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], 0, initial_minerl_1 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_2_1_path'], 0, initial_minerl_1 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_3_1_path'], 0, initial_minerl_1 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_2_path'], 0, initial_minerl_2 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_2_2_path'], 0, initial_minerl_2 - 0.2, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_3_2_path'], 0, initial_minerl_2 - 0.2, _SV_NODATA)
+
+        # no uptake expected from mineral layers 4-5
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_4_1_path'], initial_minerl_1 - tolerance,
+            initial_minerl_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_5_1_path'], initial_minerl_1 - tolerance,
+            initial_minerl_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_4_2_path'], initial_minerl_2 - tolerance,
+            initial_minerl_2 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_5_2_path'], initial_minerl_2 - tolerance,
+            initial_minerl_2 + tolerance, _SV_NODATA)

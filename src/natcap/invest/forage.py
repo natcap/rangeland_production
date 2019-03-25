@@ -160,11 +160,14 @@ _PERSISTENT_PARAMS_FILES = {
     'rnewbs_2_2_path': 'rnewbs_2_2.tif',
     }
 
-# values that are updated once per year
+# site-level values that are updated once per year
 _YEARLY_FILES = {
     'annual_precip_path': 'annual_precip.tif',
     'baseNdep_path': 'baseNdep.tif',
     }
+
+# pft-level values that are updated once per year
+_YEARLY_PFT_FILES = ['pltlig_above', 'pltlig_below']
 
 # intermediate values for each plant functional type that are shared
 # between submodels, but do not need to be saved as output
@@ -178,7 +181,7 @@ _PFT_INTERMEDIATE_VALUES = [
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
-_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt']
+_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt', 'bgwfunc']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -631,6 +634,10 @@ def execute(args):
     year_reg = dict(
         [(key, os.path.join(year_dir, path)) for key, path in
             _YEARLY_FILES.iteritems()])
+    for pft_i in pft_id_set:
+        for file in _YEARLY_PFT_FILES:
+            year_reg['{}_{}'.format(file, pft_i)] = os.path.join(
+                year_dir, '{}_{}.tif'.format(file, pft_i))
 
     # make monthly directory for monthly intermediate parameters that are
     # shared between submodels, but do not need to be saved as output
@@ -650,8 +657,8 @@ def execute(args):
         if (month_index % 12) == 0:
             # Update yearly quantities
             _yearly_tasks(
-                aligned_inputs['site_index'], site_param_table,
-                aligned_inputs, month_index, year_reg)
+                aligned_inputs, site_param_table, veg_trait_table, month_index,
+                year_reg, pft_id_set)
 
         current_month = (starting_month + month_index - 1) % 12 + 1
         year = starting_year + (starting_month + month_index - 1) // 12
@@ -687,6 +694,22 @@ def execute(args):
         _decomposition(
             aligned_inputs, current_month, month_index, site_param_table,
             year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg)
+
+        _death_and_partition(
+            'stded', aligned_inputs, site_param_table, current_month,
+            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+
+        _death_and_partition(
+            'bgliv', aligned_inputs, site_param_table, current_month,
+            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+
+        _shoot_senescence(
+            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
+            current_month)
+
+        _new_growth(
+            pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+            sv_reg, month_reg, current_month)
 
 
 def raster_multiplication(
@@ -1754,78 +1777,46 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
 
 def _yearly_tasks(
-        site_index_path, site_param_table, aligned_inputs, month_index,
-        year_reg):
+        aligned_inputs, site_param_table, veg_trait_table, month_index,
+        year_reg, pft_id_set):
     """Calculate quantities that remain static for 12 months.
 
-    These quantities are annual precipitation and annual atmospheric N
-    deposition. Century also calculates non-symbiotic soil N fixation once
-    yearly, but here those were moved to monthly tasks.
-    Century uses precipitation in the future 12 months (prcgrw) to predict
-    root:shoot ratios, but here we instead use the sum of monthly
-    precipitation in 12 months including the current one, if data for 12
-    future months are not available.
-    Lines 79-82 Eachyr.f
+    These quantities are annual precipitation, annual atmospheric N
+    deposition, and the fraction of plant residue which is lignin for each pft.
+    Century also calculates non-symbiotic soil N fixation once yearly, but here
+    those were moved to monthly tasks. Century uses precipitation in the future
+    12 months (prcgrw) to predict root:shoot ratios, but here we instead use
+    the sum of monthly precipitation in 12 months including the current one, if
+    data for 12 future months are not available.
+    Lines 79-82, 164 Eachyr.f
 
     Parameters:
-        site_index_path (string): path to site spatial index raster
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including monthly precipitation and site
+            spatial index raster
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
-        aligned_inputs (dict): map of key, path pairs indicating paths
-            to aligned model inputs, including monthly precipitation
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
         month_index (int): current monthly step, relative to 0 so that
             month_index=0 at first monthly time step
         year_reg (dict): map of key, path pairs giving paths to the annual
             precipitation and N deposition rasters
+        pft_id_set (set): set of integers identifying plant functional types
 
-    Modifies the rasters year_reg['annual_precip_path'] and
-        year_reg['baseNdep_path']
+    Modifies:
+        the rasters indicated by:
+            year_reg['annual_precip_path']
+            year_reg['baseNdep_path']
+            year_reg['pltlig_above_<pft>'] for each pft
+            year_reg['pltlig_below_<pft>'] for each pft
 
     Returns:
         None
 
     Raises:
-        ValueError if less than 12 monthly precipitation rasters can be found
+        ValueError if fewer than 12 monthly precipitation rasters can be found
     """
-    offset = -12
-    annual_precip_rasters = []
-    while len(annual_precip_rasters) < 12:
-        offset += 1
-        if offset == 12:
-            raise ValueError("Insufficient precipitation rasters were found")
-        precip_month = month_index + offset
-        try:
-            annual_precip_rasters.append(
-                    aligned_inputs['precip_%d' % precip_month])
-        except KeyError:
-            continue
-
-    precip_nodata = set([])
-    for precip_raster in annual_precip_rasters:
-        precip_nodata.update(
-            set([pygeoprocessing.get_raster_info(precip_raster)['nodata'][0]]))
-    if len(precip_nodata) > 1:
-        raise ValueError("Precipitation rasters include >1 nodata value")
-    precip_nodata = list(precip_nodata)[0]
-
-    raster_list_sum(
-        annual_precip_rasters, precip_nodata, year_reg['annual_precip_path'],
-        _TARGET_NODATA)
-
-    # calculate base N deposition
-    # intermediate parameter rasters for this operation
-    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
-    param_val_dict = {}
-    for val in['epnfa_1', 'epnfa_2']:
-        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        param_val_dict[val] = target_path
-        site_to_val = dict(
-            [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
-        pygeoprocessing.reclassify_raster(
-            (site_index_path, 1), site_to_val, target_path,
-            gdal.GDT_Float32, _IC_NODATA)
-
     def calc_base_N_dep(epnfa_1, epnfa_2, prcann):
         """Calculate base annual atmospheric N deposition.
 
@@ -1851,12 +1842,111 @@ def _yearly_tasks(
         baseNdep[baseNdep < 0] = 0.
         return baseNdep
 
+    def calc_pltlig(fligni_1_lyr, fligni_2_lyr, prcann):
+        """Calculate the fraction of residue that is lignin. Cmplig.f
+
+        This fraction is used to calculate the fraction of residue (i.e.,
+        incoming litter from fall of standing dead or incoming soil from death
+        of roots) that is partitioned to metabolic vs structural pools. It is
+        calculated once per year from annual precipitation and fixed
+        parameters.
+
+        Parameters:
+            fligni_1_lyr (numpy.ndarray): parameter, intercept for regression
+                predicting lignin content fraction from rainfall
+            fligni_2_lyr (numpy.ndarray): parameter, slope for regression
+                predicting lignin content fraction from rainfall
+            prcann (numpy.ndarray): derived, annual precipitation
+
+        Returns:
+            pltlig_lyr, fraction of residue that is lignin
+        """
+        valid_mask = (
+            (fligni_1_lyr != _IC_NODATA) &
+            (fligni_2_lyr != _IC_NODATA) &
+            (prcann != _TARGET_NODATA))
+
+        pltlig = numpy.empty(fligni_1_lyr.shape, dtype=numpy.float32)
+        pltlig[:] = _TARGET_NODATA
+        pltlig[valid_mask] = (
+            fligni_1_lyr[valid_mask] + fligni_2_lyr[valid_mask] *
+            prcann[valid_mask])
+        pltlig[valid_mask] = numpy.clip(pltlig[valid_mask], 0.02, 0.5)
+        return pltlig
+
+    offset = -12
+    annual_precip_rasters = []
+    while len(annual_precip_rasters) < 12:
+        offset += 1
+        if offset == 12:
+            raise ValueError("Insufficient precipitation rasters were found")
+        precip_month = month_index + offset
+        try:
+            annual_precip_rasters.append(
+                    aligned_inputs['precip_%d' % precip_month])
+        except KeyError:
+            continue
+
+    precip_nodata = set([])
+    for precip_raster in annual_precip_rasters:
+        precip_nodata.update(
+            set([pygeoprocessing.get_raster_info(precip_raster)['nodata'][0]]))
+    if len(precip_nodata) > 1:
+        raise ValueError("Precipitation rasters include >1 nodata value")
+    precip_nodata = list(precip_nodata)[0]
+
+    raster_list_sum(
+        annual_precip_rasters, precip_nodata, year_reg['annual_precip_path'],
+        _TARGET_NODATA)
+
+    # intermediate parameter rasters for this operation
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    param_val_dict = {}
+    for val in['epnfa_1', 'epnfa_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    for val in ['fligni_1_1', 'fligni_2_1', 'fligni_1_2', 'fligni_2_2']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
+                [_IC_NODATA], fill_value_list=[fill_val])
+
+    # calculate base N deposition
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             param_val_dict['epnfa_1'], param_val_dict['epnfa_2'],
             year_reg['annual_precip_path']]],
         calc_base_N_dep, year_reg['baseNdep_path'], gdal.GDT_Float32,
         _TARGET_NODATA)
+
+    for pft_i in pft_id_set:
+        # fraction of surface residue that is lignin
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['fligni_1_1_{}'.format(pft_i)],
+                param_val_dict['fligni_2_1_{}'.format(pft_i)],
+                year_reg['annual_precip_path']]],
+            calc_pltlig, year_reg['pltlig_above_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # fraction of soil residue that is lignin
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                param_val_dict['fligni_1_2_{}'.format(pft_i)],
+                param_val_dict['fligni_2_2_{}'.format(pft_i)],
+                year_reg['annual_precip_path']]],
+            calc_pltlig, year_reg['pltlig_below_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -2368,7 +2458,7 @@ def _potential_production(
 
         Returns:
             tgprod_pot_prod, total above- and belowground potential biomass
-                production
+                production (g biomass)
         """
         valid_mask = (
             (prdx_1 != _IC_NODATA) &
@@ -2587,9 +2677,41 @@ def _calc_favail_P(sv_reg, param_val_dict):
         gdal.GDT_Float32, _IC_NODATA)
 
 
+def _calc_avail_mineral_nutrient(pft_param_dict, sv_reg, iel, target_path):
+    """Calculate one mineral nutrient available to one plant functional type.
+
+    The mineral nutrient available to a plant functional type is calculated
+    from the mineral nutrient content of soil layers accessible by that
+    plant function type.
+
+    Parameters:
+        pft_param_dict (dict): map of key, value pairs giving the values of
+            parameters for this plant functional type
+            (i.e., veg_trait_table[pft_i] for this pft_i)
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month
+        iel (int): integer index for current nutrient (1=N, 2=P)
+        target_path (string): path to raster to contain available mineral
+            nutrient for this plant functional type and nutrient
+
+    Modifies:
+        the raster indicated by `target_path`
+
+    Returns:
+        None
+    """
+    nlay = int(pft_param_dict['nlaypg'])
+    mineral_raster_list = [
+        sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
+            1, nlay + 1)]
+    raster_list_sum(
+        mineral_raster_list, _SV_NODATA, target_path, _TARGET_NODATA,
+        nodata_remove=True)
+
+
 def _calc_available_nutrient(
         pft_i, iel, pft_param_dict, sv_reg, site_param_table, site_index_path,
-        favail_path, tgprod_path, eavail_path):
+        availm_path, favail_path, tgprod_path, eavail_path):
     """Calculate nutrient available to a plant functional type.
 
     The nutrient available is the sum of mineral nutrient (N or P) in soil
@@ -2606,6 +2728,8 @@ def _calc_available_nutrient(
         sv_reg (dict): map of key, path pairs giving paths to state
             variables for the current month
         site_index_path (string): path to site spatial index raster
+        availm_path (string): path to raster containing available mineral
+            nutrient for the given plant functional type and nutrient
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
         favail_path (string): path to raster containing the appropriate value
@@ -2613,8 +2737,7 @@ def _calc_available_nutrient(
             directly as user input, but for phosphorus, it must be calculated
             from other parameters.
         tgprod_path (string): path to raster containing total potential
-            production limited by shortwave radiation, temperature, and
-            moisture
+            production (g biomass)
         eavail_path (string): path to location to store the result, nutrient
             available to the plant functional type
 
@@ -2648,6 +2771,7 @@ def _calc_available_nutrient(
             (rictrl != _IC_NODATA) &
             (~numpy.isclose(bglivc, _SV_NODATA)) &
             (riint != _IC_NODATA) &
+            (availm != _TARGET_NODATA) &
             (favail != _IC_NODATA) &
             (~numpy.isclose(crpstg, _SV_NODATA)))
 
@@ -2679,10 +2803,11 @@ def _calc_available_nutrient(
             snfxmx (numpy.ndarray): parameter, maximum rate of symbiotic
                 nitrogen fixation
             tgprod (numpy.ndarray): derived, total above- and belowground
-                potential production
+                potential production (g biomass)
 
         Returns:
             eavail, total N available including N fixed by the plant
+
         """
         valid_mask = (
             (eavail_prior != _TARGET_NODATA) &
@@ -2700,10 +2825,6 @@ def _calc_available_nutrient(
 
     # temporary intermediate rasters for calculating available nutrient
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
-    temp_val_dict = {}
-    for val in ['availm']:
-        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-
     param_val_dict = {}
     for val in ['rictrl', 'riint']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
@@ -2722,21 +2843,12 @@ def _calc_available_nutrient(
             site_index_path, target_path, gdal.GDT_Float32,
             [_IC_NODATA], fill_value_list=[fill_val])
 
-    nlay = int(pft_param_dict['nlaypg'])
-    mineral_raster_list = [
-        sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
-            1, nlay + 1)]
-    raster_list_sum(
-        mineral_raster_list, _SV_NODATA, temp_val_dict['availm'],
-        _TARGET_NODATA, nodata_remove=True)
-
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             param_val_dict['rictrl'],
             sv_reg['bglivc_{}_path'.format(pft_i)],
             param_val_dict['riint'],
-            temp_val_dict['availm'],
-            favail_path,
+            availm_path, favail_path,
             sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]],
         calc_eavail, eavail_path,
         gdal.GDT_Float32, _TARGET_NODATA)
@@ -3431,9 +3543,9 @@ def calc_final_tgprod_rtsh(
         gremb_path (string): path to raster containing the parameter
             gremb, the grazing effect multiplier
         tgprod_path (string): path to raster containing final total
-            potential production
+            potential production (g biomass)
         rtsh_path (string): path to raster containing final root:shoot
-            ratio
+            ratio of potential production
 
     Modifies:
         The raster indicated by tgprod_path
@@ -3474,9 +3586,9 @@ def _root_shoot_ratio(
         veg_trait_table, prev_sv_reg, year_reg, month_reg):
     """Calculate final potential production and root:shoot ratio.
 
-    Final potential production and root:shoot ratio is calculated according
-    to nutrient availability and demand for the nutrient, and the impact of
-    defoliation by herbivores. CropDynC.f
+    Final potential biomass production and root:shoot ratio is calculated
+    according to nutrient availability and demand for the nutrient, and the
+    impact of defoliation by herbivores. CropDynC.f
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
@@ -3496,13 +3608,14 @@ def _root_shoot_ratio(
             calculated values that are shared between submodels
 
     Modifies:
-        The raster indicated by `month_reg['tgprod_<PFT>']` for each
-            plant functional type (PFT)
+        The raster indicated by `month_reg['tgprod_<PFT>']`, total potential
+            production (g biomass) for each plant functional type (PFT)
         The raster indicated by `month_reg['rtsh_<PFT>']` for each
             plant functional type (PFT)
 
     Returns:
         None
+
     """
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
@@ -3520,14 +3633,14 @@ def _root_shoot_ratio(
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for pft_i in do_PFT:
-        for val in ['fracrc_p', 'fracrc']:
+        for val in ['fracrc_p', 'fracrc', 'availm']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
         for iel in [1, 2]:
             for val in ['eavail', 'demand']:
                 temp_val_dict[
-                    '{}_{}_{}'.format(val, pft_i, iel)] = os.path.join(
-                        temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
+                    '{}_{}_{}'.format(val, iel, pft_i)] = os.path.join(
+                        temp_dir, '{}_{}_{}.tif'.format(val, iel, pft_i))
 
     # temporary parameter rasters for root:shoot submodel
     param_val_dict = {}
@@ -3561,9 +3674,9 @@ def _root_shoot_ratio(
                     'pramn_1', 'pramn_2', 'pramx_1', 'pramx_2', 'prbmn_1',
                     'prbmn_2', 'prbmx_1', 'prbmx_2']:
                 target_path = os.path.join(
-                    temp_dir, '{}_{}_{}.tif'.format(val, pft_i, iel))
+                    temp_dir, '{}_{}_{}.tif'.format(val, iel, pft_i))
                 param_val_dict[
-                    '{}_{}_{}'.format(val, pft_i, iel)] = target_path
+                    '{}_{}_{}'.format(val, iel, pft_i)] = target_path
                 fill_val = veg_trait_table[pft_i]['{}_{}'.format(val, iel)]
                 pygeoprocessing.new_raster_from_base(
                     aligned_inputs['site_index'], target_path,
@@ -3593,40 +3706,45 @@ def _root_shoot_ratio(
         for iel in [1, 2]:
             # persistent ratios used here and in plant growth submodel
             calc_ce_ratios(
-                param_val_dict['pramn_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['pramn_2_{}_{}'.format(pft_i, iel)],
+                param_val_dict['pramn_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['pramn_2_{}_{}'.format(iel, pft_i)],
                 prev_sv_reg['aglivc_{}_path'.format(pft_i)],
                 param_val_dict['biomax_{}'.format(pft_i)],
-                param_val_dict['pramx_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['pramx_2_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmn_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmn_2_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmx_1_{}_{}'.format(pft_i, iel)],
-                param_val_dict['prbmx_2_{}_{}'.format(pft_i, iel)],
+                param_val_dict['pramx_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['pramx_2_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmn_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmn_2_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmx_1_{}_{}'.format(iel, pft_i)],
+                param_val_dict['prbmx_2_{}_{}'.format(iel, pft_i)],
                 year_reg['annual_precip_path'], month_reg,
                 pft_i, iel)
+            # sum of mineral nutrient in accessible soil layers
+            _calc_avail_mineral_nutrient(
+                veg_trait_table[pft_i], prev_sv_reg, iel,
+                temp_val_dict['availm_{}'.format(pft_i)])
             # eavail_iel, available nutrient
             _calc_available_nutrient(
                 pft_i, iel, veg_trait_table[pft_i], prev_sv_reg,
                 site_param_table, aligned_inputs['site_index'],
+                temp_val_dict['availm_{}'.format(pft_i)],
                 param_val_dict['favail_{}'.format(iel)],
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
-                temp_val_dict['eavail_{}_{}'.format(pft_i, iel)])
+                temp_val_dict['eavail_{}_{}'.format(iel, pft_i)])
             # demand_iel, demand for the nutrient
             _calc_nutrient_demand(
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 temp_val_dict['fracrc_p_{}'.format(pft_i)],
                 month_reg['cercrp_min_above_{}_{}'.format(iel, pft_i)],
                 month_reg['cercrp_min_below_{}_{}'.format(iel, pft_i)],
-                temp_val_dict['demand_{}_{}'.format(pft_i, iel)])
+                temp_val_dict['demand_{}_{}'.format(iel, pft_i)])
         # revised fraction of carbon allocated to roots
         calc_revised_fracrc(
             param_val_dict['frtcindx_{}'.format(pft_i)],
             temp_val_dict['fracrc_p_{}'.format(pft_i)],
-            temp_val_dict['eavail_{}_1'.format(pft_i)],
-            temp_val_dict['eavail_{}_2'.format(pft_i)],
-            temp_val_dict['demand_{}_1'.format(pft_i)],
-            temp_val_dict['demand_{}_2'.format(pft_i)],
+            temp_val_dict['eavail_1_{}'.format(pft_i)],
+            temp_val_dict['eavail_2_{}'.format(pft_i)],
+            temp_val_dict['demand_1_{}'.format(pft_i)],
+            temp_val_dict['demand_2_{}'.format(pft_i)],
             month_reg['h2ogef_1_{}'.format(pft_i)],
             param_val_dict['cfrtcw_1_{}'.format(pft_i)],
             param_val_dict['cfrtcw_2_{}'.format(pft_i)],
@@ -5987,10 +6105,6 @@ def remove_leached_iel(
         orgflow[valid_mask] = cleach[valid_mask] / rceof1_2[valid_mask]
         return orgflow
 
-        rceof1_2 = som1c_2 / som1e_2_2 * 35
-        orgflow_2 = cleach / rceof1_2
-        return orgflow
-
     with tempfile.NamedTemporaryFile(
             prefix='operand_temp', delete=False,
             dir=PROCESSING_DIR) as operand_temp_file:
@@ -6242,8 +6356,31 @@ def _decomposition(
             pevap[no_melt_mask])
         return rprpet
 
+    def calc_bgwfunc(rprpet):
+        """Calculate the impact of belowground water content on decomposition.
+
+        Bgwfunc reflects the effect of soil moisture on decomposition and is
+        also used to calculate shoot senescence due to water stress. It is
+        calculated from the ratio of soil water in the top two soil layers to
+        reference evapotranspiration.
+
+        Parameters:
+            rprpet (numpy.ndarray): derived, ratio of precipitation or snowmelt
+                to reference evapotranspiration
+
+        Returns:
+            bgwfunc, the effect of soil moisture on decomposition
+        """
+        valid_mask = (rprpet != _TARGET_NODATA)
+        bgwfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        bgwfunc[:] = _TARGET_NODATA
+        bgwfunc[valid_mask] = (
+            1. / (1. + 30 * numpy.exp(-8.5 * rprpet[valid_mask])))
+        bgwfunc[(valid_mask & (rprpet > 9))] = 1
+        return bgwfunc
+
     def calc_defac(
-            rprpet, snow, min_temp, max_temp, teff_1, teff_2, teff_3, teff_4):
+            bgwfunc, snow, min_temp, max_temp, teff_1, teff_2, teff_3, teff_4):
         """Calculate decomposition factor.
 
         The decomposition factor influences the rate of surface and soil
@@ -6251,8 +6388,8 @@ def _decomposition(
         moisture. Lines 151-200, Cycle.f.
 
         Parameters:
-            rprpet (numpy.ndarray): derived, ratio of precipitation or snowmelt
-                to reference evapotranspiration
+            bgwfunc (numpy.ndarray): derived, effect of soil moisture on
+                decomposition
             snow (numpy.ndarray): state variable, current snowpack
             min_temp (numpy.ndarray): input, minimum temperature for the month
             max_temp (numpy.ndarray): input, maximum temperature for the month
@@ -6272,7 +6409,7 @@ def _decomposition(
             defac, aboveground and belowground decomposition factor
         """
         valid_mask = (
-            (rprpet != _TARGET_NODATA) &
+            (bgwfunc != _TARGET_NODATA) &
             (snow != _TARGET_NODATA) &
             (~numpy.isclose(min_temp, min_temp_nodata)) &
             (~numpy.isclose(max_temp, max_temp_nodata)) &
@@ -6280,19 +6417,12 @@ def _decomposition(
             (teff_2 != _IC_NODATA) &
             (teff_3 != _IC_NODATA) &
             (teff_4 != _IC_NODATA))
-
-        agwfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
-        agwfunc[:] = _TARGET_NODATA
-        agwfunc[valid_mask] = (
-            1. / (1. + 30 * numpy.exp(-8.5 * rprpet[valid_mask])))
-        agwfunc[(valid_mask & (rprpet > 9))] = 1
-
-        stemp = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        stemp = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         stemp[:] = _TARGET_NODATA
         stemp[valid_mask] = (min_temp[valid_mask] + max_temp[valid_mask]) / 2.
         stemp[(valid_mask & (snow > 0))] = 0.
 
-        tfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        tfunc = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         tfunc[:] = _TARGET_NODATA
         tfunc[valid_mask] = numpy.maximum(
             0.01,
@@ -6303,10 +6433,10 @@ def _decomposition(
                 numpy.arctan(numpy.pi * teff_4[valid_mask] *
                 (30.0 - teff_1[valid_mask]))))
 
-        defac = numpy.empty(rprpet.shape, dtype=numpy.float32)
+        defac = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         defac[:] = _TARGET_NODATA
         defac[valid_mask] = numpy.maximum(
-            0., tfunc[valid_mask] * agwfunc[valid_mask])
+            0., tfunc[valid_mask] * bgwfunc[valid_mask])
         return defac
 
     def calc_pheff_struc(pH):
@@ -6442,10 +6572,16 @@ def _decomposition(
         calc_rprpet, temp_val_dict['rprpet'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
+    # bgwfunc, effect of soil moisture on decomposition
+    pygeoprocessing.raster_calculator(
+        [(temp_val_dict['rprpet'], 1)],
+        calc_bgwfunc, month_reg['bgwfunc'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
     # defac, decomposition factor calculated from soil temp and moisture
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
-            temp_val_dict['rprpet'], sv_reg['snow_path'],
+            month_reg['bgwfunc'], sv_reg['snow_path'],
             aligned_inputs['min_temp_{}'.format(current_month)],
             aligned_inputs['max_temp_{}'.format(current_month)],
             param_val_dict['teff_1'], param_val_dict['teff_2'],
@@ -6511,6 +6647,13 @@ def _decomposition(
             sv_reg['{}_path'.format(state_var)])
         delta_sv_dict[state_var] = os.path.join(
             temp_dir, '{}.tif'.format(state_var))
+    # surface mineral N in sv_reg was initialized by _monthly_N_fixation;
+    # copy other layers to current sv_reg here
+    for lyr in xrange(2, nlayer_max + 1):
+        state_var = 'minerl_{}_1'.format(lyr)
+        shutil.copyfile(
+            prev_sv_reg['{}_path'.format(state_var)],
+            sv_reg['{}_path'.format(state_var)])
     for compartment in ['strlig']:
         for lyr in [1, 2]:
             state_var = '{}_{}'.format(compartment, lyr)
@@ -7376,3 +7519,1899 @@ def _decomposition(
         temp_val_dict['d_statv_temp'], _SV_NODATA,
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['minerl_1_1_path'], _SV_NODATA)
+
+
+def partit(
+        cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
+        site_index_path, site_param_table, lyr):
+    """Partition incoming material into structural and metabolic pools.
+
+    When organic material is added to the soil, for example as dead
+    biomass falls and becomes litter, or when organic material is added
+    from animal waste, it is partitioned into structural (STRUCC_lyr) and
+    metabolic (METABC_lyr) material according to the ratio of lignin to N in
+    the residue. As residue is partitioned, some N and P may be directly
+    absorbed from surface mineral N or P into the residue.
+
+    Parameters:
+        cpart_path (string): path to raster containing C in incoming material
+            that is to be partitioned
+        epart_1_path (string): path to raster containing N in incoming
+            material
+        epart_2_path (string): path to raster containing P in incoming
+            material
+        frlign_path (string): path to raster containing fraction of incoming
+            material that is lignin
+        sv_reg (dict): map of key, path pairs giving paths to current state
+            variables
+        site_index_path (string): path to site spatial index raster
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        lyr (int): layer which is receiving the incoming material (i.e.,
+            1=surface layer, 2=soil layer)
+
+    Modifies:
+        the rasters indicated by the following paths:
+            sv_reg['minerl_1_1_path']
+            sv_reg['minerl_1_2_path']
+            sv_reg['metabc_{}_path'.format(lyr)]
+            sv_reg['strucc_{}_path'.format(lyr)]
+            sv_reg['metabe_{}_1_path'.format(lyr)]
+            sv_reg['metabe_{}_2_path'.format(lyr)]
+            sv_reg['struce_{}_1_path'.format(lyr)]
+            sv_reg['struce_{}_2_path'.format(lyr)]
+            sv_reg['strlig_{}_path'.format(lyr)]
+
+    Returns:
+        None
+    """
+    def calc_dirabs(
+            cpart, epart_iel, minerl_1_iel, damr_lyr_iel, pabres, damrmn_iel):
+        """Calculate direct absorption of mineral N or P.
+
+        When organic material is added to the soil, some mineral N or P may
+        be directly absorbed from the surface mineral layer into the incoming
+        material. the amount transferred depends on the N or P in the incoming
+        material and the required C/N or C/P ratio of receiving material.
+
+        Parameters:
+            cpart (numpy.ndarray): derived, C in incoming material
+            epart_iel (numpy.ndarray): derived, <iel> in incoming material
+            minerl_1_iel (numpy.ndarray): state variable, surface mineral <iel>
+            damr_lyr_iel (numpy.ndarray): parameter, fraction of iel in lyr
+                absorbed by residue
+            pabres (numpy.ndarray): parameter, amount of residue which will
+                give maximum direct absorption of iel
+            damrmn_iel (numpy.ndarray): parameter, minimum C/iel ratio allowed
+                in residue after direct absorption
+
+        Returns:
+            dirabs_iel, <iel> (N or P) absorbed from the surface mineral pool
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (epart_iel != _TARGET_NODATA) &
+            (~numpy.isclose(minerl_1_iel, _SV_NODATA)) &
+            (damr_lyr_iel != _IC_NODATA) &
+            (pabres != _IC_NODATA) &
+            (damrmn_iel != _IC_NODATA))
+
+        dirabs_iel = numpy.empty(cpart.shape, dtype=numpy.float32)
+        dirabs_iel[:] = _TARGET_NODATA
+        dirabs_iel[valid_mask] = 0.
+
+        minerl_mask = ((minerl_1_iel >= 0) & valid_mask)
+        dirabs_iel[minerl_mask] = (
+            damr_lyr_iel[minerl_mask] * minerl_1_iel[minerl_mask] *
+            numpy.maximum(cpart[minerl_mask] / pabres[minerl_mask], 1.))
+
+        # rcetot: C/E ratio of incoming material
+        rcetot = numpy.empty(cpart.shape, dtype=numpy.float32)
+        rcetot[:] = _IC_NODATA
+        e_sufficient_mask = (((epart_iel + dirabs_iel) > 0) & valid_mask)
+        rcetot[valid_mask] = 0
+        rcetot[e_sufficient_mask] = (
+            cpart[e_sufficient_mask] / (
+                epart_iel[e_sufficient_mask] + dirabs_iel[e_sufficient_mask]))
+
+        dirabs_mod_mask = ((rcetot < damrmn_iel) & valid_mask)
+        dirabs_iel[dirabs_mod_mask] = numpy.maximum(
+            cpart[dirabs_mod_mask] / damrmn_iel[dirabs_mod_mask] -
+            epart_iel[dirabs_mod_mask], 0.)
+        return dirabs_iel
+
+    def calc_d_metabc_lyr(cpart, epart_1, dirabs_1, frlign, spl_1, spl_2):
+        """Calculate the change in metabolic C after addition of new material.
+
+        Parameters:
+            cpart (numpy.ndarray): C in incoming material
+            epart_1 (numpy.ndarray): N in incoming material
+            dirabs_1 (numpy.ndarray): derived, direct aborption of mineral N
+                into incoming material
+            frlign (numpy.ndarray): fraction of incoming material which is
+                lignin
+            spl_1 (numpy.ndarray): parameter, intercept of regression
+                predicting fraction of residue going to metabolic
+            spl_2 (numpy.ndarray): parameter, slope of regression predicting
+                fraction of residue going to metabolic
+
+        Returns:
+            d_metabc_lyr, change in metabc_lyr
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (epart_1 != _TARGET_NODATA) &
+            (frlign != _TARGET_NODATA) &
+            (spl_1 != _IC_NODATA) &
+            (spl_2 != _IC_NODATA))
+
+        # rlnres: ratio of lignin to N in the incoming material
+        rlnres = numpy.empty(cpart.shape, dtype=numpy.float32)
+        rlnres[:] = _TARGET_NODATA
+        rlnres[valid_mask] = (
+            frlign[valid_mask] / (
+                (epart_1[valid_mask] + dirabs_1[valid_mask]) /
+                (cpart[valid_mask] * 2.5)))
+
+        # frmet: fraction of cpart that goes to metabolic
+        frmet = numpy.empty(cpart.shape, dtype=numpy.float32)
+        frmet[:] = _TARGET_NODATA
+        frmet[valid_mask] = (
+            spl_1[valid_mask] - spl_2[valid_mask] * rlnres[valid_mask])
+
+        lign_exceeded_mask = ((frlign > (1. - frmet)) & valid_mask)
+        frmet[lign_exceeded_mask] = 1. - frlign[lign_exceeded_mask]
+
+        d_metabc_lyr = numpy.empty(cpart.shape, dtype=numpy.float32)
+        d_metabc_lyr[:] = _TARGET_NODATA
+        d_metabc_lyr[valid_mask] = cpart[valid_mask] * frmet[valid_mask]
+        return d_metabc_lyr
+
+    def calc_d_strucc_lyr(cpart, d_metabc_lyr):
+        """Calculate change in structural C after addition of new material.
+
+        Parameters:
+            cpart (numpy.ndarray): derived, C in incoming material
+            d_metabc_lyr (numpy.ndarray) derived, change in metabc_lyr
+
+        Returns:
+            d_strucc_lyr, change in strucc_lyr
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (d_metabc_lyr != _TARGET_NODATA))
+
+        d_strucc_lyr = numpy.empty(cpart.shape, dtype=numpy.float32)
+        d_strucc_lyr[:] = _TARGET_NODATA
+        d_strucc_lyr[valid_mask] = cpart[valid_mask] - d_metabc_lyr[valid_mask]
+        return d_strucc_lyr
+
+    def calc_d_struce_lyr_iel(d_strucc_lyr, rcestr_iel):
+        """Calculate the change in N or P in structural material in layer lyr.
+
+        Parameters:
+            d_strucc_lyr (numpy.ndarray): change in strucc_lyr with addition of
+                incoming material
+            rcestr_iel (numpy.ndarray): parameter, C/<iel> ratio for structural
+                material
+
+        Returns:
+            d_struce_lyr_iel, change in structural N or P in layer lyr
+        """
+        valid_mask = (
+            (d_strucc_lyr != _TARGET_NODATA) &
+            (rcestr_iel != _IC_NODATA))
+
+        d_struce_lyr_iel = numpy.empty(d_strucc_lyr.shape, dtype=numpy.float32)
+        d_struce_lyr_iel[valid_mask] = (
+            d_strucc_lyr[valid_mask] / rcestr_iel[valid_mask])
+        return d_struce_lyr_iel
+
+    def calc_d_metabe_lyr_iel(cpart, epart_iel, dirabs_iel, d_struce_lyr_iel):
+        """Calculate the change in N or P in metabolic material in layer lyr.
+
+        Parameters:
+            cpart (numpy.ndarray): C in incoming material
+            epart_iel (numpy.ndarray): <iel> in incoming material
+            dirabs_iel (numpy.ndarray): <iel> absorbed from the surface mineral
+                pool
+            d_struce_lyr_iel (numpy.ndarray): change in structural N or P in
+                layer lyr
+
+        Returns:
+            d_metabe_lyr_iel, change in metabolic N or P in layer lyr
+        """
+        valid_mask = (
+            (cpart != _TARGET_NODATA) &
+            (epart_iel != _TARGET_NODATA) &
+            (dirabs_iel != _TARGET_NODATA) &
+            (d_struce_lyr_iel != _TARGET_NODATA))
+
+        d_metabe_lyr_iel = numpy.empty(cpart.shape, dtype=numpy.float32)
+        d_metabe_lyr_iel[:] = _TARGET_NODATA
+        d_metabe_lyr_iel[valid_mask] = (
+            epart_iel[valid_mask] + dirabs_iel[valid_mask] -
+            d_struce_lyr_iel[valid_mask])
+        return d_metabe_lyr_iel
+
+    def calc_d_strlig_lyr(frlign, d_strucc_lyr, cpart, strlig_lyr, strucc_lyr):
+        """Calculate change in fraction of lignin in structural material.
+
+        Parameters:
+            frlign (numpy.ndarray): fraction of incoming material which is
+                lignin
+            d_strucc_lyr (numpy.ndarray): change in strucc_lyr with addition of
+                incoming material
+            cpart (numpy.ndarray): C in incoming material
+            strlig_lyr (numpy.ndarray): state variable, lignin in structural
+                material in receiving layer
+            strucc_lyr (numpy.ndarray): state variable, C in structural
+                material in layer lyr
+
+        Returns:
+            d_strlig_lyr, change in fraction of lignin in structural material
+                in layer lyr
+        """
+        valid_mask = (
+            (frlign != _TARGET_NODATA) &
+            (d_strucc_lyr != _TARGET_NODATA) &
+            (cpart != _TARGET_NODATA) &
+            (~numpy.isclose(strlig_lyr, _SV_NODATA)) &
+            (~numpy.isclose(strucc_lyr, _SV_NODATA)))
+
+        fligst = numpy.empty(frlign.shape, dtype=numpy.float32)
+        fligst[:] = _TARGET_NODATA
+        fligst[valid_mask] = numpy.minimum(
+            frlign[valid_mask] / (
+                d_strucc_lyr[valid_mask] / cpart[valid_mask]), 1.)
+
+        strlig_lyr_mod = numpy.empty(frlign.shape, dtype=numpy.float32)
+        strlig_lyr_mod[:] = _TARGET_NODATA
+        strlig_lyr_mod[valid_mask] = (
+            ((strlig_lyr[valid_mask] * strucc_lyr[valid_mask]) +
+                (fligst[valid_mask] * d_strucc_lyr[valid_mask])) /
+            (strucc_lyr[valid_mask] + d_strucc_lyr[valid_mask]))
+
+        d_strlig_lyr = numpy.empty(frlign.shape, dtype=numpy.float32)
+        d_strlig_lyr[:] = _IC_NODATA
+        d_strlig_lyr[valid_mask] = (
+            strlig_lyr_mod[valid_mask] - strlig_lyr[valid_mask])
+        return d_strlig_lyr
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'dirabs_1', 'dirabs_2', 'd_metabc_lyr', 'd_strucc_lyr',
+            'd_struce_lyr_iel', 'd_statv_temp', 'operand_temp']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    param_val_dict = {}
+    for val in [
+            'damr_{}_1'.format(lyr), 'damr_{}_2'.format(lyr), 'pabres',
+            'damrmn_1', 'damrmn_2', 'spl_1', 'spl_2', 'rcestr_1',
+            'rcestr_2']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (site_index_path, 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+    # direct absorption of N and P from surface mineral layer
+    for iel in [1, 2]:
+        if iel == 1:
+            epart_path = epart_1_path
+        else:
+            epart_path = epart_2_path
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cpart_path, epart_path,
+                sv_reg['minerl_1_{}_path'.format(iel)],
+                param_val_dict['damr_{}_{}'.format(lyr, iel)],
+                param_val_dict['pabres'],
+                param_val_dict['damrmn_{}'.format(iel)]]],
+            calc_dirabs, temp_val_dict['dirabs_{}'.format(iel)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # remove direct absorption from surface mineral layer
+        shutil.copyfile(
+            sv_reg['minerl_1_{}_path'.format(iel)],
+            temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['dirabs_{}'.format(iel)], _TARGET_NODATA,
+            sv_reg['minerl_1_{}_path'.format(iel)], _SV_NODATA)
+
+    # partition C into structural and metabolic
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            cpart_path, epart_1_path, temp_val_dict['dirabs_1'],
+            frlign_path, param_val_dict['spl_1'],
+            param_val_dict['spl_2']]],
+        calc_d_metabc_lyr, temp_val_dict['d_metabc_lyr'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            cpart_path, temp_val_dict['d_metabc_lyr']]],
+        calc_d_strucc_lyr, temp_val_dict['d_strucc_lyr'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    shutil.copyfile(
+        sv_reg['metabc_{}_path'.format(lyr)], temp_val_dict['d_statv_temp'])
+    raster_sum(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['d_metabc_lyr'], _TARGET_NODATA,
+        sv_reg['metabc_{}_path'.format(lyr)], _SV_NODATA)
+    shutil.copyfile(
+        sv_reg['strucc_{}_path'.format(lyr)], temp_val_dict['d_statv_temp'])
+    raster_sum(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['d_strucc_lyr'], _TARGET_NODATA,
+        sv_reg['strucc_{}_path'.format(lyr)], _SV_NODATA)
+
+    # partition N and P into structural and metabolic
+    for iel in [1, 2]:
+        if iel == 1:
+            epart_path = epart_1_path
+        else:
+            epart_path = epart_2_path
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['d_strucc_lyr'],
+                param_val_dict['rcestr_{}'.format(iel)]]],
+            calc_d_struce_lyr_iel, temp_val_dict['d_struce_lyr_iel'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['struce_{}_{}_path'.format(lyr, iel)],
+            temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['d_struce_lyr_iel'], _TARGET_NODATA,
+            sv_reg['struce_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                cpart_path, epart_path,
+                temp_val_dict['dirabs_{}'.format(iel)],
+                temp_val_dict['d_struce_lyr_iel']]],
+            calc_d_metabe_lyr_iel, temp_val_dict['operand_temp'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['metabe_{}_{}_path'.format(lyr, iel)],
+            temp_val_dict['d_statv_temp'])
+        raster_sum(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['operand_temp'], _TARGET_NODATA,
+            sv_reg['metabe_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+
+    # adjust fraction of lignin in receiving structural pool
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            frlign_path, temp_val_dict['d_strucc_lyr'], cpart_path,
+            sv_reg['strlig_{}_path'.format(lyr)],
+            sv_reg['strucc_{}_path'.format(lyr)]]],
+        calc_d_strlig_lyr, temp_val_dict['operand_temp'], gdal.GDT_Float32,
+        _IC_NODATA)
+    shutil.copyfile(
+        sv_reg['strlig_{}_path'.format(lyr)],
+        temp_val_dict['d_statv_temp'])
+    raster_sum(
+        temp_val_dict['d_statv_temp'], _SV_NODATA,
+        temp_val_dict['operand_temp'], _TARGET_NODATA,
+        sv_reg['strlig_{}_path'.format(lyr)], _SV_NODATA)
+
+
+def calc_fall_standing_dead(stdedc, fallrt):
+    """Calculate delta C with fall of standing dead.
+
+    Material falls from standing dead biomass into surface litter
+    according to a constant monthly fall rate.
+
+    Parameters:
+        stdedc (numpy.ndarray): state variable, C in standing dead material
+        fallrt (numpy.ndarray): parameter, fraction of standing dead material
+            that falls each month
+
+    Returns:
+        delta_c_standing_dead, change in C in standing dead
+    """
+    valid_mask = (
+        (~numpy.isclose(stdedc, _SV_NODATA)) &
+        (fallrt != _IC_NODATA))
+    delta_c_standing_dead = numpy.empty(stdedc.shape, dtype=numpy.float32)
+    delta_c_standing_dead[:] = _TARGET_NODATA
+    delta_c_standing_dead[valid_mask] = stdedc[valid_mask] * fallrt[valid_mask]
+    return delta_c_standing_dead
+
+
+def calc_root_death(
+        average_temperature, rtdtmp, rdr, avh2o_1, deck5, bglivc):
+    """Calculate delta C with death of roots.
+
+    Material flows from roots into soil organic matter pools due to root death.
+    Root death rate is limited by average temperature and influenced by
+    available soil moisture. Change in C is calculated by multiplying the root
+    death rate by bglivc, C in live roots.
+
+    Parameters:
+        average_temperature (numpy.ndarray): derived, average temperature for
+            the current month
+        rtdtmp (numpy.ndarray): parameter,  temperature below which root death
+            does not occur
+        rdr (numpy.ndarray): parameter, maximum root death rate at very dry
+            soil conditions
+        avh2o_1 (numpy.ndarray): state variable, water available to the current
+            plant functional type for growth
+        deck5 (numpy.ndarray): parameter, level of available soil water at
+            which root death rate is half maximum
+        bglivc (numpy.ndarray): state variable, C in belowground live roots
+
+    Returns:
+        delta_c_root_death, change in C during root death
+    """
+    valid_mask = (
+        (average_temperature != _IC_NODATA) &
+        (rdr != _IC_NODATA) &
+        (~numpy.isclose(avh2o_1, _SV_NODATA)) &
+        (deck5 != _IC_NODATA) &
+        (~numpy.isclose(bglivc, _SV_NODATA)))
+    root_death_rate = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    root_death_rate[:] = _TARGET_NODATA
+    root_death_rate[valid_mask] = 0.
+
+    temp_sufficient_mask = ((average_temperature >= rtdtmp) & valid_mask)
+    root_death_rate[temp_sufficient_mask] = numpy.minimum(
+        rdr[temp_sufficient_mask] *
+        (1.0 - avh2o_1[temp_sufficient_mask] / (
+            deck5[temp_sufficient_mask] + avh2o_1[temp_sufficient_mask])),
+        0.95)
+
+    delta_c_root_death = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    delta_c_root_death[:] = _TARGET_NODATA
+    delta_c_root_death[valid_mask] = (
+        root_death_rate[valid_mask] * bglivc[valid_mask])
+    return delta_c_root_death
+
+
+def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
+    """Calculate the change in N or P accompanying change in C.
+
+    As C flows out of standing dead biomass or roots, the amount of iel
+    (N or P) flowing out of the same pool is calculated from the change in C
+    according to the ratio of C to iel in the pool.
+
+    Parameters:
+        c_state_variable (numpy.ndarray): state variable, C in the pool that is
+            losing material
+        iel_state_variable (numpy.ndarray): state variable, N or P in the pool
+            that is losing material
+        delta_c (numpy.ndarray): derived, change in C. Change in N or P is
+            proportional to this amount.
+
+    Returns:
+        delta_iel, change in N or P accompanying the change in C
+    """
+    valid_mask = (
+        (~numpy.isclose(c_state_variable, _SV_NODATA)) &
+        (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
+        (delta_c != _TARGET_NODATA))
+    delta_iel = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
+    delta_iel[:] = _TARGET_NODATA
+    delta_iel[valid_mask] = (
+        (iel_state_variable[valid_mask] / c_state_variable[valid_mask]) *
+        delta_c[valid_mask])
+    return delta_iel
+
+
+def _death_and_partition(
+        state_variable, aligned_inputs, site_param_table, current_month,
+        prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table):
+    """Track movement of C, N and P from a pft-level state variable into soil.
+
+    Calculate C, N and P leaving the specified state variable and entering
+    surface or soil organic matter pools.  Subtract the change in C, N and P
+    from the state variable tracked for each pft, sum up the amounts across
+    pfts, and distribute the sum of the material flowing from the state
+    variable to surface or soil structural and metabolic pools.
+
+    Parameters:
+        state_variable (string): string identifying the state variable that is
+            flowing into organic matter.  Must be one of "stded" (for fall
+            of standing dead) or "bgliv" (for death of roots). If the state
+            variable is stded, material flowing from stded enters surface
+            structural and metabolic pools.  If the state variable is bgliv,
+            material flowing from bgliv enters soil structural and metabolic
+            pools.
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including temperature,
+            plant functional type composition, and site spatial index
+        site_param_table (dict): map of site spatial indices to dictionaries
+            containing site parameters
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        pft_id_set (set): set of integers identifying plant functional types
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+
+    Modifies:
+        The rasters indicated by
+            sv_reg['<state_variable>c_<pft>_path'] for each pft
+            sv_reg['<state_variable>e_1_<pft>_path'] for each pft
+            sv_reg['<state_variable>e_2_<pft>_path'] for each pft
+            sv_reg['minerl_1_1_path']
+            sv_reg['minerl_1_2_path']
+            sv_reg['metabc_<lyr>_path']
+            sv_reg['strucc_<lyr>_path']
+            sv_reg['metabe_<lyr>_1_path']
+            sv_reg['metabe_<lyr>_2_path']
+            sv_reg['struce_<lyr>_1_path']
+            sv_reg['struce_<lyr>_2_path']
+            sv_reg['strlig_<lyr>_path']
+        where lyr=1 if `state_variable` == 'stded'
+              lyr=2 if `state_variable` == 'bgliv'
+
+    Returns:
+        None
+    """
+    def calc_avg_temp(max_temp, min_temp):
+        """Calculate average temperature from maximum and minimum temp."""
+        valid_mask = (
+            (~numpy.isclose(max_temp, max_temp_nodata)) &
+            (~numpy.isclose(min_temp, min_temp_nodata)))
+        tave = numpy.empty(max_temp.shape, dtype=numpy.float32)
+        tave[:] = _IC_NODATA
+        tave[valid_mask] = (max_temp[valid_mask] + min_temp[valid_mask]) / 2.
+        return tave
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'tave', 'delta_c', 'delta_iel', 'delta_sv_weighted',
+            'operand_temp', 'sum_weighted_delta_C', 'sum_weighted_delta_N',
+            'sum_weighted_delta_P', 'weighted_lignin', 'sum_lignin',
+            'fraction_lignin']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict = {}
+
+    # site-level parameters
+    val = 'deck5'
+    target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict[val] = target_path
+    site_to_val = dict(
+        [(site_code, float(table[val])) for
+            (site_code, table) in site_param_table.iteritems()])
+    pygeoprocessing.reclassify_raster(
+        (aligned_inputs['site_index'], 1), site_to_val, target_path,
+        gdal.GDT_Float32, _IC_NODATA)
+
+    # pft-level parameters
+    for val in['fallrt', 'rtdtmp', 'rdr']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+
+    # sum of material across pfts to be partitioned to organic matter
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_weighted_delta_C'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_weighted_delta_N'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_weighted_delta_P'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], temp_val_dict['sum_lignin'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+
+    max_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['max_temp_{}'.format(current_month)])['nodata'][0]
+    min_temp_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            aligned_inputs['min_temp_{}'.format(current_month)]]],
+        calc_avg_temp, temp_val_dict['tave'], gdal.GDT_Float32, _IC_NODATA)
+
+    for pft_i in pft_id_set:
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+
+        # calculate change in C leaving the given state variable
+        if state_variable == 'stded':
+            fill_val = veg_trait_table[pft_i]['fallrt']
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['site_index'], param_val_dict['fallrt'],
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    prev_sv_reg['stdedc_{}_path'.format(pft_i)],
+                    param_val_dict['fallrt']]],
+                calc_fall_standing_dead, temp_val_dict['delta_c'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+        else:
+            for val in ['rtdtmp', 'rdr']:
+                fill_val = veg_trait_table[pft_i][val]
+                pygeoprocessing.new_raster_from_base(
+                    aligned_inputs['site_index'], param_val_dict[val],
+                    gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['tave'],
+                    param_val_dict['rtdtmp'],
+                    param_val_dict['rdr'],
+                    sv_reg['avh2o_1_{}_path'.format(pft_i)],
+                    param_val_dict['deck5'],
+                    prev_sv_reg['bglivc_{}_path'.format(pft_i)]]],
+                calc_root_death, temp_val_dict['delta_c'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+        # subtract delta_c from the pft-level state variable
+        raster_difference(
+            prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
+            _SV_NODATA, temp_val_dict['delta_c'], _TARGET_NODATA,
+            sv_reg['{}c_{}_path'.format(state_variable, pft_i)], _SV_NODATA)
+        # calculate delta C weighted by % cover of this pft
+        raster_multiplication(
+            temp_val_dict['delta_c'], _TARGET_NODATA,
+            aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+            temp_val_dict['delta_sv_weighted'], _TARGET_NODATA)
+        shutil.copyfile(
+            temp_val_dict['sum_weighted_delta_C'],
+            temp_val_dict['operand_temp'])
+        raster_sum(
+            temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+            temp_val_dict['operand_temp'], _TARGET_NODATA,
+            temp_val_dict['sum_weighted_delta_C'], _TARGET_NODATA)
+        # calculate weighted fraction of flowing C which is lignin
+        if state_variable == 'stded':
+            frlign_path = year_reg['pltlig_above_{}'.format(pft_i)]
+        else:
+            frlign_path = year_reg['pltlig_below_{}'.format(pft_i)]
+        raster_multiplication(
+            temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+            frlign_path, _TARGET_NODATA,
+            temp_val_dict['weighted_lignin'], _TARGET_NODATA)
+        shutil.copyfile(
+            temp_val_dict['sum_lignin'], temp_val_dict['operand_temp'])
+        raster_sum(
+            temp_val_dict['weighted_lignin'], _TARGET_NODATA,
+            temp_val_dict['operand_temp'], _TARGET_NODATA,
+            temp_val_dict['sum_lignin'], _TARGET_NODATA)
+
+        for iel in [1, 2]:
+            # calculate N or P flowing out of the pft-level state variable
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
+                    prev_sv_reg['{}e_{}_{}_path'.format(
+                        state_variable, iel, pft_i)],
+                    temp_val_dict['delta_c']]],
+                calc_delta_iel, temp_val_dict['delta_iel'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            # subtract delta_iel from the pft-level state variable
+            raster_difference(
+                prev_sv_reg['{}e_{}_{}_path'.format(
+                    state_variable, iel, pft_i)], _SV_NODATA,
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                sv_reg['{}e_{}_{}_path'.format(state_variable, iel, pft_i)],
+                _SV_NODATA)
+            # calculate delta iel weighted by % cover of this pft
+            raster_multiplication(
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+                temp_val_dict['delta_sv_weighted'], _TARGET_NODATA)
+            if iel == 1:
+                shutil.copyfile(
+                    temp_val_dict['sum_weighted_delta_N'],
+                    temp_val_dict['operand_temp'])
+                raster_sum(
+                    temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+                    temp_val_dict['operand_temp'], _TARGET_NODATA,
+                    temp_val_dict['sum_weighted_delta_N'], _TARGET_NODATA)
+            else:
+                shutil.copyfile(
+                    temp_val_dict['sum_weighted_delta_P'],
+                    temp_val_dict['operand_temp'])
+                raster_sum(
+                    temp_val_dict['delta_sv_weighted'], _TARGET_NODATA,
+                    temp_val_dict['operand_temp'], _TARGET_NODATA,
+                    temp_val_dict['sum_weighted_delta_P'], _TARGET_NODATA)
+
+    # partition sum of C, N and P into structural and metabolic pools
+    if state_variable == 'stded':
+        lyr = 1
+    else:
+        lyr = 2
+    raster_division(
+        temp_val_dict['sum_lignin'], _TARGET_NODATA,
+        temp_val_dict['sum_weighted_delta_C'], _TARGET_NODATA,
+        temp_val_dict['fraction_lignin'], _TARGET_NODATA)
+    partit(
+        temp_val_dict['sum_weighted_delta_C'],
+        temp_val_dict['sum_weighted_delta_N'],
+        temp_val_dict['sum_weighted_delta_P'],
+        temp_val_dict['fraction_lignin'],
+        sv_reg, aligned_inputs['site_index'], site_param_table, lyr)
+
+
+def calc_senescence_water_shading(
+        aglivc, bgwfunc, fsdeth_1, fsdeth_3, fsdeth_4):
+    """Calculate shoot death due to water stress and shading.
+
+    In months where senescence is not scheduled to occur, some shoot death
+    may still occur due to water stress and shading.
+
+    Parameters:
+        aglivc (numpy.ndarray): state variable, carbon in aboveground live
+            biomass
+        bgwfunc (numpy.ndarray): derived, effect of soil moisture on
+            decomposition and shoot senescence
+        fsdeth_1 (numpy.ndarray): parameter, maximum shoot death rate at very
+            dry soil conditions
+        fsdeth_3 (numpy.ndarray): parameter, additional fraction of shoots
+            which die when aglivc is greater than fsdeth_4
+        fsdeth_4 (numpy.ndarray): parameter, threshold value for aglivc
+            above which shading increases senescence
+
+    Returns:
+        fdeth, fraction of aboveground live biomass that is converted to
+            standing dead
+    """
+    valid_mask = (
+        (~numpy.isclose(aglivc, _SV_NODATA)) &
+        (bgwfunc != _TARGET_NODATA) &
+        (fsdeth_1 != _IC_NODATA) &
+        (fsdeth_3 != _IC_NODATA) &
+        (fsdeth_4 != _IC_NODATA))
+    fdeth = numpy.empty(aglivc.shape, dtype=numpy.float32)
+    fdeth[:] = _TARGET_NODATA
+    fdeth[valid_mask] = fsdeth_1[valid_mask] * (1. - bgwfunc[valid_mask])
+
+    shading_mask = ((aglivc > fsdeth_4) & valid_mask)
+    fdeth[shading_mask] = fdeth[shading_mask] + fsdeth_3[shading_mask]
+    fdeth[valid_mask] = numpy.minimum(fdeth[valid_mask], 1.)
+    return fdeth
+
+
+def _shoot_senescence(
+        pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
+        current_month):
+    """Senescence of live material to standing dead.
+
+    Live aboveground biomass is converted to standing dead according to
+    senescence, which is specified for each pft to occur in one or more months
+    of the year. In other months, some senescence may occur because of water
+    stress or shading.  During senescence, C, N and P move from agliv to stded
+    state variables.
+
+    Parameters:
+        pft_id_set (set): set of integers identifying plant functional types
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+
+    Modifies:
+        the rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['stdedc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+            sv_reg['crpstg_1_<pft>_path'] for each pft
+            sv_reg['crpstg_2_<pft>_path'] for each pft
+            sv_reg['stdede_1_<pft>_path'] for each pft
+            sv_reg['stdede_2_<pft>_path'] for each pft
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'operand_temp', 'fdeth', 'delta_c', 'delta_iel', 'vol_loss',
+            'to_storage', 'to_stdede']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    param_val_dict = {}
+    for val in[
+            'fsdeth_1', 'fsdeth_2', 'fsdeth_3', 'fsdeth_4', 'vlossp',
+            'crprtf_1', 'crprtf_2']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                prev_sv_reg['aglivc_{}_path'.format(pft_i)], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+
+    for pft_i in pft_id_set:
+        if str(current_month) == veg_trait_table[pft_i]['senescence_month']:
+            temp_val_dict['fdeth'] = param_val_dict[
+                'fsdeth_2_{}'.format(pft_i)]
+        else:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+                    month_reg['bgwfunc'],
+                    param_val_dict['fsdeth_1_{}'.format(pft_i)],
+                    param_val_dict['fsdeth_3_{}'.format(pft_i)],
+                    param_val_dict['fsdeth_4_{}'.format(pft_i)]]],
+                calc_senescence_water_shading, temp_val_dict['fdeth'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+        # change in C flowing from aboveground live biomass to standing dead
+        raster_multiplication(
+            temp_val_dict['fdeth'], _TARGET_NODATA,
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['delta_c'], _TARGET_NODATA)
+        raster_difference(
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['delta_c'], _TARGET_NODATA,
+            sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA)
+        raster_sum(
+            prev_sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['delta_c'], _TARGET_NODATA,
+            sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA)
+
+        for iel in [1, 2]:
+            # change in N or P flowing from aboveground live biomass to dead
+            raster_multiplication(
+                temp_val_dict['fdeth'], _TARGET_NODATA,
+                prev_sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['delta_iel'], _TARGET_NODATA)
+            raster_difference(
+                prev_sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['delta_iel'], _TARGET_NODATA,
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            if iel == 1:
+                # volatilization loss of N
+                raster_multiplication(
+                    temp_val_dict['delta_iel'], _TARGET_NODATA,
+                    param_val_dict['vlossp_{}'.format(pft_i)], _IC_NODATA,
+                    temp_val_dict['vol_loss'], _TARGET_NODATA)
+                shutil.copyfile(
+                    temp_val_dict['delta_iel'], temp_val_dict['operand_temp'])
+                raster_difference(
+                    temp_val_dict['operand_temp'], _TARGET_NODATA,
+                    temp_val_dict['vol_loss'], _TARGET_NODATA,
+                    temp_val_dict['delta_iel'], _TARGET_NODATA)
+            # a fraction of N and P goes to crop storage
+            raster_multiplication(
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                param_val_dict['crprtf_{}_{}'.format(iel, pft_i)], _IC_NODATA,
+                temp_val_dict['to_storage'], _TARGET_NODATA)
+            raster_sum(
+                prev_sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['to_storage'], _TARGET_NODATA,
+                sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            # the rest goes to standing dead biomass
+            raster_difference(
+                temp_val_dict['delta_iel'], _TARGET_NODATA,
+                temp_val_dict['to_storage'], _TARGET_NODATA,
+                temp_val_dict['to_stdede'], _TARGET_NODATA)
+            raster_sum(
+                prev_sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                _SV_NODATA, temp_val_dict['to_stdede'], _TARGET_NODATA,
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+
+def convert_biomass_to_C(biomass_path, c_path):
+    """Convert from grams of biomass to grams of carbon.
+
+    The root:shoot submodel calculates potential growth in units of grams of
+    biomass, but the growth submodel calculates actual growth from that
+    potential growth in units of grams of carbon.  Convert biomass to carbon
+    using a conversion factor of 2.5.
+
+    Parameters:
+        biomass_path (string): path to raster containing grams of
+            biomass
+        c_path (string): path to raster that should contain the equivalent
+            grams of carbon
+
+    Modifies:
+        the raster indicated by `c_path`
+
+    Returns:
+        None
+    """
+    def convert_op(biomass):
+        """Convert grams of biomass to grams of carbon."""
+        valid_mask = (biomass != _TARGET_NODATA)
+        carbon = numpy.empty(biomass.shape, dtype=numpy.float32)
+        carbon[:] = _TARGET_NODATA
+        carbon[valid_mask] = biomass[valid_mask] / 2.5
+        return carbon
+    pygeoprocessing.raster_calculator(
+        [(biomass_path, 1)], convert_op, c_path, gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+
+def restrict_potential_growth(potenc, availm_1, availm_2, snfxmx_1):
+    """Restrict potential growth according to mineral nutrients.
+
+    Limit potential growth by the availability of mineral N and P. Growth only
+    occurs if there is some availability of both mineral elements. Line 63
+    Restrp.f
+
+    Parameters:
+        potenc (numpy.ndarray): potential C production (g C)
+        availm_1 (numpy.ndarray): derived, total mineral N available to this
+            pft
+        availm_2 (numpy.ndarray): derived, total mineral P available to this
+            pft
+        snfxmx_1 (numpy.ndarray): parameter, maximum symbiotic N fixation rate
+
+    Returns:
+        potenc_lim_minerl, potential C production limited by availability of
+            mineral nutrients
+    """
+    valid_mask = (
+        (potenc != _TARGET_NODATA) &
+        (availm_1 != _TARGET_NODATA) &
+        (availm_2 != _TARGET_NODATA) &
+        (snfxmx_1 != _IC_NODATA))
+    potenc_lim_minerl = numpy.empty(potenc.shape, dtype=numpy.float32)
+    potenc_lim_minerl[:] = _TARGET_NODATA
+    potenc_lim_minerl[valid_mask] = 0
+
+    growth_mask = (
+        ((availm_1 > 0) | (snfxmx_1 > 0)) &
+        (availm_2 > 0) &
+        valid_mask)
+    potenc_lim_minerl[growth_mask] = potenc[growth_mask]
+    return potenc_lim_minerl
+
+
+def c_uptake_aboveground(aglivc, cprodl, rtsh):
+    """Do uptake of C from atmosphere to aboveground live biomass.
+
+    Given total C predicted to flow into new growth and the root:shoot ratio
+    of new growth, perform the flow of C from the atmosphere into aboveground
+    live biomass. Lines 137-146 Growth.f
+
+    Parameters:
+        aglivc (numpy.ndarray): state variable, existing C in aboveground live
+            biomass
+        cprodl (numpy.ndarray): derived, c production limited by nutrient
+            availability
+        rtsh (numpy.ndarray): derived, root/shoot ratio of new production
+
+    Returns:
+        modified_aglivc, modified C in aboveground live biomass
+    """
+    valid_mask = (
+        (~numpy.isclose(aglivc, _SV_NODATA)) &
+        (cprodl != _TARGET_NODATA) &
+        (rtsh != _TARGET_NODATA))
+
+    c_prod_aboveground = numpy.empty(aglivc.shape, dtype=numpy.float32)
+    c_prod_aboveground[:] = _TARGET_NODATA
+    c_prod_aboveground[valid_mask] = (
+        cprodl[valid_mask] * (1. - rtsh[valid_mask] / (rtsh[valid_mask] + 1.)))
+
+    modified_aglivc = numpy.empty(aglivc.shape, dtype=numpy.float32)
+    modified_aglivc[:] = _SV_NODATA
+    modified_aglivc[valid_mask] = (
+        aglivc[valid_mask] + c_prod_aboveground[valid_mask])
+    return modified_aglivc
+
+
+def c_uptake_belowground(bglivc, cprodl, rtsh):
+    """Do uptake of C from atmosphere to belowground live biomass.
+
+    Given total C predicted to flow into new growth and the root:shoot ratio
+    of new growth, perform the flow of C from the atmosphere into belowground
+    live biomass.  Lines 148-156 Growth.f
+
+    Parameters:
+        bglivc (numpy.ndarray): state variable, existing C in belowground live
+            biomass
+        cprodl (numpy.ndarray): derived, c production limited by nutrient
+            availability
+        rtsh (numpy.ndarray): derived, root/shoot ratio of new production
+
+    Returns:
+        modified_bglivc, modified C in belowground live biomass
+    """
+    valid_mask = (
+        (~numpy.isclose(bglivc, _SV_NODATA)) &
+        (cprodl != _TARGET_NODATA) &
+        (rtsh != _TARGET_NODATA))
+
+    c_prod_belowground = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    c_prod_belowground[:] = _TARGET_NODATA
+    c_prod_belowground[valid_mask] = (
+        cprodl[valid_mask] * (rtsh[valid_mask] / (rtsh[valid_mask] + 1.)))
+
+    modified_bglivc = numpy.empty(bglivc.shape, dtype=numpy.float32)
+    modified_bglivc[:] = _SV_NODATA
+    modified_bglivc[valid_mask] = (
+        bglivc[valid_mask] + c_prod_belowground[valid_mask])
+    return modified_bglivc
+
+
+def calc_uptake_source(return_type):
+    """Calculate uptake of nutrient from available sources."""
+    def _uptake(
+            eavail_iel, eup_above_iel, eup_below_iel, plantNfix, storage_iel,
+            iel):
+        """Calculate N or P taken up from one source.
+
+        Given the N or P predicted to flow into new above- and belowground
+        production, calculate how much of that nutrient will be taken from the
+        crop storage pool and how much will be taken from soil.  For N, some of
+        the necessary uptake maybe also come from symbiotic N fixation.
+
+        Parameters:
+            eavail_iel (numpy.ndarray): derived, total iel available to this
+                plant functional type
+            eup_above_iel (numpy.ndarray): derived, iel in new aboveground
+                production
+            eup_below_iel (numpy.ndarray): derived, iel in new belowground
+                production
+            plantNfix (numpy.ndarray): derived, symbiotic N fixed by this plant
+                functional type
+            storage_iel (numpy.ndarray): state variable, iel in crop storage
+                pool
+            iel (integer): index identifying N or P
+
+        Returns:
+            uptake_storage, uptake from crop storage pool, if return_type is
+                'uptake_storage'
+            uptake_soil, uptake from mineral content of soil layers accessible
+                by the plant function type, if return_type is 'uptake_soil'
+            uptake_Nfix, uptake from symbiotically fixed nitrogen, if
+                return_type is 'uptake_Nfix'
+        """
+        valid_mask = (
+            (eup_above_iel != _TARGET_NODATA) &
+            (eup_below_iel != _TARGET_NODATA) &
+            (plantNfix != _TARGET_NODATA) &
+            (~numpy.isclose(storage_iel, _SV_NODATA)))
+        eprodl_iel = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        eprodl_iel[:] = _TARGET_NODATA
+        eprodl_iel[valid_mask] = (
+            eup_above_iel[valid_mask] + eup_below_iel[valid_mask])
+
+        uptake_storage = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        uptake_storage[:] = _TARGET_NODATA
+        uptake_soil = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        uptake_soil[:] = _TARGET_NODATA
+        uptake_Nfix = numpy.empty(eup_above_iel.shape, dtype=numpy.float32)
+        uptake_Nfix[:] = _TARGET_NODATA
+
+        storage_sufficient_mask = ((eprodl_iel <= storage_iel) & valid_mask)
+        uptake_storage[valid_mask] = 0.
+        uptake_storage[storage_sufficient_mask] = (
+            eprodl_iel[storage_sufficient_mask])
+        uptake_soil[storage_sufficient_mask] = 0.
+        uptake_Nfix[storage_sufficient_mask] = 0.
+
+        insuff_mask = ((eprodl_iel > storage_iel) & valid_mask)
+        uptake_storage[insuff_mask] = storage_iel[insuff_mask]
+        if iel == 1:
+            uptake_soil[insuff_mask] = numpy.minimum(
+                (eprodl_iel[insuff_mask] - storage_iel[insuff_mask] -
+                    plantNfix[insuff_mask]),
+                (eavail_iel[insuff_mask] - storage_iel[insuff_mask] -
+                    plantNfix[insuff_mask]))
+            uptake_Nfix[insuff_mask] = plantNfix[insuff_mask]
+        else:
+            uptake_soil[insuff_mask] = (
+                eprodl_iel[insuff_mask] - storage_iel[insuff_mask])
+
+        if return_type == 'uptake_storage':
+            return uptake_storage
+        elif return_type == 'uptake_soil':
+            return uptake_soil
+        elif return_type == 'uptake_Nfix':
+            return uptake_Nfix
+    return _uptake
+
+
+def calc_aboveground_uptake(total_uptake, eup_above_iel, eup_below_iel):
+    """Calculate uptake of nutrient apportioned to aboveground biomass.
+
+    Given the total amount of iel (N or P) taken up from one source, the amount
+    of uptake that is apportioned to aboveground biomass is calculated from the
+    proportion of demand from above- and belowground growth.
+
+    Parameters:
+        total_uptake (numpy.ndarray): derived, uptake of iel from one source
+        eup_above_iel (numpy.ndarray): derived, iel in new aboveground growth
+        eup_below_iel (numpy.ndarray): derived, iel in new belowground growth
+
+    Returns:
+        uptake_above, uptake from one source that is apportioned to aboveground
+            biomass
+    """
+    valid_mask = (
+        (total_uptake != _TARGET_NODATA) &
+        (eup_above_iel != _TARGET_NODATA) &
+        (eup_below_iel != _TARGET_NODATA))
+    uptake_above = numpy.empty(total_uptake.shape, dtype=numpy.float32)
+    uptake_above[valid_mask] = (
+        total_uptake[valid_mask] * (
+            eup_above_iel[valid_mask] /
+            (eup_above_iel[valid_mask] + eup_below_iel[valid_mask])))
+    return uptake_above
+
+
+def calc_belowground_uptake(total_uptake, eup_above_iel, eup_below_iel):
+    """Calculate uptake of nutrient apportioned to _belowground biomass.
+
+    Given the total amount of iel (N or P) taken up from one source, the amount
+    of uptake that is apportioned to belowground biomass is calculated from
+    the proportion of demand from above- and belowground growth.
+
+    Parameters:
+        total_uptake (numpy.ndarray): derived, uptake of iel from one source
+        eup_above_iel (numpy.ndarray): derived, iel in new aboveground growth
+        eup_below_iel (numpy.ndarray): derived, iel in new belowground growth
+
+    Returns:
+        uptake_below, uptake from one source that is apportioned to belowground
+            biomass
+    """
+    valid_mask = (
+        (total_uptake != _TARGET_NODATA) &
+        (eup_above_iel != _TARGET_NODATA) &
+        (eup_below_iel != _TARGET_NODATA))
+    uptake_below = numpy.empty(total_uptake.shape, dtype=numpy.float32)
+    uptake_below[valid_mask] = (
+        total_uptake[valid_mask] * (
+            eup_below_iel[valid_mask] /
+            (eup_above_iel[valid_mask] + eup_below_iel[valid_mask])))
+    return uptake_below
+
+
+def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
+    """Calculate uptake of mineral iel from one soil layer.
+
+    Uptake of mineral iel (N or P) from each soil layer into new growth
+    is done according to the proportion of total mineral iel contributed
+    by that layer.
+
+    Parameters:
+        uptake_soil (numpy.ndarray): derived, total uptake of N or P
+            from soil
+        minerl_lyr_iel (numpy.ndarray): state variable, mineral iel in
+            this soil layer
+        fsol (numpy.ndarray): derived, fraction of iel in solution
+        availm (numpy.ndarray): derived, sum of mineral iel across
+            soil layers accessible by this plant functional type
+
+    Returns:
+        minerl_uptake_lyr, uptake of iel from this soil layer
+    """
+    valid_mask = (
+        (uptake_soil != _TARGET_NODATA) &
+        (~numpy.isclose(minerl_lyr_iel, _SV_NODATA)) &
+        (fsol != _TARGET_NODATA) &
+        (availm != _TARGET_NODATA))
+    minerl_uptake_lyr = numpy.empty(uptake_soil.shape, dtype=numpy.float32)
+    minerl_uptake_lyr[valid_mask] = (
+        uptake_soil[valid_mask] * minerl_lyr_iel[valid_mask] *
+        fsol[valid_mask] / availm[valid_mask])
+    return minerl_uptake_lyr
+
+
+def nutrient_uptake(
+        iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
+        plantNfix_path, availm_path, eavail_path, sv_reg, pft_i,
+        pslsrb_path, sorpmx_path):
+    """Do uptake of N or P from soil and crop storage to aglive and bglive.
+
+    Perform the flows of iel from crop storage pool, soil mineral pools, and
+    symbiotic N fixation into new above- and belowground biomass. N and P taken
+    up from the soil by one plant functional type are weighted by the percent
+    cover of that functional type. Lines 124-156, Restrp.f, lines 186-226,
+    Growth.f
+
+    Parameters:
+        iel (int): index identifying N (iel=1) or P (iel=2)
+        nlay (int): number of soil layers accessible by this plant functional
+            type
+        percent_cover_path (string): path to raster containing percent cover of
+            this plant functional type
+        eup_above_iel_path (string): path to raster containing iel in new
+            aboveground production
+        eup_below_iel_path (string): path to raster containing iel in new
+            belowground production
+        plantNfix_path (string): path to raster giving symbiotic N fixed by
+            this plant functional type
+        availm_path (string): path to raster giving the sum of mineral iel
+            across soil layers accessible by this plant functional type
+        eavail_path (string): path to raster giving total iel available to
+            this plant functional type
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        pft_i (int): index identifying the current pft
+        pslsrb_path (string): path to raster giving pslsrb paramter, slope term
+            controlling fraction of mineral P that is labile
+        sorpmx_path (string): path to raster giving sorpmx paramter, maximum P
+            sorption potential
+
+    Modifies:
+        The rasters indicated by
+            sv_reg['aglive_<iel>_<pft>_path'], iel in aboveground live biomass,
+                for the given iel and current pft
+            sv_reg['bglive_<iel>_<pft>_path'], iel in belowground live biomass,
+                for the given iel and current pft
+            sv_reg['crpstg_<iel>_<pft>_path'], iel in crop storage, for the
+                given iel and current pft
+            sv_reg['minerl_<layer>_<iel>_path'], iel in the soil mineral pool,
+                for each soil layer accessible by the current pft ([1:nlay])
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'uptake_storage', 'uptake_soil', 'uptake_Nfix', 'statv_temp',
+            'uptake_above', 'uptake_below', 'fsol', 'minerl_uptake_lyr',
+            'uptake_weighted']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    # calculate uptake from crop storage
+    pft_nodata = pygeoprocessing.get_raster_info(
+        percent_cover_path)['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            eavail_path, eup_above_iel_path, eup_below_iel_path,
+            plantNfix_path, sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]] +
+        [(iel, 'raw')],
+        calc_uptake_source('uptake_storage'), temp_val_dict['uptake_storage'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    # calculate uptake from soil
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            eavail_path, eup_above_iel_path, eup_below_iel_path,
+            plantNfix_path, sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]] +
+        [(iel, 'raw')],
+        calc_uptake_source('uptake_soil'), temp_val_dict['uptake_soil'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    if iel == 1:
+        # calculate uptake from symbiotically fixed N
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                eavail_path, eup_above_iel_path, eup_below_iel_path,
+                plantNfix_path,
+                sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)]]] +
+            [(iel, 'raw')],
+            calc_uptake_source('uptake_Nfix'), temp_val_dict['uptake_Nfix'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # do uptake from crop storage into aboveground and belowground live
+    shutil.copyfile(
+        sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
+        temp_val_dict['statv_temp'])
+    raster_difference(
+        temp_val_dict['statv_temp'], _SV_NODATA,
+        temp_val_dict['uptake_storage'], _TARGET_NODATA,
+        sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['uptake_storage'], eup_above_iel_path,
+            eup_below_iel_path]],
+        calc_aboveground_uptake, temp_val_dict['uptake_above'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    shutil.copyfile(
+        sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+        temp_val_dict['statv_temp'])
+    raster_sum(
+        temp_val_dict['statv_temp'], _SV_NODATA,
+        temp_val_dict['uptake_above'], _TARGET_NODATA,
+        sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['uptake_storage'], eup_above_iel_path,
+            eup_below_iel_path]],
+        calc_belowground_uptake, temp_val_dict['uptake_below'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    shutil.copyfile(
+        sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+        temp_val_dict['statv_temp'])
+    raster_sum(
+        temp_val_dict['statv_temp'], _SV_NODATA,
+        temp_val_dict['uptake_below'], _TARGET_NODATA,
+        sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # uptake from each soil layer in proportion to its contribution to availm
+    for lyr in xrange(1, nlay + 1):
+        if iel == 2:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    sv_reg['minerl_1_2_path'], sorpmx_path,
+                    pslsrb_path]],
+                fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32,
+                _TARGET_NODATA)
+        else:
+            pygeoprocessing.new_raster_from_base(
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['fsol'],
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[1.])
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['uptake_soil'],
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                temp_val_dict['fsol'], availm_path]],
+            calc_minerl_uptake_lyr, temp_val_dict['minerl_uptake_lyr'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # uptake removed from soil is weighted by pft % cover
+        raster_multiplication(
+            percent_cover_path, pft_nodata,
+            temp_val_dict['minerl_uptake_lyr'], _TARGET_NODATA,
+            temp_val_dict['uptake_weighted'], _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+            temp_val_dict['statv_temp'])
+        raster_difference(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_weighted'], _TARGET_NODATA,
+            sv_reg['minerl_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+
+        # uptake from minerl iel in lyr into above and belowground live
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['minerl_uptake_lyr'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_aboveground_uptake, temp_val_dict['uptake_above'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_above'], _TARGET_NODATA,
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['minerl_uptake_lyr'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_belowground_uptake, temp_val_dict['uptake_below'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_below'], _TARGET_NODATA,
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # uptake from N fixation into above and belowground live
+    if iel == 1:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['uptake_Nfix'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_aboveground_uptake, temp_val_dict['uptake_above'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_above'], _TARGET_NODATA,
+            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['uptake_Nfix'], eup_above_iel_path,
+                eup_below_iel_path]],
+            calc_belowground_uptake, temp_val_dict['uptake_below'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        shutil.copyfile(
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)],
+            temp_val_dict['statv_temp'])
+        raster_sum(
+            temp_val_dict['statv_temp'], _SV_NODATA,
+            temp_val_dict['uptake_below'], _TARGET_NODATA,
+            sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+
+def calc_nutrient_limitation(return_type):
+    """Calculate C, N, and P in new production given nutrient availability."""
+    def _nutrlm(
+            potenc, rtsh, eavail_1, eavail_2, snfxmx_1, cercrp_max_above_1,
+            cercrp_max_below_1, cercrp_max_above_2, cercrp_max_below_2,
+            cercrp_min_above_1, cercrp_min_below_1, cercrp_min_above_2,
+            cercrp_min_below_2):
+        """Calculate new production limited by N and P.
+
+        Growth of new biomass is limited by the availability of N and P.
+        Compare nutrient availability to the demand for each nutrient, which
+        differs between above- and belowground production. Nutrlm.f
+
+        Parameters:
+        potenc (numpy.ndarray): derived, potential production of C calculated
+            by root:shoot ratio submodel
+        rtsh (numpy.ndarray): derived, root/shoot ratio of new production
+        eavail_1 (numpy.ndarray): derived, available N (includes predicted
+            symbiotic N fixation)
+        eavail_2 (numpy.ndarray): derived, available P
+        snfxmx_1 (numpy.ndarray): parameter, maximum symbiotic N fixation rate
+        cercrp_max_above_1 (numpy.ndarray): max C/N ratio of new aboveground
+            growth
+        cercrp_max_below_1 (numpy.ndarray): max C/N ratio of new belowground
+            growth
+        cercrp_max_above_2 (numpy.ndarray): max C/P ratio of new aboveground
+            growth
+        cercrp_max_below_2 (numpy.ndarray): max C/P ratio of new belowground
+            growth
+        cercrp_min_above_1 (numpy.ndarray): min C/N ratio of new aboveground
+            growth
+        cercrp_min_below_1 (numpy.ndarray): min C/N ratio of new belowground
+            growth
+        cercrp_min_above_2 (numpy.ndarray): min C/P ratio of new aboveground
+            growth
+        cercrp_min_below_2 (numpy.ndarray): min C/P ratio of new belowground
+            growth
+
+        Returns:
+            cprodl, total C production limited by nutrient availability,
+                if return_type is 'cprodl'
+            eup_above_1, N in new aboveground production, if return_type is
+                'eup_above_1'
+            eup_below_1, N in new belowground production, if return_type is
+                'eup_below_1'
+            eup_above_2, P in new aboveground production, if return_type is
+                'eup_above_2'
+            eup_below_2, P in new belowground production, if return_type is
+                'eup_below_2'
+            plantNfix, N fixation that actually occurs, if return_type is
+                'plantNfix'
+        """
+        valid_mask = (
+            (potenc != _TARGET_NODATA) &
+            (rtsh != _TARGET_NODATA) &
+            (eavail_1 != _TARGET_NODATA) &
+            (eavail_2 != _TARGET_NODATA) &
+            (snfxmx_1 != _IC_NODATA) &
+            (cercrp_max_above_1 != _TARGET_NODATA) &
+            (cercrp_max_below_1 != _TARGET_NODATA) &
+            (cercrp_max_above_2 != _TARGET_NODATA) &
+            (cercrp_max_below_2 != _TARGET_NODATA) &
+            (cercrp_min_above_1 != _TARGET_NODATA) &
+            (cercrp_min_below_1 != _TARGET_NODATA) &
+            (cercrp_min_above_2 != _TARGET_NODATA) &
+            (cercrp_min_below_2 != _TARGET_NODATA))
+        cfrac_below = numpy.empty(potenc.shape, dtype=numpy.float32)
+        cfrac_below[valid_mask] = (
+            rtsh[valid_mask] / (rtsh[valid_mask] + 1.))
+        cfrac_above = numpy.empty(potenc.shape, dtype=numpy.float32)
+        cfrac_above[valid_mask] = 1. - cfrac_below[valid_mask]
+
+        # maxec is average e/c ratio across aboveground and belowground
+        # maxeci is indexed to aboveground only or belowground only
+        maxeci_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxeci_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+
+        maxeci_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxeci_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        mineci_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+
+        maxeci_above_1[valid_mask] = 1. / cercrp_min_above_1[valid_mask]
+        mineci_above_1[valid_mask] = 1. / cercrp_max_above_1[valid_mask]
+        maxeci_below_1[valid_mask] = 1. / cercrp_min_below_1[valid_mask]
+        mineci_below_1[valid_mask] = 1. / cercrp_max_below_1[valid_mask]
+
+        maxeci_above_2[valid_mask] = 1. / cercrp_min_above_2[valid_mask]
+        mineci_above_2[valid_mask] = 1. / cercrp_max_above_2[valid_mask]
+        maxeci_below_2[valid_mask] = 1. / cercrp_min_below_2[valid_mask]
+        mineci_below_2[valid_mask] = 1. / cercrp_max_below_2[valid_mask]
+
+        maxec_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxec_1[valid_mask] = (
+            cfrac_below[valid_mask] * maxeci_below_1[valid_mask] +
+            cfrac_above[valid_mask] * maxeci_above_1[valid_mask])
+        maxec_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxec_2[valid_mask] = (
+            cfrac_below[valid_mask] * maxeci_below_2[valid_mask] +
+            cfrac_above[valid_mask] * maxeci_above_2[valid_mask])
+
+        # N/C ratio in new production according to demand and supply
+        demand_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        demand_1[valid_mask] = potenc[valid_mask] * maxec_1[valid_mask]
+
+        ecfor_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_above_1[valid_mask] = (
+            mineci_above_1[valid_mask] +
+            (maxeci_above_1[valid_mask] - mineci_above_1[valid_mask]) *
+            eavail_1[valid_mask] / demand_1[valid_mask])
+        ecfor_below_1[valid_mask] = (
+            mineci_below_1[valid_mask] +
+            (maxeci_below_1[valid_mask] - mineci_below_1[valid_mask]) *
+            eavail_1[valid_mask] / demand_1[valid_mask])
+
+        sufficient_mask = ((eavail_1 > demand_1) & valid_mask)
+        ecfor_above_1[sufficient_mask] = maxeci_above_1[sufficient_mask]
+        ecfor_below_1[sufficient_mask] = maxeci_below_1[sufficient_mask]
+
+        # caculate C production limited by N supply
+        c_constrained_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        c_constrained_1[valid_mask] = (
+            eavail_1[valid_mask] / (
+                cfrac_below[valid_mask] * ecfor_below_1[valid_mask] +
+                cfrac_above[valid_mask] * ecfor_above_1[valid_mask]))
+
+        # P/C ratio in new production according to demand and supply
+        demand_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        demand_2[valid_mask] = potenc[valid_mask] * maxec_2[valid_mask]
+
+        ecfor_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        ecfor_above_2[valid_mask] = (
+            mineci_above_2[valid_mask] +
+            (maxeci_above_2[valid_mask] - mineci_above_2[valid_mask]) *
+            eavail_2[valid_mask] / demand_2[valid_mask])
+        ecfor_below_2[valid_mask] = (
+            mineci_below_2[valid_mask] +
+            (maxeci_below_2[valid_mask] - mineci_below_2[valid_mask]) *
+            eavail_2[valid_mask] / demand_2[valid_mask])
+
+        sufficient_mask = ((eavail_2 > demand_2) & valid_mask)
+        ecfor_above_2[sufficient_mask] = maxeci_above_2[sufficient_mask]
+        ecfor_below_2[sufficient_mask] = maxeci_below_2[sufficient_mask]
+
+        # caculate C production limited by P supply
+        c_constrained_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        c_constrained_2[valid_mask] = (
+            eavail_2[valid_mask] / (
+                cfrac_below[valid_mask] * ecfor_below_2[valid_mask] +
+                cfrac_above[valid_mask] * ecfor_above_2[valid_mask]))
+
+        # C production limited by both N and P
+        cprodl = numpy.empty(potenc.shape, dtype=numpy.float32)
+        cprodl[:] = _TARGET_NODATA
+        cprodl[valid_mask] = numpy.minimum(
+            c_constrained_1[valid_mask],
+            c_constrained_2[valid_mask])
+        cprodl[valid_mask] = numpy.minimum(
+            cprodl[valid_mask], potenc[valid_mask])
+
+        # N uptake into new production, given limited C production
+        eup_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_above_1[:] = _TARGET_NODATA
+        eup_below_1[:] = _TARGET_NODATA
+
+        eup_above_1[valid_mask] = (
+            cprodl[valid_mask] * cfrac_above[valid_mask] *
+            ecfor_above_1[valid_mask])
+        eup_below_1[valid_mask] = (
+            cprodl[valid_mask] * cfrac_below[valid_mask] *
+            ecfor_below_1[valid_mask])
+
+        # P uptake into new production, given limited C production
+        eup_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eup_above_2[:] = _TARGET_NODATA
+        eup_below_2[:] = _TARGET_NODATA
+
+        eup_above_2[valid_mask] = (
+            cprodl[valid_mask] * cfrac_above[valid_mask] *
+            ecfor_above_2[valid_mask])
+        eup_below_2[valid_mask] = (
+            cprodl[valid_mask] * cfrac_below[valid_mask] *
+            ecfor_below_2[valid_mask])
+
+        # Calculate N fixation that occurs to subsidize needed N supply
+        maxNfix = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxNfix[valid_mask] = snfxmx_1[valid_mask] * potenc[valid_mask]
+
+        eprodl_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eprodl_1[valid_mask] = (
+            eup_above_1[valid_mask] + eup_below_1[valid_mask])
+        Nfix_mask = (
+            (eprodl_1 - (eavail_1 + maxNfix) > 0.05) &
+            valid_mask)
+        eprodl_1[Nfix_mask] = eavail_1[Nfix_mask] + maxNfix[Nfix_mask]
+
+        plantNfix = numpy.empty(potenc.shape, dtype=numpy.float32)
+        plantNfix[:] = _TARGET_NODATA
+        plantNfix[valid_mask] = numpy.maximum(
+            eprodl_1[valid_mask] - eavail_1[valid_mask], 0.)
+
+        if return_type == 'cprodl':
+            return cprodl
+        elif return_type == 'eup_above_1':
+            return eup_above_1
+        elif return_type == 'eup_below_1':
+            return eup_below_1
+        elif return_type == 'eup_above_2':
+            return eup_above_2
+        elif return_type == 'eup_below_2':
+            return eup_below_2
+        elif return_type == 'plantNfix':
+            return plantNfix
+    return _nutrlm
+
+
+def _new_growth(
+        pft_id_set, aligned_inputs, site_param_table, veg_trait_table, sv_reg,
+        month_reg, current_month):
+    """Growth of new aboveground and belowground biomass.
+
+    Add new growth to aboveground and belowground live biomass. C is taken up
+    from the atmosphere, while N and P are taken up from the crop storage pool,
+    soil mineral N and P content, and symbiotic N fixation. N and P taken up
+    from the soil are weighted by the percent cover of the plant functional
+    type.
+
+    Parameters:
+        pft_id_set (set): set of integers identifying plant functional types
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including percent cover of each plant
+            functional type
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+
+    Modifies:
+        The rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+            sv_reg['bglivc_<pft>_path'] for each pft
+            sv_reg['bglive_1_<pft>_path'] for each pft
+            sv_reg['bglive_2_<pft>_path'] for each pft
+            sv_reg['crpstg_1_<pft>_path'] for each pft
+            sv_reg['crpstg_2_<pft>_path'] for each pft
+            sv_reg['minerl_{layer}_1_path'] for each soil layer
+            sv_reg['minerl_{layer}_2_path'] for each soil layer
+
+    Returns:
+        None
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['statv_temp']:
+        target_path = os.path.join(
+            temp_dir, '{}.tif'.format(val))
+        temp_val_dict['{}'.format(val)] = target_path
+    for val in [
+            'availm_1', 'availm_2', 'eavail_1', 'eavail_2', 'potenc',
+            'potenc_lim_minerl', 'cprodl', 'eup_above_1', 'eup_below_1',
+            'eup_above_2', 'eup_below_2', 'plantNfix']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            temp_val_dict['{}_{}'.format(val, pft_i)] = target_path
+
+    param_val_dict = {}
+    # site-level parameters
+    for val in [
+            'favail_1', 'favail_4', 'favail_5', 'favail_6', 'pslsrb',
+            'sorpmx']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    param_val_dict['favail_2'] = os.path.join(temp_dir, 'favail_2.tif')
+    _calc_favail_P(sv_reg, param_val_dict)
+
+    # pft-level parameters
+    for pft_i in pft_id_set:
+        for val in ['snfxmx_1']:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                sv_reg['aglivc_{}_path'.format(pft_i)], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+
+    for pft_i in pft_id_set:
+        if str(current_month) != veg_trait_table[pft_i]['senescence_month']:
+            # calculate available nutrients for all pfts prior to
+            # performing uptake
+            for iel in [1, 2]:
+                _calc_avail_mineral_nutrient(
+                    veg_trait_table[pft_i], sv_reg, iel,
+                    temp_val_dict['availm_{}_{}'.format(iel, pft_i)])
+    for pft_i in pft_id_set:
+        # growth only occurs in months when senescence not scheduled
+        if str(current_month) != veg_trait_table[pft_i]['senescence_month']:
+            # calculate available nutrients
+            for iel in [1, 2]:
+                # eavail_iel, available nutrient
+                _calc_available_nutrient(
+                    pft_i, iel, veg_trait_table[pft_i], sv_reg,
+                    site_param_table, aligned_inputs['site_index'],
+                    temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
+                    param_val_dict['favail_{}'.format(iel)],
+                    month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                    temp_val_dict['eavail_{}_{}'.format(iel, pft_i)])
+
+            # convert from grams of biomass to grams of carbon
+            convert_biomass_to_C(
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                temp_val_dict['potenc_{}'.format(pft_i)])
+
+            # restrict potential growth by availability of N and P
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_{}'.format(pft_i)],
+                    temp_val_dict['availm_1_{}'.format(pft_i)],
+                    temp_val_dict['availm_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)]]],
+                restrict_potential_growth,
+                temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('cprodl'),
+                temp_val_dict['cprodl_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_above_1'),
+                temp_val_dict['eup_above_1_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_below_1'),
+                temp_val_dict['eup_below_1_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_above_2'),
+                temp_val_dict['eup_above_2_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('eup_below_2'),
+                temp_val_dict['eup_below_2_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['potenc_lim_minerl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)],
+                    temp_val_dict['eavail_1_{}'.format(pft_i)],
+                    temp_val_dict['eavail_2_{}'.format(pft_i)],
+                    param_val_dict['snfxmx_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_max_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_max_below_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_1_{}'.format(pft_i)],
+                    month_reg['cercrp_min_above_2_{}'.format(pft_i)],
+                    month_reg['cercrp_min_below_2_{}'.format(pft_i)]]],
+                calc_nutrient_limitation('plantNfix'),
+                temp_val_dict['plantNfix_{}'.format(pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+
+            # uptake of C into new aboveground production
+            shutil.copyfile(
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                temp_val_dict['statv_temp'])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['statv_temp'],
+                    temp_val_dict['cprodl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)]]],
+                c_uptake_aboveground, sv_reg['aglivc_{}_path'.format(pft_i)],
+                gdal.GDT_Float32, _SV_NODATA)
+
+            # uptake of C into new belowground production
+            shutil.copyfile(
+                sv_reg['bglivc_{}_path'.format(pft_i)],
+                temp_val_dict['statv_temp'])
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['statv_temp'],
+                    temp_val_dict['cprodl_{}'.format(pft_i)],
+                    month_reg['rtsh_{}'.format(pft_i)]]],
+                c_uptake_belowground, sv_reg['bglivc_{}_path'.format(pft_i)],
+                gdal.GDT_Float32, _SV_NODATA)
+
+            # uptake of N and P into new above- and belowground production
+            for iel in [1, 2]:
+                nutrient_uptake(
+                    iel, int(veg_trait_table[pft_i]['nlaypg']),
+                    aligned_inputs['pft_{}'.format(pft_i)],
+                    temp_val_dict['eup_above_{}_{}'.format(iel, pft_i)],
+                    temp_val_dict['eup_below_{}_{}'.format(iel, pft_i)],
+                    temp_val_dict['plantNfix_{}'.format(pft_i)],
+                    temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
+                    temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
+                    sv_reg, pft_i, param_val_dict['pslsrb'],
+                    param_val_dict['sorpmx'])
