@@ -762,9 +762,15 @@ def raster_division(
         valid_mask = (
             (~numpy.isclose(raster1, raster1_nodata)) &
             (~numpy.isclose(raster2, raster2_nodata)))
+        raster1 = raster1.astype(numpy.float32)
+        raster2 = raster2.astype(numpy.float32)
+
         result = numpy.empty(raster1.shape, dtype=numpy.float32)
         result[:] = target_path_nodata
-        result[valid_mask] = raster1[valid_mask] / raster2[valid_mask]
+        zero_mask = ((raster1 == 0.) & (raster2 == 0.) & valid_mask)
+        nonzero_mask = ((raster1 != 0.) & (raster2 != 0.) & valid_mask)
+        result[zero_mask] = 0.
+        result[nonzero_mask] = raster1[nonzero_mask] / raster2[nonzero_mask]
         return result
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [raster1, raster2]],
@@ -2360,8 +2366,11 @@ def _potential_production(
             (avh2o_1[valid_mask] + precip[valid_mask])/pevap[valid_mask],
             0.01)
 
-        intcpt = pprpts_1 + (pprpts_2 * wc)
-        slope = 1. / (pprpts_3 - intcpt)
+        intcpt = numpy.empty(pevap.shape, dtype=numpy.float32)
+        intcpt[valid_mask] = (
+            pprpts_1[valid_mask] + (pprpts_2[valid_mask] * wc[valid_mask]))
+        slope = numpy.empty(pevap.shape, dtype=numpy.float32)
+        slope[valid_mask] = 1. / (pprpts_3[valid_mask] - intcpt[valid_mask])
 
         h2ogef_1 = numpy.empty(pevap.shape, dtype=numpy.float32)
         h2ogef_1[:] = _TARGET_NODATA
@@ -3024,9 +3033,9 @@ def calc_ce_ratios(
 
     Parameters:
         pramn_1_path (string): path to raster containing the parameter
-            pramn_1, the minimum aboveground ratio with zero biomass
+            pramn_<iel>_1, the minimum aboveground ratio with zero biomass
         pramn_2_path (string): path to raster containing the parameter
-            pramn_2, the minimum aboveground ratio with biomass greater
+            pramn_<iel>_2, the minimum aboveground ratio with biomass greater
             than or equal to biomax
         aglivc_path (string): path to raster containing carbon in
             aboveground live biomass
@@ -3034,21 +3043,21 @@ def calc_ce_ratios(
             biomax, the biomass above which the ratio equals pramn_2
             or pramx_2
         pramx_1_path (string): path to raster containing the parameter
-            pramx_1, the maximum aboveground ratio with zero biomass
+            pramx_<iel>_1, the maximum aboveground ratio with zero biomass
         pramx_2_path (string): path to raster containing the parameter
-            pramx_2, the maximum aboveground ratio with biomass greater
+            pramx_<iel>_2, the maximum aboveground ratio with biomass greater
             than or equal to biomax
         prbmn_1_path (string): path to raster containing the parameter
-            prbmn_1, intercept of regression to predict minimum
+            prbmn_<iel>_1, intercept of regression to predict minimum
             belowground ratio from annual precipitation
         prbmn_2_path (string): path to raster containing the parameter
-            prbmn_2, slope of regression to predict minimum belowground
+            prbmn_<iel>_2, slope of regression to predict minimum belowground
             ratio from annual precipitation
         prbmx_1_path (string): path to raster containing the parameter
-            prbmx_1, intercept of regression to predict maximum belowground
-            ratio from annual precipitation
+            prbmx_<iel>_1, intercept of regression to predict maximum
+            belowground ratio from annual precipitation
         prbmx_2_path (string): path to raster containing the parameter
-            prbmx_2, slope of regression to predict maximum belowground
+            prbmx_<iel>_2, slope of regression to predict maximum belowground
             ratio from annual precipitation
         annual_precip_path (string): path to annual precipitation raster
         month_reg (dict): map of key, path pairs giving paths to
@@ -3669,18 +3678,19 @@ def _root_shoot_ratio(
             pygeoprocessing.new_raster_from_base(
                 aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
                 [_IC_NODATA], fill_value_list=[fill_val])
-        for iel in [1, 2]:
-            for val in [
-                    'pramn_1', 'pramn_2', 'pramx_1', 'pramx_2', 'prbmn_1',
-                    'prbmn_2', 'prbmx_1', 'prbmx_2']:
-                target_path = os.path.join(
-                    temp_dir, '{}_{}_{}.tif'.format(val, iel, pft_i))
-                param_val_dict[
-                    '{}_{}_{}'.format(val, iel, pft_i)] = target_path
-                fill_val = veg_trait_table[pft_i]['{}_{}'.format(val, iel)]
-                pygeoprocessing.new_raster_from_base(
-                    aligned_inputs['site_index'], target_path,
-                    gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+        for val in [
+                'pramn_1_1', 'pramn_1_2', 'pramx_1_1', 'pramx_1_2',
+                'prbmn_1_1', 'prbmn_1_2', 'prbmx_1_1', 'prbmx_1_2',
+                'pramn_2_1', 'pramn_2_2', 'pramx_2_1', 'pramx_2_2',
+                'prbmn_2_1', 'prbmn_2_2', 'prbmx_2_1', 'prbmx_2_2']:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict[
+                '{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['site_index'], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
 
     # the parameter favail_2 must be calculated from current mineral N in
     # surface layer
@@ -3706,16 +3716,16 @@ def _root_shoot_ratio(
         for iel in [1, 2]:
             # persistent ratios used here and in plant growth submodel
             calc_ce_ratios(
-                param_val_dict['pramn_1_{}_{}'.format(iel, pft_i)],
-                param_val_dict['pramn_2_{}_{}'.format(iel, pft_i)],
+                param_val_dict['pramn_{}_1_{}'.format(iel, pft_i)],
+                param_val_dict['pramn_{}_2_{}'.format(iel, pft_i)],
                 prev_sv_reg['aglivc_{}_path'.format(pft_i)],
                 param_val_dict['biomax_{}'.format(pft_i)],
-                param_val_dict['pramx_1_{}_{}'.format(iel, pft_i)],
-                param_val_dict['pramx_2_{}_{}'.format(iel, pft_i)],
-                param_val_dict['prbmn_1_{}_{}'.format(iel, pft_i)],
-                param_val_dict['prbmn_2_{}_{}'.format(iel, pft_i)],
-                param_val_dict['prbmx_1_{}_{}'.format(iel, pft_i)],
-                param_val_dict['prbmx_2_{}_{}'.format(iel, pft_i)],
+                param_val_dict['pramx_{}_1_{}'.format(iel, pft_i)],
+                param_val_dict['pramx_{}_2_{}'.format(iel, pft_i)],
+                param_val_dict['prbmn_{}_1_{}'.format(iel, pft_i)],
+                param_val_dict['prbmn_{}_2_{}'.format(iel, pft_i)],
+                param_val_dict['prbmx_{}_1_{}'.format(iel, pft_i)],
+                param_val_dict['prbmx_{}_2_{}'.format(iel, pft_i)],
                 year_reg['annual_precip_path'], month_reg,
                 pft_i, iel)
             # sum of mineral nutrient in accessible soil layers
@@ -7641,17 +7651,20 @@ def partit(
         valid_mask = (
             (cpart != _TARGET_NODATA) &
             (epart_1 != _TARGET_NODATA) &
+            (dirabs_1 != _TARGET_NODATA) &
             (frlign != _TARGET_NODATA) &
             (spl_1 != _IC_NODATA) &
             (spl_2 != _IC_NODATA))
+        movt_mask = ((cpart > 0) & valid_mask)
 
         # rlnres: ratio of lignin to N in the incoming material
         rlnres = numpy.empty(cpart.shape, dtype=numpy.float32)
         rlnres[:] = _TARGET_NODATA
-        rlnres[valid_mask] = (
-            frlign[valid_mask] / (
-                (epart_1[valid_mask] + dirabs_1[valid_mask]) /
-                (cpart[valid_mask] * 2.5)))
+        rlnres[valid_mask] = 0.
+        rlnres[movt_mask] = (
+            frlign[movt_mask] / (
+                (epart_1[movt_mask] + dirabs_1[movt_mask]) /
+                (cpart[movt_mask] * 2.5)))
 
         # frmet: fraction of cpart that goes to metabolic
         frmet = numpy.empty(cpart.shape, dtype=numpy.float32)
@@ -7758,12 +7771,14 @@ def partit(
             (cpart != _TARGET_NODATA) &
             (~numpy.isclose(strlig_lyr, _SV_NODATA)) &
             (~numpy.isclose(strucc_lyr, _SV_NODATA)))
+        movt_mask = ((cpart > 0) & valid_mask)
 
         fligst = numpy.empty(frlign.shape, dtype=numpy.float32)
         fligst[:] = _TARGET_NODATA
-        fligst[valid_mask] = numpy.minimum(
-            frlign[valid_mask] / (
-                d_strucc_lyr[valid_mask] / cpart[valid_mask]), 1.)
+        fligst[valid_mask] = 1.
+        fligst[movt_mask] = numpy.minimum(
+            frlign[movt_mask] / (
+                d_strucc_lyr[movt_mask] / cpart[movt_mask]), 1.)
 
         strlig_lyr_mod = numpy.empty(frlign.shape, dtype=numpy.float32)
         strlig_lyr_mod[:] = _TARGET_NODATA
