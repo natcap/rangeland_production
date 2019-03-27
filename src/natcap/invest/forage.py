@@ -767,8 +767,8 @@ def raster_division(
 
         result = numpy.empty(raster1.shape, dtype=numpy.float32)
         result[:] = target_path_nodata
-        zero_mask = ((raster1 == 0.) & (raster2 == 0.) & valid_mask)
-        nonzero_mask = ((raster1 != 0.) & (raster2 != 0.) & valid_mask)
+        zero_mask = ((raster2 == 0.) & valid_mask)
+        nonzero_mask = ((raster2 != 0.) & valid_mask)
         result[zero_mask] = 0.
         result[nonzero_mask] = raster1[nonzero_mask] / raster2[nonzero_mask]
         return result
@@ -2366,16 +2366,14 @@ def _potential_production(
             (avh2o_1[valid_mask] + precip[valid_mask])/pevap[valid_mask],
             0.01)
 
-        intcpt = numpy.empty(pevap.shape, dtype=numpy.float32)
-        intcpt[valid_mask] = (
+        intcpt = (
             pprpts_1[valid_mask] + (pprpts_2[valid_mask] * wc[valid_mask]))
-        slope = numpy.empty(pevap.shape, dtype=numpy.float32)
-        slope[valid_mask] = 1. / (pprpts_3[valid_mask] - intcpt[valid_mask])
+        slope = 1. / (pprpts_3[valid_mask] - intcpt)
 
         h2ogef_1 = numpy.empty(pevap.shape, dtype=numpy.float32)
         h2ogef_1[:] = _TARGET_NODATA
         h2ogef_1[valid_mask] = (
-            1.0 + slope[valid_mask] *
+            1.0 + slope *
             (h2ogef_prior[valid_mask] - pprpts_3[valid_mask]))
 
         h2ogef_1[valid_mask] = numpy.clip(h2ogef_1[valid_mask], 0.01, 1.)
