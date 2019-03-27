@@ -767,8 +767,10 @@ def raster_division(
 
         result = numpy.empty(raster1.shape, dtype=numpy.float32)
         result[:] = target_path_nodata
-        zero_mask = ((raster2 == 0.) & valid_mask)
+        error_mask = ((raster1 != 0) & (raster2 == 0.) & valid_mask)
+        zero_mask = ((raster1 == 0.) & (raster2 == 0.) & valid_mask)
         nonzero_mask = ((raster2 != 0.) & valid_mask)
+        result[error_mask] = target_path_nodata
         result[zero_mask] = 0.
         result[nonzero_mask] = raster1[nonzero_mask] / raster2[nonzero_mask]
         return result
