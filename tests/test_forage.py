@@ -2109,7 +2109,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -10283,44 +10283,195 @@ class foragetests(unittest.TestCase):
         Returns:
             None
         """
-        from natcap.invest import forage
+        def leach_point(
+                starting_mineral_dict, amov_dict, sand, minlch, fleach_1,
+                fleach_2, fleach_3, fleach_4, pslsrb, sorpmx):
+            """Point-based implementation of `leach`.
 
-        # known values
+            Returns:
+                dictionary of modified mineral element content of each soil
+                    layer
+            """
+            ending_minerl_dict = starting_minerl_dict.copy()
+            fsol = fsfunc_point(
+                starting_minerl_dict['minerl_1_2'], pslsrb, sorpmx)
+            for iel in [1, 2]:
+                if iel == 1:
+                    frlech = (fleach_1 + fleach_2 * sand) * fleach_3
+                else:
+                    frlech = (fleach_1 + fleach_2 * sand) * fleach_4 * fsol
+                for lyr in xrange(1, 5):
+                    linten = numpy.clip(
+                        1 - (minlch - amov_dict['amov_{}'.format(lyr)]) /
+                        minlch, 0., 1.)
+                    amount_leached = (
+                        frlech *
+                        ending_minerl_dict['minerl_{}_{}'.format(lyr, iel)] *
+                        linten)
+                    ending_minerl_dict['minerl_{}_{}'.format(lyr, iel)] = (
+                        ending_minerl_dict[
+                            'minerl_{}_{}'.format(lyr, iel)] - amount_leached)
+                    try:
+                        ending_minerl_dict[
+                            'minerl_{}_{}'.format(lyr + 1, iel)] = (
+                            ending_minerl_dict[
+                                'minerl_{}_{}'.format(lyr + 1, iel)] +
+                            amount_leached)
+                    except KeyError:
+                        # nutrient leaving bottom layer does not need to be
+                        # tracked
+                        pass
+            return ending_minerl_dict
+
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known values, no leaching of P
         starting_minerl_dict = {
-            'minerl_1_iel': 10.,
-            'minerl_2_iel': 10.,
-            'minerl_3_iel': 10.,
-            'minerl_4_iel': 10.,
-        }
-        ending_minerl_dict = starting_minerl_dict.copy()
+            'minerl_1_1': 10.,
+            'minerl_2_1': 10.,
+            'minerl_3_1': 10.,
+            'minerl_4_1': 10.,
+            'minerl_1_2': 10.,
+            'minerl_2_2': 10.,
+            'minerl_3_2': 10.,
+            'minerl_4_2': 10.,
+            }
         amov_dict = {
             'amov_1': 19.,
             'amov_2': 10.,
             'amov_3': 23.,
             'amov_4': 19.,
-        }
-
+            }
         sand = 0.48375
         minlch = 18.
         fleach_1 = 0.2
         fleach_2 = 0.7
-        fleach_3 = 1
+        fleach_3 = 1.
+        fleach_4 = 0.
+        pslsrb = 1
+        sorpmx = 2
 
-        frlech = (fleach_1 + fleach_2 * sand) * fleach_3
+        minerl_dict_point = leach_point(
+            starting_minerl_dict, amov_dict, sand, minlch, fleach_1,
+            fleach_2, fleach_3, fleach_4, pslsrb, sorpmx)
+
+        # raster-based inputs
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'sand': os.path.join(self.workspace_dir, 'sand.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['sand'], sand)
+        site_param_table = {
+            1: {
+                'minlch': minlch,
+                'fleach_1': fleach_1,
+                'fleach_2': fleach_2,
+                'fleach_3': fleach_3,
+                'fleach_4': fleach_4,
+                'pslsrb': pslsrb,
+                'sorpmx': sorpmx,
+                'nlayer': 4,
+            }
+        }
+        sv_reg = {}
+        for iel in [1, 2]:
+            for lyr in xrange(1, 5):
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
+                    self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
+                create_constant_raster(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                    starting_minerl_dict['minerl_{}_{}'.format(lyr, iel)])
+        month_reg = {}
         for lyr in xrange(1, 5):
-            linten = numpy.clip(
-                1 - (minlch - amov_dict['amov_{}'.format(lyr)]) / minlch,
-                0., 1.)
-            amtlea = (
-                frlech * ending_minerl_dict['minerl_{}_iel'.format(lyr)] *
-                linten)
-            ending_minerl_dict['minerl_{}_iel'.format(lyr)] = (
-                ending_minerl_dict['minerl_{}_iel'.format(lyr)] - amtlea)
-            try:
-                ending_minerl_dict['minerl_{}_iel'.format(lyr + 1)] = (
-                    ending_minerl_dict['minerl_{}_iel'.format(lyr + 1)] +
-                    amtlea)
-            except KeyError:
-                # nutrient leaving bottom layer does not need to be tracked
-                pass
+            month_reg['amov_{}'.format(lyr)] = os.path.join(
+                self.workspace_dir, 'amov_{}.tif'.format(lyr))
+            create_constant_raster(
+                month_reg['amov_{}'.format(lyr)],
+                amov_dict['amov_{}'.format(lyr)])
 
+        forage._leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        for iel in [1, 2]:
+            for lyr in xrange(1, 5):
+                self.assert_all_values_in_raster_within_range(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                    minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] -
+                    tolerance,
+                    minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] +
+                    tolerance, _SV_NODATA)
+
+        # some leaching of P
+        starting_minerl_dict = {
+            'minerl_1_1': 13.,
+            'minerl_2_1': 10.,
+            'minerl_3_1': 8.,
+            'minerl_4_1': 9.5,
+            'minerl_1_2': 12.3,
+            'minerl_2_2': 10.,
+            'minerl_3_2': 7.2,
+            'minerl_4_2': 2.1,
+            }
+        amov_dict = {
+            'amov_1': 12.,
+            'amov_2': 20.,
+            'amov_3': 23.,
+            'amov_4': 19.,
+            }
+        sand = 0.48375
+        minlch = 18.
+        fleach_1 = 0.2
+        fleach_2 = 0.7
+        fleach_3 = 0.2
+        fleach_4 = 0.7
+        pslsrb = 1
+        sorpmx = 2
+
+        minerl_dict_point = leach_point(
+            starting_minerl_dict, amov_dict, sand, minlch, fleach_1,
+            fleach_2, fleach_3, fleach_4, pslsrb, sorpmx)
+
+        # raster-based inputs
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'sand': os.path.join(self.workspace_dir, 'sand.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['sand'], sand)
+        site_param_table = {
+            1: {
+                'minlch': minlch,
+                'fleach_1': fleach_1,
+                'fleach_2': fleach_2,
+                'fleach_3': fleach_3,
+                'fleach_4': fleach_4,
+                'pslsrb': pslsrb,
+                'sorpmx': sorpmx,
+                'nlayer': 4,
+            }
+        }
+        sv_reg = {}
+        for iel in [1, 2]:
+            for lyr in xrange(1, 5):
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
+                    self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
+                create_constant_raster(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                    starting_minerl_dict['minerl_{}_{}'.format(lyr, iel)])
+        month_reg = {}
+        for lyr in xrange(1, 5):
+            month_reg['amov_{}'.format(lyr)] = os.path.join(
+                self.workspace_dir, 'amov_{}.tif'.format(lyr))
+            create_constant_raster(
+                month_reg['amov_{}'.format(lyr)],
+                amov_dict['amov_{}'.format(lyr)])
+
+        forage._leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        for iel in [1, 2]:
+            for lyr in xrange(1, 5):
+                self.assert_all_values_in_raster_within_range(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                    minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] -
+                    tolerance,
+                    minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] +
+                    tolerance, _SV_NODATA)

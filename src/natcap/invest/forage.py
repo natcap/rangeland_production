@@ -9430,3 +9430,208 @@ def _new_growth(
                     temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
                     sv_reg, pft_i, param_val_dict['pslsrb'],
                     param_val_dict['sorpmx'])
+
+
+def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
+    """Calculate amount of mineral nutrient leaching from one soil layer.
+
+    The amount of mineral N or P leaching from a soil layer into the adjacent
+    soil layer below depends on the potential fraction of mineral leaching, the
+    amount of saturated water flow between the two layers, and the mineral
+    nutrient content of the above layer.
+
+    Parameters:
+        minlch (numpy.ndarray): parameter, critical water flow for leaching of
+            minerals (cm of H2O leached below 30 cm soil depth)
+        amov_lyr (numpy.ndarray): derived, saturated water flow from the
+            current layer
+        frlech (numpy.ndarray): derived, potential fraction of mineral leaching
+        minerl_lyr_iel (numpy.ndarray): state variable, mineral N or P in the
+            current layer
+
+    Returns:
+        amount_leached, mineral N or P leaching from the current soil layer to
+            the next adjacent soil layer
+    """
+    valid_mask = (
+        (minlch != _IC_NODATA) &
+        (amov_lyr != _TARGET_NODATA) &
+        (frlech != _TARGET_NODATA) &
+        (~numpy.isclose(minerl_lyr_iel, _SV_NODATA)))
+
+    linten = numpy.clip(
+        1. - (minlch[valid_mask] - amov_lyr[valid_mask]) / minlch[valid_mask],
+        0., 1.)
+    amount_leached = numpy.empty(minlch.shape, dtype=numpy.float32)
+    amount_leached[:] = _TARGET_NODATA
+    amount_leached[valid_mask] = (
+        frlech[valid_mask] * minerl_lyr_iel[valid_mask] * linten)
+    return amount_leached
+
+
+def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
+    """Simulate the movement of N and P through soil layers by leaching.
+
+    Mineral nutrients are carried downward through soil layers if there is
+    saturated flow of water flowing between layers.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fraction of sand and site
+            spatial index
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        sv_reg (dict):  map of key, path pairs giving paths to state
+            variables for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            saturated flow of water between soil layers
+
+    Modifies:
+        the raster indicated by sv_reg['minerl_<lyr>_1'], mineral N in the soil
+            layer, for each soil layer
+        the raster indicated by sv_reg['minerl_<lyr>_2'], mineral P in the soil
+            layer, for each soil layer
+
+    Returns:
+        None
+    """
+    def calc_frlech_N(fleach_1, fleach_2, sand, fleach_3):
+        """Calculate the potential fraction of N leaching.
+
+        Mineral N and P leach from each soil layer to the adjacent layer if
+        there is saturated water flow between the two layers and if there is
+        mineral nutrient in the donating layer to flow. With higher soil sand
+        content, the potential fraction of nutrient that leaches is higher.
+
+        Parameters:
+            fleach_1 (numpy.ndarray): parameter, intercept giving the fraction
+                of N or P that leaches to the next layer if there is saturated
+                water flow
+            fleach_2 (numpy.ndarray): parameter, slope value giving the
+                fraction of N or P that leaches to the next layer if there is
+                saturated water flow
+            sand (numpy.ndarray): input, fraction of soil that is sand
+            fleach_3 (numpy.ndarray): parameter, leaching fraction multiplier
+                specific to N.
+
+        Returns:
+            frlech_N, the potential fraction of mineral N leaching
+        """
+        valid_mask = (
+            (fleach_1 != _IC_NODATA) &
+            (fleach_2 != _IC_NODATA) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (fleach_3 != _IC_NODATA))
+
+        frlech_N = numpy.empty(fleach_1.shape, dtype=numpy.float32)
+        frlech_N[:] = _TARGET_NODATA
+        frlech_N[valid_mask] = (
+            (fleach_1[valid_mask] + fleach_2[valid_mask] * sand[valid_mask]) *
+            fleach_3[valid_mask])
+        return frlech_N
+
+    def calc_frlech_P(fleach_1, fleach_2, sand, fleach_4, fsol):
+        """Calculate the potential fraction of P leaching.
+
+        Mineral N and P leach from each soil layer to the adjacent layer if
+        there is saturated water flow between the two layers and if there is
+        mineral nutrient in the donating layer to flow. With higher soil sand
+        content, the potential fraction of nutrient that leaches is higher.
+
+        Parameters:
+            fleach_1 (numpy.ndarray): parameter, intercept giving the fraction
+                of N or P that leaches to the next layer if there is saturated
+                water flow
+            fleach_2 (numpy.ndarray): parameter, slope value giving the
+                fraction of N or P that leaches to the next layer if there is
+                saturated water flow
+            sand (numpy.ndarray): input, fraction of soil that is sand
+            fleach_4 (numpy.ndarray): parameter, leaching fraction multiplier
+                specific to P.
+            fsol (numpy.ndarray): derived, fraction of P in solution
+
+        Returns:
+            frlech_P, the potential fraction of mineral P leaching
+        """
+        valid_mask = (
+            (fleach_1 != _IC_NODATA) &
+            (fleach_2 != _IC_NODATA) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (fleach_4 != _IC_NODATA) &
+            (fsol != _TARGET_NODATA))
+
+        frlech_P = numpy.empty(fleach_1.shape, dtype=numpy.float32)
+        frlech_P[:] = _TARGET_NODATA
+        frlech_P[valid_mask] = (
+            (fleach_1[valid_mask] + fleach_2[valid_mask] * sand[valid_mask]) *
+            fleach_4[valid_mask] * fsol[valid_mask])
+        return frlech_P
+
+    nlayer_max = int(max(
+        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'fsol', 'frlech_1', 'frlech_2', 'amount_leached', 'd_statv_temp']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict = {}
+    for val in [
+            'sorpmx', 'pslsrb', 'minlch', 'fleach_1', 'fleach_2', 'fleach_3',
+            'fleach_4']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+    sand_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['sand'])['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['fleach_1'], param_val_dict['fleach_2'],
+            aligned_inputs['sand'], param_val_dict['fleach_3']]],
+        calc_frlech_N, temp_val_dict['frlech_1'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            sv_reg['minerl_1_2_path'], param_val_dict['sorpmx'],
+            param_val_dict['pslsrb']]],
+        fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['fleach_1'], param_val_dict['fleach_2'],
+            aligned_inputs['sand'], param_val_dict['fleach_4'],
+            temp_val_dict['fsol']]],
+        calc_frlech_P, temp_val_dict['frlech_2'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    for iel in [1, 2]:
+        for lyr in xrange(1, nlayer_max + 1):
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    param_val_dict['minlch'], month_reg['amov_{}'.format(lyr)],
+                    temp_val_dict['frlech_{}'.format(iel)],
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)]]],
+                calc_amount_leached, temp_val_dict['amount_leached'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['amount_leached'], _TARGET_NODATA,
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+            if lyr != nlayer_max:
+                shutil.copyfile(
+                    sv_reg['minerl_{}_{}_path'.format(lyr + 1, iel)],
+                    temp_val_dict['d_statv_temp'])
+                raster_sum(
+                    temp_val_dict['d_statv_temp'], _SV_NODATA,
+                    temp_val_dict['amount_leached'], _TARGET_NODATA,
+                    sv_reg['minerl_{}_{}_path'.format(lyr + 1, iel)],
+                    _SV_NODATA)
