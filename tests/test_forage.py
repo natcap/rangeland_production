@@ -2109,7 +2109,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -5838,6 +5838,7 @@ class foragetests(unittest.TestCase):
                     'precro': precro,
                     'fwloss_1': fwloss_1,
                     'fwloss_2': fwloss_2,
+                    'nlayer': nlaypg_max,
                 }
             }
             for lyr in xrange(1, nlaypg_max + 1):
@@ -5918,7 +5919,16 @@ class foragetests(unittest.TestCase):
                     nrows=nrows, ncols=ncols)
             # monthly shared quantities
             month_reg = {
+                'amov_1': os.path.join(self.workspace_dir, 'amov_1.tif'),
                 'amov_2': os.path.join(self.workspace_dir, 'amov_2.tif'),
+                'amov_3': os.path.join(self.workspace_dir, 'amov_3.tif'),
+                'amov_4': os.path.join(self.workspace_dir, 'amov_4.tif'),
+                'amov_5': os.path.join(self.workspace_dir, 'amov_5.tif'),
+                'amov_6': os.path.join(self.workspace_dir, 'amov_6.tif'),
+                'amov_7': os.path.join(self.workspace_dir, 'amov_7.tif'),
+                'amov_8': os.path.join(self.workspace_dir, 'amov_8.tif'),
+                'amov_9': os.path.join(self.workspace_dir, 'amov_9.tif'),
+                'amov_10': os.path.join(self.workspace_dir, 'amov_10.tif'),
                 'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif')
             }
             for pft_i in pft_dict.iterkeys():

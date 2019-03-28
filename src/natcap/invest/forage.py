@@ -181,7 +181,9 @@ _PFT_INTERMEDIATE_VALUES = [
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
-_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt', 'bgwfunc']
+_SITE_INTERMEDIATE_VALUES = [
+    'amov_1', 'amov_2', 'amov_3', 'amov_4', 'amov_5', 'amov_6', 'amov_7',
+    'amov_8', 'amov_9', 'amov_10', 'snowmelt', 'bgwfunc']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -710,6 +712,8 @@ def execute(args):
         _new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
             sv_reg, month_reg, current_month)
+
+        _leach(aligned_inputs, site_param_table, sv_reg, month_reg)
 
 
 def raster_multiplication(
@@ -4564,9 +4568,8 @@ def _soil_water(
     runoff and infiltration into the soil, percolation through the soil, and
     transpiration by plants. Update soil moisture in each soil layer.
     Estimate avh2o_1 for each PFT (water available to the PFT for growth),
-    avh2o_3 (water in first two soil layers), and amov_2 (indicating whether
-    movement of water occurs from the second soil layer, used in
-    decomposition).
+    avh2o_3 (water in first two soil layers), and amov_<lyr> (saturated flow
+    of water between soil layers, used in decomposition and mineral leaching).
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
@@ -4597,8 +4600,8 @@ def _soil_water(
         the raster indicated by `sv_reg['asmos_<lyr>_path']`, soil moisture
             content, for each soil layer accessible by roots of any plant
             functional type
-        the raster indicated by `month_reg['amov_2']`, movement of soil
-            moisture out of soil layer 2
+        the rasters indicated by `month_reg['amov_<lyr>']` for each soil layer,
+            saturated flow of water from that soil layer
         the raster indicated by `sv_reg['avh2o_1_<PFT>_path']`, soil moisture
             available for growth, for each plant functional type (PFT)
         the raster indicated by `sv_reg['avh2o_3_path']`, available water in
@@ -4633,9 +4636,13 @@ def _soil_water(
     min_temp_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
 
-    # get max number of soil layers to track
+    # get max number of soil layers accessible by plants
     nlaypg_max = int(max(
         veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys()))
+
+    # max number of soil layers simulated, beyond those accessible by plants
+    nlayer_max = int(max(
+        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
 
     # temporary intermediate rasters for soil water submodel
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -4646,11 +4653,17 @@ def _soil_water(
             'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'trap_revised',
             'pevp', 'tot', 'tot2', 'rwcf_1', 'evlos', 'avinj_interim_1']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-    for val in ['asmos_interim', 'avw', 'awwt', 'avinj']:
+    # temporary intermediate values for each layer accessible by plants
+    for val in ['avw', 'awwt', 'avinj']:
         for lyr in xrange(1, nlaypg_max + 1):
             val_lyr = '{}_{}'.format(val, lyr)
             temp_val_dict[val_lyr] = os.path.join(
                 temp_dir, '{}.tif'.format(val_lyr))
+    # temporary intermediate value for each layer total
+    for lyr in xrange(1, nlayer_max + 1):
+        val_lyr = 'asmos_interim_{}'.format(lyr)
+        temp_val_dict[val_lyr] = os.path.join(
+            temp_dir, '{}.tif'.format(val_lyr))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
         for val in ['tgprod_weighted', 'sum_avinj']:
@@ -4667,17 +4680,26 @@ def _soil_water(
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
-    for val in ['adep', 'awtl']:
-        for lyr in xrange(1, nlaypg_max + 1):
-            val_lyr = '{}_{}'.format(val, lyr)
-            target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
-            param_val_dict[val_lyr] = target_path
-            site_to_val = dict(
-                [(site_code, float(table[val_lyr])) for
-                    (site_code, table) in site_param_table.iteritems()])
-            pygeoprocessing.reclassify_raster(
-                (aligned_inputs['site_index'], 1), site_to_val, target_path,
-                gdal.GDT_Float32, _IC_NODATA)
+    for lyr in xrange(1, nlaypg_max + 1):
+        val_lyr = 'awtl_{}'.format(lyr)
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
+        param_val_dict[val_lyr] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val_lyr])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    for lyr in xrange(1, nlayer_max + 1):
+        val_lyr = 'adep_{}'.format(lyr)
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
+        param_val_dict[val_lyr] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val_lyr])) for
+                (site_code, table) in site_param_table.iteritems()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
 
     # calculate canopy and litter cover that influence moisture inputs
     # calculate biomass in surface litter
@@ -4819,7 +4841,7 @@ def _soil_water(
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # distribute water to each layer
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in xrange(1, nlayer_max + 1):
         shutil.copyfile(
             temp_val_dict['modified_moisture_inputs'],
             temp_val_dict['current_moisture_inputs'])
@@ -4843,10 +4865,10 @@ def _soil_water(
             distribute_water_to_soil_layer('amov'),
             temp_val_dict['modified_moisture_inputs'],
             gdal.GDT_Float32, _TARGET_NODATA)
-        if lyr == 2:
-            # moisture leaving soil layer 2 is needed in decomposition submodel
-            shutil.copyfile(
-                temp_val_dict['modified_moisture_inputs'], month_reg['amov_2'])
+        # amov, water moving to next layer, persists between submodels
+        shutil.copyfile(
+            temp_val_dict['modified_moisture_inputs'],
+            month_reg['amov_{}'.format(lyr)])
 
     # calculate available water for transpiration
     avw_list = []
