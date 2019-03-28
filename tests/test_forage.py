@@ -5405,7 +5405,7 @@ class foragetests(unittest.TestCase):
             _TARGET_NODATA)
 
     def test_calc_evaporation_loss(self):
-        """Test `calc_evaporation_loss.
+        """Test `calc_evaporation_loss`.
 
         Use the function `calc_evaporation_loss` to calculate moisture
         that evaporates from soil layer 1.
@@ -10268,3 +10268,59 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             sv_reg['minerl_5_2_path'], initial_minerl_2 - tolerance,
             initial_minerl_2 + tolerance, _SV_NODATA)
+
+    def test_leaching(self):
+        """Test `leach`.
+
+        Use the function `leach` to calculate N or P leaching through soil
+        layers. Compare calculated change in mineral N or P to values
+        calculated by point-based version.
+
+        Raises:
+            AssertionError if `leach` does not match results calculated by
+            point-based version
+
+        Returns:
+            None
+        """
+        from natcap.invest import forage
+
+        # known values
+        starting_minerl_dict = {
+            'minerl_1_iel': 10.,
+            'minerl_2_iel': 10.,
+            'minerl_3_iel': 10.,
+            'minerl_4_iel': 10.,
+        }
+        ending_minerl_dict = starting_minerl_dict.copy()
+        amov_dict = {
+            'amov_1': 19.,
+            'amov_2': 10.,
+            'amov_3': 23.,
+            'amov_4': 19.,
+        }
+
+        sand = 0.48375
+        minlch = 18.
+        fleach_1 = 0.2
+        fleach_2 = 0.7
+        fleach_3 = 1
+
+        frlech = (fleach_1 + fleach_2 * sand) * fleach_3
+        for lyr in xrange(1, 5):
+            linten = numpy.clip(
+                1 - (minlch - amov_dict['amov_{}'.format(lyr)]) / minlch,
+                0., 1.)
+            amtlea = (
+                frlech * ending_minerl_dict['minerl_{}_iel'.format(lyr)] *
+                linten)
+            ending_minerl_dict['minerl_{}_iel'.format(lyr)] = (
+                ending_minerl_dict['minerl_{}_iel'.format(lyr)] - amtlea)
+            try:
+                ending_minerl_dict['minerl_{}_iel'.format(lyr + 1)] = (
+                    ending_minerl_dict['minerl_{}_iel'.format(lyr + 1)] +
+                    amtlea)
+            except KeyError:
+                # nutrient leaving bottom layer does not need to be tracked
+                pass
+
