@@ -438,7 +438,7 @@ def execute(args):
     site_param_table = utils.build_lookup_from_csv(
         args['site_param_table'], 'site')
     missing_site_index_list = list(
-        site_index_set.difference(site_param_table.iterkeys()))
+        site_index_set.difference(site_param_table.keys()))
     if missing_site_index_list:
         raise ValueError(
             "Couldn't find parameter values for the following site " +
@@ -461,13 +461,13 @@ def execute(args):
         base_align_raster_path_id_map['pft_%d' % pft_i] = pft_path
     veg_trait_table = utils.build_lookup_from_csv(
         args['veg_trait_path'], 'PFT')
-    missing_pft_trait_list = pft_id_set.difference(veg_trait_table.iterkeys())
+    missing_pft_trait_list = pft_id_set.difference(veg_trait_table.keys())
     if missing_pft_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
     frtcindx_set = set([
-        veg_trait_table[k]['frtcindx'] for k in veg_trait_table.iterkeys()])
+        veg_trait_table[k]['frtcindx'] for k in veg_trait_table.keys()])
     if frtcindx_set.difference(set([0, 1])):
         raise ValueError("frtcindx parameter contains invalid values")
 
@@ -490,7 +490,7 @@ def execute(args):
     anim_trait_table = utils.build_lookup_from_csv(
         args['animal_trait_path'], 'animal_id')
     missing_animal_trait_list = set(
-        anim_id_list).difference(anim_trait_table.iterkeys())
+        anim_id_list).difference(anim_trait_table.keys())
     if missing_animal_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following animal " +
@@ -517,15 +517,15 @@ def execute(args):
     os.makedirs(aligned_raster_dir)
     aligned_inputs = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
-        for key, path in base_align_raster_path_id_map.iteritems()])
+        for key, path in base_align_raster_path_id_map.items()])
 
     # align all the base inputs to be the minimum known pixel size and to
     # only extend over their combined intersections
     source_input_path_list = [
         base_align_raster_path_id_map[k] for k in sorted(
-            base_align_raster_path_id_map.iterkeys())]
+            base_align_raster_path_id_map.keys())]
     aligned_input_path_list = [
-        aligned_inputs[k] for k in sorted(aligned_inputs.iterkeys())]
+        aligned_inputs[k] for k in sorted(aligned_inputs.keys())]
 
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
@@ -542,7 +542,7 @@ def execute(args):
         state_var_nodata = set([])
         # align initial state variables to resampled inputs
         resample_initial_path_map = {}
-        for sv in _SITE_STATE_VARIABLE_FILES.iterkeys():
+        for sv in _SITE_STATE_VARIABLE_FILES.keys():
             sv_path = os.path.join(
                 args['initial_conditions_dir'],
                 _SITE_STATE_VARIABLE_FILES[sv])
@@ -577,14 +577,14 @@ def execute(args):
         os.makedirs(sv_dir)
         aligned_initial_path_map = dict(
             [(key, os.path.join(sv_dir, os.path.basename(path)))
-                for key, path in resample_initial_path_map.iteritems()])
+                for key, path in resample_initial_path_map.items()])
         initial_path_list = (
             [resample_initial_path_map[k] for k in
-                sorted(resample_initial_path_map.iterkeys())] +
+                sorted(resample_initial_path_map.keys())] +
             source_input_path_list)
         aligned_initial_path_list = (
             [aligned_initial_path_map[k] for k in
-                sorted(aligned_initial_path_map.iterkeys())] +
+                sorted(aligned_initial_path_map.keys())] +
             aligned_input_path_list)
         pygeoprocessing.align_and_resize_raster_stack(
             initial_path_list, aligned_initial_path_list,
@@ -635,7 +635,7 @@ def execute(args):
     year_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     year_reg = dict(
         [(key, os.path.join(year_dir, path)) for key, path in
-            _YEARLY_FILES.iteritems()])
+            _YEARLY_FILES.items()])
     for pft_i in pft_id_set:
         for file in _YEARLY_PFT_FILES:
             year_reg['{}_{}'.format(file, pft_i)] = os.path.join(
@@ -1298,7 +1298,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
     site_to_edepth = dict(
         [(site_code, float(table['edepth'])) for
-         (site_code, table) in site_param_table.iteritems()])
+         (site_code, table) in site_param_table.items()])
 
     pygeoprocessing.reclassify_raster(
         (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
@@ -1369,7 +1369,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for (
-                site_code, table) in site_param_table.iteritems()])
+                site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _IC_NODATA)
@@ -1671,7 +1671,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             param_val_dict['{}_{}'.format(val, iel)] = target_path
             site_to_val = dict(
                 [(site_code, float(table['{}_{}'.format(val, iel)])) for
-                    (site_code, table) in site_param_table.iteritems()])
+                    (site_code, table) in site_param_table.items()])
             pygeoprocessing.reclassify_raster(
                 (site_index_path, 1), site_to_val, target_path,
                 gdal.GDT_Float32, _IC_NODATA)
@@ -1769,7 +1769,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # calculate rnewbs_iel_1 - belowground material to SOM1
         site_to_varat1_1 = dict([
             (site_code, float(table['varat1_1_{}'.format(iel)])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_varat1_1,
             pp_reg['rnewbs_{}_1_path'.format(iel)],
@@ -1778,7 +1778,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # rnewbs(iel,2) = varat22(1,iel)
         site_to_varat22_1 = dict([
             (site_code, float(table['varat22_1_{}'.format(iel)])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_varat22_1,
             pp_reg['rnewbs_{}_2_path'.format(iel)],
@@ -1919,7 +1919,7 @@ def _yearly_tasks(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -2510,7 +2510,7 @@ def _potential_production(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -2844,7 +2844,7 @@ def _calc_available_nutrient(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -3665,7 +3665,7 @@ def _root_shoot_ratio(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -3963,7 +3963,7 @@ def _snow(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for (
-                site_code, table) in site_param_table.iteritems()])
+                site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _IC_NODATA)
@@ -4637,12 +4637,10 @@ def _soil_water(
         aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
 
     # get max number of soil layers accessible by plants
-    nlaypg_max = int(max(
-        veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys()))
+    nlaypg_max = int(max(val['nlaypg'] for val in veg_trait_table.values()))
 
     # max number of soil layers simulated, beyond those accessible by plants
-    nlayer_max = int(max(
-        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
+    nlayer_max = int(max(val['nlayer'] for val in site_param_table.values()))
 
     # temporary intermediate rasters for soil water submodel
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -4676,7 +4674,7 @@ def _soil_water(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -4686,7 +4684,7 @@ def _soil_water(
         param_val_dict[val_lyr] = target_path
         site_to_val = dict(
             [(site_code, float(table[val_lyr])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -4696,7 +4694,7 @@ def _soil_water(
         param_val_dict[val_lyr] = target_path
         site_to_val = dict(
             [(site_code, float(table[val_lyr])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -5070,7 +5068,7 @@ def _monthly_N_fixation(
     param_val_dict = {'epnfs_2': target_path}
     site_to_val = dict(
         [(site_code, float(table['epnfs_2'])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
     pygeoprocessing.reclassify_raster(
         (aligned_inputs['site_index'], 1), site_to_val, target_path,
         gdal.GDT_Float32, _IC_NODATA)
@@ -6579,7 +6577,7 @@ def _decomposition(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -6665,7 +6663,7 @@ def _decomposition(
 
     # initialize current month state variables and delta state variable dict
     nlayer_max = int(max(
-        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
+        val['nlayer'] for val in site_param_table.values()))
     delta_sv_dict = {
         'minerl_1_1': os.path.join(temp_dir, 'minerl_1_1.tif'),
         'parent_2': os.path.join(temp_dir, 'parent_2.tif'),
@@ -6728,7 +6726,7 @@ def _decomposition(
 
     for _ in xrange(4):
         # initialize change (delta, d) in state variables for this decomp step
-        for state_var in delta_sv_dict.iterkeys():
+        for state_var in delta_sv_dict.keys():
             pygeoprocessing.new_raster_from_base(
                 aligned_inputs['site_index'], delta_sv_dict[state_var],
                 gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[0])
@@ -7831,7 +7829,7 @@ def partit(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -8120,7 +8118,7 @@ def _death_and_partition(
     param_val_dict[val] = target_path
     site_to_val = dict(
         [(site_code, float(table[val])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
     pygeoprocessing.reclassify_raster(
         (aligned_inputs['site_index'], 1), site_to_val, target_path,
         gdal.GDT_Float32, _IC_NODATA)
@@ -9252,7 +9250,7 @@ def _new_growth(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -9590,8 +9588,7 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
             fleach_4[valid_mask] * fsol[valid_mask])
         return frlech_P
 
-    nlayer_max = int(max(
-        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
+    nlayer_max = int(max(val['nlayer'] for val in site_param_table.values()))
 
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
@@ -9606,7 +9603,7 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
