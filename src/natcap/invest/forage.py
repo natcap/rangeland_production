@@ -467,7 +467,7 @@ def execute(args):
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
     frtcindx_set = set([
-        veg_trait_table[k]['frtcindx'] for k in veg_trait_table.keys()])
+        pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
         raise ValueError("frtcindx parameter contains invalid values")
 
