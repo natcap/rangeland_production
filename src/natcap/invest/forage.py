@@ -181,7 +181,9 @@ _PFT_INTERMEDIATE_VALUES = [
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
-_SITE_INTERMEDIATE_VALUES = ['amov_2', 'snowmelt', 'bgwfunc']
+_SITE_INTERMEDIATE_VALUES = [
+    'amov_1', 'amov_2', 'amov_3', 'amov_4', 'amov_5', 'amov_6', 'amov_7',
+    'amov_8', 'amov_9', 'amov_10', 'snowmelt', 'bgwfunc']
 
 # Target nodata is for general rasters that are positive, and _IC_NODATA are
 # for rasters that are any range
@@ -436,7 +438,7 @@ def execute(args):
     site_param_table = utils.build_lookup_from_csv(
         args['site_param_table'], 'site')
     missing_site_index_list = list(
-        site_index_set.difference(site_param_table.iterkeys()))
+        site_index_set.difference(site_param_table.keys()))
     if missing_site_index_list:
         raise ValueError(
             "Couldn't find parameter values for the following site " +
@@ -459,13 +461,13 @@ def execute(args):
         base_align_raster_path_id_map['pft_%d' % pft_i] = pft_path
     veg_trait_table = utils.build_lookup_from_csv(
         args['veg_trait_path'], 'PFT')
-    missing_pft_trait_list = pft_id_set.difference(veg_trait_table.iterkeys())
+    missing_pft_trait_list = pft_id_set.difference(veg_trait_table.keys())
     if missing_pft_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
     frtcindx_set = set([
-        veg_trait_table[k]['frtcindx'] for k in veg_trait_table.iterkeys()])
+        pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
         raise ValueError("frtcindx parameter contains invalid values")
 
@@ -488,7 +490,7 @@ def execute(args):
     anim_trait_table = utils.build_lookup_from_csv(
         args['animal_trait_path'], 'animal_id')
     missing_animal_trait_list = set(
-        anim_id_list).difference(anim_trait_table.iterkeys())
+        anim_id_list).difference(anim_trait_table.keys())
     if missing_animal_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following animal " +
@@ -515,15 +517,15 @@ def execute(args):
     os.makedirs(aligned_raster_dir)
     aligned_inputs = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
-        for key, path in base_align_raster_path_id_map.iteritems()])
+        for key, path in base_align_raster_path_id_map.items()])
 
     # align all the base inputs to be the minimum known pixel size and to
     # only extend over their combined intersections
     source_input_path_list = [
         base_align_raster_path_id_map[k] for k in sorted(
-            base_align_raster_path_id_map.iterkeys())]
+            base_align_raster_path_id_map.keys())]
     aligned_input_path_list = [
-        aligned_inputs[k] for k in sorted(aligned_inputs.iterkeys())]
+        aligned_inputs[k] for k in sorted(aligned_inputs.keys())]
 
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
@@ -540,7 +542,7 @@ def execute(args):
         state_var_nodata = set([])
         # align initial state variables to resampled inputs
         resample_initial_path_map = {}
-        for sv in _SITE_STATE_VARIABLE_FILES.iterkeys():
+        for sv in _SITE_STATE_VARIABLE_FILES.keys():
             sv_path = os.path.join(
                 args['initial_conditions_dir'],
                 _SITE_STATE_VARIABLE_FILES[sv])
@@ -575,14 +577,14 @@ def execute(args):
         os.makedirs(sv_dir)
         aligned_initial_path_map = dict(
             [(key, os.path.join(sv_dir, os.path.basename(path)))
-                for key, path in resample_initial_path_map.iteritems()])
+                for key, path in resample_initial_path_map.items()])
         initial_path_list = (
             [resample_initial_path_map[k] for k in
-                sorted(resample_initial_path_map.iterkeys())] +
+                sorted(resample_initial_path_map.keys())] +
             source_input_path_list)
         aligned_initial_path_list = (
             [aligned_initial_path_map[k] for k in
-                sorted(aligned_initial_path_map.iterkeys())] +
+                sorted(aligned_initial_path_map.keys())] +
             aligned_input_path_list)
         pygeoprocessing.align_and_resize_raster_stack(
             initial_path_list, aligned_initial_path_list,
@@ -633,7 +635,7 @@ def execute(args):
     year_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     year_reg = dict(
         [(key, os.path.join(year_dir, path)) for key, path in
-            _YEARLY_FILES.iteritems()])
+            _YEARLY_FILES.items()])
     for pft_i in pft_id_set:
         for file in _YEARLY_PFT_FILES:
             year_reg['{}_{}'.format(file, pft_i)] = os.path.join(
@@ -710,6 +712,8 @@ def execute(args):
         _new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
             sv_reg, month_reg, current_month)
+
+        _leach(aligned_inputs, site_param_table, sv_reg, month_reg)
 
 
 def raster_multiplication(
@@ -1294,7 +1298,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
     site_to_edepth = dict(
         [(site_code, float(table['edepth'])) for
-         (site_code, table) in site_param_table.iteritems()])
+         (site_code, table) in site_param_table.items()])
 
     pygeoprocessing.reclassify_raster(
         (site_index_path, 1), site_to_edepth, edepth_path, gdal.GDT_Float32,
@@ -1365,7 +1369,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for (
-                site_code, table) in site_param_table.iteritems()])
+                site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _IC_NODATA)
@@ -1667,7 +1671,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
             param_val_dict['{}_{}'.format(val, iel)] = target_path
             site_to_val = dict(
                 [(site_code, float(table['{}_{}'.format(val, iel)])) for
-                    (site_code, table) in site_param_table.iteritems()])
+                    (site_code, table) in site_param_table.items()])
             pygeoprocessing.reclassify_raster(
                 (site_index_path, 1), site_to_val, target_path,
                 gdal.GDT_Float32, _IC_NODATA)
@@ -1765,7 +1769,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # calculate rnewbs_iel_1 - belowground material to SOM1
         site_to_varat1_1 = dict([
             (site_code, float(table['varat1_1_{}'.format(iel)])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_varat1_1,
             pp_reg['rnewbs_{}_1_path'.format(iel)],
@@ -1774,7 +1778,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         # rnewbs(iel,2) = varat22(1,iel)
         site_to_varat22_1 = dict([
             (site_code, float(table['varat22_1_{}'.format(iel)])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_varat22_1,
             pp_reg['rnewbs_{}_2_path'.format(iel)],
@@ -1915,7 +1919,7 @@ def _yearly_tasks(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -2506,7 +2510,7 @@ def _potential_production(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -2840,7 +2844,7 @@ def _calc_available_nutrient(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -3661,7 +3665,7 @@ def _root_shoot_ratio(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -3959,7 +3963,7 @@ def _snow(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for (
-                site_code, table) in site_param_table.iteritems()])
+                site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path, gdal.GDT_Float32,
             _IC_NODATA)
@@ -4564,9 +4568,8 @@ def _soil_water(
     runoff and infiltration into the soil, percolation through the soil, and
     transpiration by plants. Update soil moisture in each soil layer.
     Estimate avh2o_1 for each PFT (water available to the PFT for growth),
-    avh2o_3 (water in first two soil layers), and amov_2 (indicating whether
-    movement of water occurs from the second soil layer, used in
-    decomposition).
+    avh2o_3 (water in first two soil layers), and amov_<lyr> (saturated flow
+    of water between soil layers, used in decomposition and mineral leaching).
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
@@ -4597,8 +4600,8 @@ def _soil_water(
         the raster indicated by `sv_reg['asmos_<lyr>_path']`, soil moisture
             content, for each soil layer accessible by roots of any plant
             functional type
-        the raster indicated by `month_reg['amov_2']`, movement of soil
-            moisture out of soil layer 2
+        the rasters indicated by `month_reg['amov_<lyr>']` for each soil layer,
+            saturated flow of water from that soil layer
         the raster indicated by `sv_reg['avh2o_1_<PFT>_path']`, soil moisture
             available for growth, for each plant functional type (PFT)
         the raster indicated by `sv_reg['avh2o_3_path']`, available water in
@@ -4633,9 +4636,11 @@ def _soil_water(
     min_temp_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['min_temp_{}'.format(current_month)])['nodata'][0]
 
-    # get max number of soil layers to track
-    nlaypg_max = int(max(
-        veg_trait_table[i]['nlaypg'] for i in veg_trait_table.iterkeys()))
+    # get max number of soil layers accessible by plants
+    nlaypg_max = int(max(val['nlaypg'] for val in veg_trait_table.values()))
+
+    # max number of soil layers simulated, beyond those accessible by plants
+    nlayer_max = int(max(val['nlayer'] for val in site_param_table.values()))
 
     # temporary intermediate rasters for soil water submodel
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -4646,11 +4651,17 @@ def _soil_water(
             'aliv', 'sd', 'absevap', 'evap_losses', 'trap', 'trap_revised',
             'pevp', 'tot', 'tot2', 'rwcf_1', 'evlos', 'avinj_interim_1']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-    for val in ['asmos_interim', 'avw', 'awwt', 'avinj']:
+    # temporary intermediate values for each layer accessible by plants
+    for val in ['avw', 'awwt', 'avinj']:
         for lyr in xrange(1, nlaypg_max + 1):
             val_lyr = '{}_{}'.format(val, lyr)
             temp_val_dict[val_lyr] = os.path.join(
                 temp_dir, '{}.tif'.format(val_lyr))
+    # temporary intermediate value for each layer total
+    for lyr in xrange(1, nlayer_max + 1):
+        val_lyr = 'asmos_interim_{}'.format(lyr)
+        temp_val_dict[val_lyr] = os.path.join(
+            temp_dir, '{}.tif'.format(val_lyr))
     # PFT-level temporary calculated values
     for pft_i in pft_id_set:
         for val in ['tgprod_weighted', 'sum_avinj']:
@@ -4663,21 +4674,30 @@ def _soil_water(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
-    for val in ['adep', 'awtl']:
-        for lyr in xrange(1, nlaypg_max + 1):
-            val_lyr = '{}_{}'.format(val, lyr)
-            target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
-            param_val_dict[val_lyr] = target_path
-            site_to_val = dict(
-                [(site_code, float(table[val_lyr])) for
-                    (site_code, table) in site_param_table.iteritems()])
-            pygeoprocessing.reclassify_raster(
-                (aligned_inputs['site_index'], 1), site_to_val, target_path,
-                gdal.GDT_Float32, _IC_NODATA)
+    for lyr in xrange(1, nlaypg_max + 1):
+        val_lyr = 'awtl_{}'.format(lyr)
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
+        param_val_dict[val_lyr] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val_lyr])) for
+                (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    for lyr in xrange(1, nlayer_max + 1):
+        val_lyr = 'adep_{}'.format(lyr)
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
+        param_val_dict[val_lyr] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val_lyr])) for
+                (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
 
     # calculate canopy and litter cover that influence moisture inputs
     # calculate biomass in surface litter
@@ -4819,7 +4839,7 @@ def _soil_water(
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # distribute water to each layer
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in xrange(1, nlayer_max + 1):
         shutil.copyfile(
             temp_val_dict['modified_moisture_inputs'],
             temp_val_dict['current_moisture_inputs'])
@@ -4843,10 +4863,10 @@ def _soil_water(
             distribute_water_to_soil_layer('amov'),
             temp_val_dict['modified_moisture_inputs'],
             gdal.GDT_Float32, _TARGET_NODATA)
-        if lyr == 2:
-            # moisture leaving soil layer 2 is needed in decomposition submodel
-            shutil.copyfile(
-                temp_val_dict['modified_moisture_inputs'], month_reg['amov_2'])
+        # amov, water moving to next layer, persists between submodels
+        shutil.copyfile(
+            temp_val_dict['modified_moisture_inputs'],
+            month_reg['amov_{}'.format(lyr)])
 
     # calculate available water for transpiration
     avw_list = []
@@ -5048,7 +5068,7 @@ def _monthly_N_fixation(
     param_val_dict = {'epnfs_2': target_path}
     site_to_val = dict(
         [(site_code, float(table['epnfs_2'])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
     pygeoprocessing.reclassify_raster(
         (aligned_inputs['site_index'], 1), site_to_val, target_path,
         gdal.GDT_Float32, _IC_NODATA)
@@ -6557,7 +6577,7 @@ def _decomposition(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -6643,7 +6663,7 @@ def _decomposition(
 
     # initialize current month state variables and delta state variable dict
     nlayer_max = int(max(
-        site_param_table[i]['nlayer'] for i in site_param_table.iterkeys()))
+        val['nlayer'] for val in site_param_table.values()))
     delta_sv_dict = {
         'minerl_1_1': os.path.join(temp_dir, 'minerl_1_1.tif'),
         'parent_2': os.path.join(temp_dir, 'parent_2.tif'),
@@ -6706,7 +6726,7 @@ def _decomposition(
 
     for _ in xrange(4):
         # initialize change (delta, d) in state variables for this decomp step
-        for state_var in delta_sv_dict.iterkeys():
+        for state_var in delta_sv_dict.keys():
             pygeoprocessing.new_raster_from_base(
                 aligned_inputs['site_index'], delta_sv_dict[state_var],
                 gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[0])
@@ -7809,7 +7829,7 @@ def partit(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (site_index_path, 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -8098,7 +8118,7 @@ def _death_and_partition(
     param_val_dict[val] = target_path
     site_to_val = dict(
         [(site_code, float(table[val])) for
-            (site_code, table) in site_param_table.iteritems()])
+            (site_code, table) in site_param_table.items()])
     pygeoprocessing.reclassify_raster(
         (aligned_inputs['site_index'], 1), site_to_val, target_path,
         gdal.GDT_Float32, _IC_NODATA)
@@ -9230,7 +9250,7 @@ def _new_growth(
         param_val_dict[val] = target_path
         site_to_val = dict(
             [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.iteritems()])
+                (site_code, table) in site_param_table.items()])
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
@@ -9430,3 +9450,207 @@ def _new_growth(
                     temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
                     sv_reg, pft_i, param_val_dict['pslsrb'],
                     param_val_dict['sorpmx'])
+
+
+def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
+    """Calculate amount of mineral nutrient leaching from one soil layer.
+
+    The amount of mineral N or P leaching from a soil layer into the adjacent
+    soil layer below depends on the potential fraction of mineral leaching, the
+    amount of saturated water flow between the two layers, and the mineral
+    nutrient content of the above layer.
+
+    Parameters:
+        minlch (numpy.ndarray): parameter, critical water flow for leaching of
+            minerals (cm of H2O leached below 30 cm soil depth)
+        amov_lyr (numpy.ndarray): derived, saturated water flow from the
+            current layer
+        frlech (numpy.ndarray): derived, potential fraction of mineral leaching
+        minerl_lyr_iel (numpy.ndarray): state variable, mineral N or P in the
+            current layer
+
+    Returns:
+        amount_leached, mineral N or P leaching from the current soil layer to
+            the next adjacent soil layer
+    """
+    valid_mask = (
+        (minlch != _IC_NODATA) &
+        (amov_lyr != _TARGET_NODATA) &
+        (frlech != _TARGET_NODATA) &
+        (~numpy.isclose(minerl_lyr_iel, _SV_NODATA)))
+
+    linten = numpy.clip(
+        1. - (minlch[valid_mask] - amov_lyr[valid_mask]) / minlch[valid_mask],
+        0., 1.)
+    amount_leached = numpy.empty(minlch.shape, dtype=numpy.float32)
+    amount_leached[:] = _TARGET_NODATA
+    amount_leached[valid_mask] = (
+        frlech[valid_mask] * minerl_lyr_iel[valid_mask] * linten)
+    return amount_leached
+
+
+def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
+    """Simulate the movement of N and P through soil layers by leaching.
+
+    Mineral nutrients are carried downward through soil layers if there is
+    saturated flow of water flowing between layers.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fraction of sand and site
+            spatial index
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        sv_reg (dict):  map of key, path pairs giving paths to state
+            variables for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            saturated flow of water between soil layers
+
+    Modifies:
+        the raster indicated by sv_reg['minerl_<lyr>_1'], mineral N in the soil
+            layer, for each soil layer
+        the raster indicated by sv_reg['minerl_<lyr>_2'], mineral P in the soil
+            layer, for each soil layer
+
+    Returns:
+        None
+    """
+    def calc_frlech_N(fleach_1, fleach_2, sand, fleach_3):
+        """Calculate the potential fraction of N leaching.
+
+        Mineral N and P leach from each soil layer to the adjacent layer if
+        there is saturated water flow between the two layers and if there is
+        mineral nutrient in the donating layer to flow. With higher soil sand
+        content, the potential fraction of nutrient that leaches is higher.
+
+        Parameters:
+            fleach_1 (numpy.ndarray): parameter, intercept giving the fraction
+                of N or P that leaches to the next layer if there is saturated
+                water flow
+            fleach_2 (numpy.ndarray): parameter, slope value giving the
+                fraction of N or P that leaches to the next layer if there is
+                saturated water flow
+            sand (numpy.ndarray): input, fraction of soil that is sand
+            fleach_3 (numpy.ndarray): parameter, leaching fraction multiplier
+                specific to N.
+
+        Returns:
+            frlech_N, the potential fraction of mineral N leaching
+        """
+        valid_mask = (
+            (fleach_1 != _IC_NODATA) &
+            (fleach_2 != _IC_NODATA) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (fleach_3 != _IC_NODATA))
+
+        frlech_N = numpy.empty(fleach_1.shape, dtype=numpy.float32)
+        frlech_N[:] = _TARGET_NODATA
+        frlech_N[valid_mask] = (
+            (fleach_1[valid_mask] + fleach_2[valid_mask] * sand[valid_mask]) *
+            fleach_3[valid_mask])
+        return frlech_N
+
+    def calc_frlech_P(fleach_1, fleach_2, sand, fleach_4, fsol):
+        """Calculate the potential fraction of P leaching.
+
+        Mineral N and P leach from each soil layer to the adjacent layer if
+        there is saturated water flow between the two layers and if there is
+        mineral nutrient in the donating layer to flow. With higher soil sand
+        content, the potential fraction of nutrient that leaches is higher.
+
+        Parameters:
+            fleach_1 (numpy.ndarray): parameter, intercept giving the fraction
+                of N or P that leaches to the next layer if there is saturated
+                water flow
+            fleach_2 (numpy.ndarray): parameter, slope value giving the
+                fraction of N or P that leaches to the next layer if there is
+                saturated water flow
+            sand (numpy.ndarray): input, fraction of soil that is sand
+            fleach_4 (numpy.ndarray): parameter, leaching fraction multiplier
+                specific to P.
+            fsol (numpy.ndarray): derived, fraction of P in solution
+
+        Returns:
+            frlech_P, the potential fraction of mineral P leaching
+        """
+        valid_mask = (
+            (fleach_1 != _IC_NODATA) &
+            (fleach_2 != _IC_NODATA) &
+            (~numpy.isclose(sand, sand_nodata)) &
+            (fleach_4 != _IC_NODATA) &
+            (fsol != _TARGET_NODATA))
+
+        frlech_P = numpy.empty(fleach_1.shape, dtype=numpy.float32)
+        frlech_P[:] = _TARGET_NODATA
+        frlech_P[valid_mask] = (
+            (fleach_1[valid_mask] + fleach_2[valid_mask] * sand[valid_mask]) *
+            fleach_4[valid_mask] * fsol[valid_mask])
+        return frlech_P
+
+    nlayer_max = int(max(val['nlayer'] for val in site_param_table.values()))
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'fsol', 'frlech_1', 'frlech_2', 'amount_leached', 'd_statv_temp']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    param_val_dict = {}
+    for val in [
+            'sorpmx', 'pslsrb', 'minlch', 'fleach_1', 'fleach_2', 'fleach_3',
+            'fleach_4']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        site_to_val = dict(
+            [(site_code, float(table[val])) for
+                (site_code, table) in site_param_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+    sand_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['sand'])['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['fleach_1'], param_val_dict['fleach_2'],
+            aligned_inputs['sand'], param_val_dict['fleach_3']]],
+        calc_frlech_N, temp_val_dict['frlech_1'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            sv_reg['minerl_1_2_path'], param_val_dict['sorpmx'],
+            param_val_dict['pslsrb']]],
+        fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['fleach_1'], param_val_dict['fleach_2'],
+            aligned_inputs['sand'], param_val_dict['fleach_4'],
+            temp_val_dict['fsol']]],
+        calc_frlech_P, temp_val_dict['frlech_2'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    for iel in [1, 2]:
+        for lyr in xrange(1, nlayer_max + 1):
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    param_val_dict['minlch'], month_reg['amov_{}'.format(lyr)],
+                    temp_val_dict['frlech_{}'.format(iel)],
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)]]],
+                calc_amount_leached, temp_val_dict['amount_leached'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['amount_leached'], _TARGET_NODATA,
+                sv_reg['minerl_{}_{}_path'.format(lyr, iel)], _SV_NODATA)
+            if lyr != nlayer_max:
+                shutil.copyfile(
+                    sv_reg['minerl_{}_{}_path'.format(lyr + 1, iel)],
+                    temp_val_dict['d_statv_temp'])
+                raster_sum(
+                    temp_val_dict['d_statv_temp'], _SV_NODATA,
+                    temp_val_dict['amount_leached'], _TARGET_NODATA,
+                    sv_reg['minerl_{}_{}_path'.format(lyr + 1, iel)],
+                    _SV_NODATA)
