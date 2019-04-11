@@ -6188,7 +6188,7 @@ def calc_pflow(pstatv, rate_param, defac):
         (~numpy.isclose(pstatv, _SV_NODATA)) &
         (rate_param != _IC_NODATA) &
         (defac != _TARGET_NODATA))
-    pflow = numpy.empty(pstatv.shape, dtype=numpy.float32)
+    pflow = numpy.empty(pstatv.shape, dtype=numpy.float64)
     pflow[:] = _IC_NODATA
     pflow[valid_mask] = (
         pstatv[valid_mask] * rate_param[valid_mask] * defac[valid_mask] *
@@ -6218,7 +6218,7 @@ def calc_pflow_to_secndy(minerl_lyr_2, pmnsec_2, fsol, defac):
         (pmnsec_2 != _IC_NODATA) &
         (fsol != _TARGET_NODATA) &
         (defac != _TARGET_NODATA))
-    fmnsec = numpy.empty(minerl_lyr_2.shape, dtype=numpy.float32)
+    fmnsec = numpy.empty(minerl_lyr_2.shape, dtype=numpy.float64)
     fmnsec[:] = _IC_NODATA
     fmnsec[valid_mask] = (
         pmnsec_2[valid_mask] * minerl_lyr_2[valid_mask] *
@@ -7411,7 +7411,7 @@ def _decomposition(
             [(path, 1) for path in [
                 sv_reg['secndy_2_path'], param_val_dict['psecmn_2'],
                 temp_val_dict['defac']]],
-            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float64,
             _IC_NODATA)
         shutil.copyfile(
             delta_sv_dict['secndy_2'], temp_val_dict['d_statv_temp'])
@@ -7433,7 +7433,7 @@ def _decomposition(
                     sv_reg['minerl_{}_2_path'.format(lyr)],
                     param_val_dict['pmnsec_2'], temp_val_dict['fsol'],
                     temp_val_dict['defac']]],
-                calc_pflow_to_secndy, temp_val_dict['pflow'], gdal.GDT_Float32,
+                calc_pflow_to_secndy, temp_val_dict['pflow'], gdal.GDT_Float64,
                 _IC_NODATA)
             shutil.copyfile(
                 delta_sv_dict['minerl_{}_2'.format(lyr)],
@@ -7454,7 +7454,7 @@ def _decomposition(
             [(path, 1) for path in [
                 sv_reg['secndy_2_path'], param_val_dict['psecoc1'],
                 temp_val_dict['defac']]],
-            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float64,
             _IC_NODATA)
         shutil.copyfile(
             delta_sv_dict['secndy_2'], temp_val_dict['d_statv_temp'])
@@ -7474,7 +7474,7 @@ def _decomposition(
             [(path, 1) for path in [
                 sv_reg['occlud_path'], param_val_dict['psecoc2'],
                 temp_val_dict['defac']]],
-            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float32,
+            calc_pflow, temp_val_dict['pflow'], gdal.GDT_Float64,
             _IC_NODATA)
         shutil.copyfile(
             delta_sv_dict['occlud'], temp_val_dict['d_statv_temp'])
