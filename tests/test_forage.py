@@ -164,6 +164,52 @@ def insert_nodata_values_into_array(target_array, nodata_value):
     return modified_array
 
 
+def calc_raster_difference_stats(
+        raster1_path, raster2_path, aggregate_vector_path):
+    """Calculate summary of the difference between two rasters.
+
+    Calculate the pixel-based difference between the raster indicated by
+    `raster1_path` and the raster indicated by `raster2_path`. Calculate
+    summary statistics from the difference raster falling inside a vector-
+    based area of interest.
+
+    Parameters:
+        raster1_path (string): path to raster to take the difference from
+        raster2_path (string): path to raster to subtract from raster1
+        aggregate_vector_path (string): area over which to calculate zonal
+            statistics on the difference between the two rasters
+
+    Returns:
+        nested dictionary indexed by aggregating feature id, and then by one
+        of 'min' 'max' 'sum' 'count' and 'nodata_count'.  Example:
+        {0: {'min': 0, 'max': 1, 'sum': 1.7, count': 3, 'nodata_count': 1}}
+    """
+    def raster_difference_op(raster1, raster2):
+        """Subtract raster2 from raster1 without removing nodata values."""
+        valid_mask = (
+            (~numpy.isclose(raster1, raster1_nodata)) &
+            (~numpy.isclose(raster2, raster2_nodata)))
+        result = numpy.empty(raster1.shape, dtype=numpy.float32)
+        result[:] = _TARGET_NODATA
+        result[valid_mask] = raster1[valid_mask] - raster2[valid_mask]
+        return result
+
+    raster1_nodata = pygeoprocessing.get_raster_info(raster1_path)['nodata'][0]
+    raster2_nodata = pygeoprocessing.get_raster_info(raster2_path)['nodata'][0]
+
+    with tempfile.NamedTemporaryFile(
+            prefix='raster_diff', delete=False) as target_file:
+        target_path = target_file.name
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [raster1_path, raster2_path]],
+        raster_difference_op, target_path, gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    return pygeoprocessing.zonal_statistics(
+        (target_path, 1), aggregate_vector_path)
+
+
 def monthly_N_fixation_point(
         precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1):
     """Add monthly N fixation to surface mineral N pool.
