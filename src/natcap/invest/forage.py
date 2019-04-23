@@ -8345,8 +8345,11 @@ def _shoot_senescence(
             prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
             temp_val_dict['delta_c'], _TARGET_NODATA,
             sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA)
+        shutil.copyfile(
+            sv_reg['stdedc_{}_path'.format(pft_i)],
+            temp_val_dict['operand_temp'])
         raster_sum(
-            prev_sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['operand_temp'], _SV_NODATA,
             temp_val_dict['delta_c'], _TARGET_NODATA,
             sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA)
 
