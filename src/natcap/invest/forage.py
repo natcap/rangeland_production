@@ -2237,7 +2237,7 @@ def _potential_production(
                 aboveground live biomass) across plant functional types
             pmxbio (numpy.ndarray): parameter, maximum biomass impact on
                 temperature
-            maxtmp (numpy.ndarray): derived, average maximum monthly
+            maxtmp (numpy.ndarray): input, average maximum monthly
                 temperature
             pmxtmp (numpy.ndarray): parameter, scaling factor for effect of
                 biomass on monthly maximum temperature
@@ -2283,7 +2283,7 @@ def _potential_production(
         ctemp[valid_mask] = (tmxs[valid_mask] + tmns[valid_mask])/2.
         return ctemp
 
-    def calc_potprd(ctemp, ppdf_1, ppdf_2, ppdf_3, ppdf_4):
+    def calc_potprd(mintmp, maxtmp, ctemp, ppdf_1, ppdf_2, ppdf_3, ppdf_4):
         """Calculate the limiting effect of temperature on growth.
 
         Estimated soil temperature restricts potential production according to
@@ -2291,6 +2291,9 @@ def _potential_production(
         type-specific parameters ppdf_1-4.. Lines 73-84 Potcrp.f
 
         Parameters:
+            mintmp (numpy.ndarray): input, average minimum monthly temperature
+            maxtmp (numpy.ndarray): input, average maximum monthly
+                temperature
             ctemp (numpy.ndarray): derived, soil temperature as calculated from
                 monthly temperature and modified by standing live biomass
             ppdf_1 (numpy.ndarray): parameter, optimum temperature for growth
@@ -2307,6 +2310,8 @@ def _potential_production(
                 by temperature
         """
         valid_mask = (
+            (~numpy.isclose(mintmp, mintmp_nodata)) &
+            (~numpy.isclose(maxtmp, maxtmp_nodata)) &
             (ctemp != _IC_NODATA) &
             (ppdf_1 != _IC_NODATA) &
             (ppdf_2 != _IC_NODATA) &
@@ -2317,13 +2322,18 @@ def _potential_production(
         frac[valid_mask] = (
             (ppdf_2[valid_mask] - ctemp[valid_mask]) /
             (ppdf_2[valid_mask] - ppdf_1[valid_mask]))
-        gpdf = numpy.empty(ctemp.shape, dtype=numpy.float32)
-        gpdf[:] = _TARGET_NODATA
-        gpdf[valid_mask] = (numpy.exp(
-            (ppdf_3[valid_mask]/ppdf_4[valid_mask]) *
-            (1. - numpy.power(frac[valid_mask], ppdf_4[valid_mask]))) *
-            numpy.power(frac[valid_mask], ppdf_3[valid_mask]))
-        return gpdf
+        avg_tmp = numpy.empty(ctemp.shape, dtype=numpy.float32)
+        avg_tmp[valid_mask] = (mintmp[valid_mask] + maxtmp[valid_mask]) / 2.
+        grow_mask = ((avg_tmp > 0) & valid_mask)
+        nogrow_mask = ((avg_tmp <= 0) & valid_mask)
+        potprd = numpy.empty(ctemp.shape, dtype=numpy.float32)
+        potprd[:] = _TARGET_NODATA
+        potprd[grow_mask] = (numpy.exp(
+            (ppdf_3[grow_mask]/ppdf_4[grow_mask]) *
+            (1. - numpy.power(frac[grow_mask], ppdf_4[grow_mask]))) *
+            numpy.power(frac[grow_mask], ppdf_3[grow_mask]))
+        potprd[nogrow_mask] = 0.
+        return potprd
 
     def calc_h2ogef_1(
             pevap, avh2o_1, precip, wc, pprpts_1, pprpts_2, pprpts_3):
@@ -2567,6 +2577,8 @@ def _potential_production(
         # potprd, the limiting effect of temperature
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
+                aligned_inputs['min_temp_{}'.format(current_month)],
+                aligned_inputs['max_temp_{}'.format(current_month)],
                 temp_val_dict['ctemp'],
                 param_val_dict['ppdf_1_{}'.format(pft_i)],
                 param_val_dict['ppdf_2_{}'.format(pft_i)],
@@ -3232,8 +3244,10 @@ def calc_revised_fracrc(
 
         a2drat = numpy.empty(totale.shape, dtype=numpy.float32)
         a2drat[:] = _TARGET_NODATA
-        a2drat[valid_mask] = numpy.clip(
-            totale[valid_mask] / demand[valid_mask], 0., 1.)
+        demand_mask = ((demand > 0) & valid_mask)
+        a2drat[valid_mask] = 1.
+        a2drat[demand_mask] = numpy.clip(
+            totale[demand_mask] / demand[demand_mask], 0., 1.)
         return a2drat
 
     def calc_perennial_fracrc(
@@ -8613,11 +8627,13 @@ def calc_aboveground_uptake(total_uptake, eup_above_iel, eup_below_iel):
         (total_uptake != _TARGET_NODATA) &
         (eup_above_iel != _TARGET_NODATA) &
         (eup_below_iel != _TARGET_NODATA))
+    nonzero_mask = ((eup_above_iel + eup_below_iel > 0) & valid_mask)
     uptake_above = numpy.empty(total_uptake.shape, dtype=numpy.float32)
-    uptake_above[valid_mask] = (
-        total_uptake[valid_mask] * (
-            eup_above_iel[valid_mask] /
-            (eup_above_iel[valid_mask] + eup_below_iel[valid_mask])))
+    uptake_above[valid_mask] = 0.
+    uptake_above[nonzero_mask] = (
+        total_uptake[nonzero_mask] * (
+            eup_above_iel[nonzero_mask] /
+            (eup_above_iel[nonzero_mask] + eup_below_iel[nonzero_mask])))
     return uptake_above
 
 
@@ -8641,11 +8657,13 @@ def calc_belowground_uptake(total_uptake, eup_above_iel, eup_below_iel):
         (total_uptake != _TARGET_NODATA) &
         (eup_above_iel != _TARGET_NODATA) &
         (eup_below_iel != _TARGET_NODATA))
+    nonzero_mask = ((eup_above_iel + eup_below_iel > 0) & valid_mask)
     uptake_below = numpy.empty(total_uptake.shape, dtype=numpy.float32)
-    uptake_below[valid_mask] = (
-        total_uptake[valid_mask] * (
-            eup_below_iel[valid_mask] /
-            (eup_above_iel[valid_mask] + eup_below_iel[valid_mask])))
+    uptake_below[valid_mask] = 0.
+    uptake_below[nonzero_mask] = (
+        total_uptake[nonzero_mask] * (
+            eup_below_iel[nonzero_mask] /
+            (eup_above_iel[nonzero_mask] + eup_below_iel[nonzero_mask])))
     return uptake_below
 
 
@@ -9007,14 +9025,17 @@ def calc_nutrient_limitation(return_type):
 
         ecfor_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
         ecfor_below_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
-        ecfor_above_1[valid_mask] = (
-            mineci_above_1[valid_mask] +
-            (maxeci_above_1[valid_mask] - mineci_above_1[valid_mask]) *
-            eavail_1[valid_mask] / demand_1[valid_mask])
-        ecfor_below_1[valid_mask] = (
-            mineci_below_1[valid_mask] +
-            (maxeci_below_1[valid_mask] - mineci_below_1[valid_mask]) *
-            eavail_1[valid_mask] / demand_1[valid_mask])
+        nonzero_mask = ((demand_1 > 0) & valid_mask)
+        ecfor_above_1[valid_mask] = 0.
+        ecfor_below_1[valid_mask] = 0.
+        ecfor_above_1[nonzero_mask] = (
+            mineci_above_1[nonzero_mask] +
+            (maxeci_above_1[nonzero_mask] - mineci_above_1[nonzero_mask]) *
+            eavail_1[nonzero_mask] / demand_1[nonzero_mask])
+        ecfor_below_1[nonzero_mask] = (
+            mineci_below_1[nonzero_mask] +
+            (maxeci_below_1[nonzero_mask] - mineci_below_1[nonzero_mask]) *
+            eavail_1[nonzero_mask] / demand_1[nonzero_mask])
 
         sufficient_mask = ((eavail_1 > demand_1) & valid_mask)
         ecfor_above_1[sufficient_mask] = maxeci_above_1[sufficient_mask]
@@ -9033,14 +9054,17 @@ def calc_nutrient_limitation(return_type):
 
         ecfor_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
         ecfor_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
-        ecfor_above_2[valid_mask] = (
-            mineci_above_2[valid_mask] +
-            (maxeci_above_2[valid_mask] - mineci_above_2[valid_mask]) *
-            eavail_2[valid_mask] / demand_2[valid_mask])
-        ecfor_below_2[valid_mask] = (
-            mineci_below_2[valid_mask] +
-            (maxeci_below_2[valid_mask] - mineci_below_2[valid_mask]) *
-            eavail_2[valid_mask] / demand_2[valid_mask])
+        nonzero_mask = ((demand_2 > 0) & valid_mask)
+        ecfor_above_2[valid_mask] = 0.
+        ecfor_below_2[valid_mask] = 0.
+        ecfor_above_2[nonzero_mask] = (
+            mineci_above_2[nonzero_mask] +
+            (maxeci_above_2[nonzero_mask] - mineci_above_2[nonzero_mask]) *
+            eavail_2[nonzero_mask] / demand_2[nonzero_mask])
+        ecfor_below_2[nonzero_mask] = (
+            mineci_below_2[nonzero_mask] +
+            (maxeci_below_2[nonzero_mask] - mineci_below_2[nonzero_mask]) *
+            eavail_2[nonzero_mask] / demand_2[nonzero_mask])
 
         sufficient_mask = ((eavail_2 > demand_2) & valid_mask)
         ecfor_above_2[sufficient_mask] = maxeci_above_2[sufficient_mask]
