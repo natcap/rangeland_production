@@ -8389,9 +8389,12 @@ def _shoot_senescence(
                 temp_val_dict['delta_iel'], _TARGET_NODATA,
                 temp_val_dict['to_storage'], _TARGET_NODATA,
                 temp_val_dict['to_stdede'], _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['operand_temp'])
             raster_sum(
-                prev_sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
-                _SV_NODATA, temp_val_dict['to_stdede'], _TARGET_NODATA,
+                temp_val_dict['operand_temp'], _SV_NODATA,
+                temp_val_dict['to_stdede'], _TARGET_NODATA,
                 sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
 
 
