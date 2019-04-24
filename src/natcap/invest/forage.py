@@ -3783,7 +3783,7 @@ def _root_shoot_ratio(
         flgrem_path = os.path.join(temp_dir, 'flgrem.tif')
         pygeoprocessing.new_raster_from_base(
             param_val_dict['grzeff_{}'.format(pft_i)], flgrem_path,
-            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.05])
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
         calc_final_tgprod_rtsh(
             month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             temp_val_dict['fracrc_{}'.format(pft_i)],
