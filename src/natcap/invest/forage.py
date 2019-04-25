@@ -7441,6 +7441,24 @@ def _decomposition(
             delta_sv_dict['secndy_2'], _IC_NODATA)
 
         # accumulate flows
+        compartment = 'som3'
+        state_var = '{}c'.format(compartment)
+        shutil.copyfile(
+            sv_reg['{}_path'.format(state_var)],
+            temp_val_dict['operand_temp'])
+        raster_sum(
+            delta_sv_dict[state_var], _IC_NODATA,
+            temp_val_dict['operand_temp'], _SV_NODATA,
+            sv_reg['{}_path'.format(state_var)], _SV_NODATA)
+        for iel in [1, 2]:
+            state_var = '{}e_{}'.format(compartment, iel)
+            shutil.copyfile(
+                sv_reg['{}_path'.format(state_var)],
+                temp_val_dict['operand_temp'])
+            raster_sum(
+                delta_sv_dict[state_var], _IC_NODATA,
+                temp_val_dict['operand_temp'], _SV_NODATA,
+                sv_reg['{}_path'.format(state_var)], _SV_NODATA)
         for compartment in ['struc', 'metab', 'som1', 'som2']:
             for lyr in [1, 2]:
                 state_var = '{}c_{}'.format(compartment, lyr)
