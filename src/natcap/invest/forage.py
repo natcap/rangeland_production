@@ -158,6 +158,7 @@ _PERSISTENT_PARAMS_FILES = {
     'rnewbs_1_2_path': 'rnewbs_1_2.tif',
     'rnewbs_2_1_path': 'rnewbs_2_1.tif',
     'rnewbs_2_2_path': 'rnewbs_2_2.tif',
+    'vlossg_path': 'vlossg.tif',
     }
 
 # site-level values that are updated once per year
@@ -1350,6 +1351,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         pp_reg['fps1s3_path']
         pp_reg['fps2s3_path']
         pp_reg['orglch_path']
+        pp_reg['vlossg_path']
 
     Returns:
         None
@@ -1362,7 +1364,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
     param_val_dict = {}
     for val in[
             'peftxa', 'peftxb', 'p1co2a_2', 'p1co2b_2', 'ps1s3_1',
-            'ps1s3_2', 'ps2s3_1', 'ps2s3_2', 'omlech_1', 'omlech_2']:
+            'ps1s3_2', 'ps2s3_1', 'ps2s3_2', 'omlech_1', 'omlech_2', 'vlossg']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
@@ -1537,6 +1539,38 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
             param_val_dict['omlech_1'], param_val_dict['omlech_2'],
             sand_path]],
         calc_orglch, pp_reg['orglch_path'], gdal.GDT_Float32, _IC_NODATA)
+
+    def calc_vlossg(vlossg_param, clay):
+        """Calculate proportion of gross mineralized N that is volatized.
+
+        During decomposition, some N is lost to volatilization. This is a
+        function of the gross mineralized N and is calculated according to this
+        multiplier, which varies with soil clay content.
+
+        Parameters:
+            vlossg (numpy.ndarray): parameter, volatilization loss multiplier
+            clay (numpy.ndarray): input, proportion clay in soil
+
+        Returns:
+            vlossg, proportion of gross mineralized N that is volatized
+        """
+        valid_mask = (
+            (vlossg_param != _IC_NODATA) &
+            (~numpy.isclose(clay, clay_nodata)))
+        vlossg = numpy.empty(vlossg_param.shape, dtype=numpy.float32)
+        vlossg[:] = _IC_NODATA
+
+        max_mask = ((clay > 0.3) & valid_mask)
+        min_mask = ((clay < 0.1) & valid_mask)
+        vlossg[valid_mask] = -0.1 * (clay[valid_mask] - 0.3) + 0.01
+        vlossg[max_mask] = 0.01
+        vlossg[min_mask] = 0.03
+        vlossg[valid_mask] = vlossg[valid_mask] * vlossg_param[valid_mask]
+        return vlossg
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [param_val_dict['vlossg'], clay_path]],
+        calc_vlossg, pp_reg['vlossg_path'], gdal.GDT_Float32, _IC_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -6519,7 +6553,7 @@ def _decomposition(
             'varat3_1_2', 'varat3_2_2', 'varat3_3_2', 'omlech_3',
             'dec5_2', 'p2co2_2', 'dec5_1', 'p2co2_1', 'dec4', 'p3co2', 'cmix',
             'pparmn_2', 'psecmn_2', 'nlayer', 'pmnsec_2', 'psecoc1', 'psecoc2',
-            'vlossg', 'epnfs_2']:
+            'epnfs_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
@@ -7510,7 +7544,7 @@ def _decomposition(
     # volatilization loss of N: line 323 Simsom.f
     raster_multiplication(
         temp_val_dict['gromin_1'], _TARGET_NODATA,
-        param_val_dict['vlossg'], _IC_NODATA,
+        pp_reg['vlossg_path'], _IC_NODATA,
         temp_val_dict['operand_temp'], _TARGET_NODATA)
     shutil.copyfile(
         sv_reg['minerl_1_1_path'], temp_val_dict['d_statv_temp'])
