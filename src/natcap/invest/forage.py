@@ -6769,7 +6769,7 @@ def _decomposition(
                 temp_val_dict['net_tosom2'],
                 sv_reg['strucc_{}_path'.format(lyr)],
                 sv_reg['struce_{}_2_path'.format(lyr)],
-                pp_reg['{}_1_2_path'.format(rcetob)],
+                pp_reg['{}_2_2_path'.format(rcetob)],
                 sv_reg['minerl_1_2_path'],
                 delta_sv_dict['struce_{}_2'.format(lyr)],
                 delta_sv_dict['som2e_{}_2'.format(lyr)],
