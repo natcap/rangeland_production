@@ -693,8 +693,8 @@ def execute(args):
             month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
 
         _decomposition(
-            aligned_inputs, current_month, month_index, site_param_table,
-            year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg)
+            aligned_inputs, current_month, month_index, pft_id_set,
+            site_param_table, year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg)
 
         _death_and_partition(
             'stded', aligned_inputs, site_param_table, current_month,
@@ -1996,6 +1996,107 @@ def _yearly_tasks(
     shutil.rmtree(temp_dir)
 
 
+def calc_latitude(template_raster, latitude_raster_path):
+    """Calculate latitude at the center of each pixel in a template raster."""
+
+    # TODO if we allow projected inputs in the future, must reproject the
+    # template raster here to ensure we collect geographic coordinates
+    pygeoprocessing.new_raster_from_base(
+        template_raster, latitude_raster_path, gdal.GDT_Float32,
+        [_IC_NODATA])
+    latitude_raster = gdal.OpenEx(latitude_raster_path, gdal.GA_Update)
+    target_band = latitude_raster.GetRasterBand(1)
+    base_raster_info = pygeoprocessing.get_raster_info(template_raster)
+    geotransform = base_raster_info['geotransform']
+    for offset_map, raster_block in pygeoprocessing.iterblocks(
+            (template_raster, 1)):
+        n_y_block = raster_block.shape[0]
+        n_x_block = raster_block.shape[1]
+
+        # offset by .5 so we're in the center of the pixel
+        xoff = offset_map['xoff'] + 0.5
+        yoff = offset_map['yoff'] + 0.5
+
+        # calculate the projected x and y coordinate bounds for the block
+        x_range = numpy.linspace(
+            geotransform[0] + geotransform[1] * xoff,
+            geotransform[0] + geotransform[1] * (xoff + n_x_block - 1),
+            n_x_block)
+        y_range = numpy.linspace(
+            geotransform[3] + geotransform[5] * yoff,
+            geotransform[3] + geotransform[5] * (yoff + n_y_block - 1),
+            n_y_block)
+
+        # we'll use this to avoid generating any nodata points
+        valid_mask = raster_block != base_raster_info['nodata']
+
+        # these indexes correspond to projected coordinates
+        # y_vector is what we want, an array of latitude coordinates
+        x_vector, y_vector = numpy.meshgrid(x_range, y_range)
+
+        target_band.WriteArray(
+            y_vector, xoff=offset_map['xoff'], yoff=offset_map['yoff'])
+
+    # Making sure the band and dataset is flushed and not in memory
+    target_band.FlushCache()
+    target_band.FlushCache()
+    target_band = None
+    gdal.Dataset.__swig_destroy__(latitude_raster)
+    latitude_raster = None
+
+
+def _calc_daylength(template_raster, month, daylength_path):
+    """Calculate estimated hours of daylength. Daylen.c
+
+    Parameters:
+        template_raster (string): path to a raster in geographic coordinates
+            that is aligned with model inputs
+        month (int): current month of the year, such that month=0 indicates
+            January
+        daylength_path (string): path to shortwave radiation raster
+
+    Modifies:
+        the raster indicated by `daylength_path`
+
+    Returns:
+        None
+    """
+    def daylength(month):
+        def _daylength(latitude):
+            """Estimate hours of daylength for a given month and latitude."""
+            # Julian day at beginning of each month
+            jday_list = [
+                1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 337]
+            jday = jday_list[month - 1]
+
+            # Convert latitude from degrees to radians
+            rlatitude = latitude * (numpy.pi / 180.0)
+
+            declin = 0.4014 * numpy.sin(6.283185 * (jday - 77.0) / 365)
+            temp = 1.0 - (-numpy.tan(rlatitude) * numpy.tan(declin))**2
+            temp[temp < 0] = 0
+
+            par1 = numpy.sqrt(temp)
+            par2 = -numpy.tan(rlatitude) * numpy.tan(declin)
+
+            ahou = numpy.arctan2(par1, par2)
+            hours_of_daylength = (ahou / numpy.pi) * 24
+            return hours_of_daylength
+        return _daylength
+
+    # calculate an intermediate input, latitude at each pixel center
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    latitude_raster_path = os.path.join(temp_dir, 'latitude.tif')
+    calc_latitude(template_raster, latitude_raster_path)
+
+    pygeoprocessing.raster_calculator(
+        [(latitude_raster_path, 1)], daylength(month), daylength_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
 def _shortwave_radiation(template_raster, month, shwave_path):
     """Calculate shortwave radiation outside the atmosphere.
 
@@ -2061,53 +2162,10 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             return shwave
         return _shwave
 
-    # TODO if we allow projected inputs in the future, must reproject the
-    # template raster here to ensure we collect geographic coordinates
     # calculate an intermediate input, latitude at each pixel center
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     latitude_raster_path = os.path.join(temp_dir, 'latitude.tif')
-    pygeoprocessing.new_raster_from_base(
-        template_raster, latitude_raster_path, gdal.GDT_Float32,
-        [_IC_NODATA])
-    latitude_raster = gdal.OpenEx(latitude_raster_path, gdal.GA_Update)
-    target_band = latitude_raster.GetRasterBand(1)
-    base_raster_info = pygeoprocessing.get_raster_info(template_raster)
-    geotransform = base_raster_info['geotransform']
-    for offset_map, raster_block in pygeoprocessing.iterblocks(
-            (template_raster, 1)):
-        n_y_block = raster_block.shape[0]
-        n_x_block = raster_block.shape[1]
-
-        # offset by .5 so we're in the center of the pixel
-        xoff = offset_map['xoff'] + 0.5
-        yoff = offset_map['yoff'] + 0.5
-
-        # calculate the projected x and y coordinate bounds for the block
-        x_range = numpy.linspace(
-            geotransform[0] + geotransform[1] * xoff,
-            geotransform[0] + geotransform[1] * (xoff + n_x_block - 1),
-            n_x_block)
-        y_range = numpy.linspace(
-            geotransform[3] + geotransform[5] * yoff,
-            geotransform[3] + geotransform[5] * (yoff + n_y_block - 1),
-            n_y_block)
-
-        # we'll use this to avoid generating any nodata points
-        valid_mask = raster_block != base_raster_info['nodata']
-
-        # these indexes correspond to projected coordinates
-        # y_vector is what we want, an array of latitude coordinates
-        x_vector, y_vector = numpy.meshgrid(x_range, y_range)
-
-        target_band.WriteArray(
-            y_vector, xoff=offset_map['xoff'], yoff=offset_map['yoff'])
-
-    # Making sure the band and dataset is flushed and not in memory
-    target_band.FlushCache()
-    target_band.FlushCache()
-    target_band = None
-    gdal.Dataset.__swig_destroy__(latitude_raster)
-    latitude_raster = None
+    calc_latitude(template_raster, latitude_raster_path)
 
     pygeoprocessing.raster_calculator(
         [(latitude_raster_path, 1)],
@@ -6258,9 +6316,45 @@ def update_aminrl(
     os.remove(aminrl_prev_path)
 
 
+def sum_biomass(
+        weighted_live_c, weighted_dead_c, strucc_1, metabc_1, elitst):
+    """Calculate total biomass for the purposes of soil shading.
+
+    Total aboveground biomass for the purposes of soil shading is the sum
+    of live biomass, standing dead biomass, and litter.  The impact of
+    litter is modifed by the parameter elitst.
+
+    Parameters:
+        weighted_live_c (numpy.ndarray): derived, sum of the state variable
+            aglivc across plant functional types
+        weighted_dead_c (numpy.ndarray): derived, sum of the state variable
+            stdedc across plant functional types
+        strucc_1 (numpy.ndarray): state variable, surface structural c
+        metabc_1 (numpy.ndarray): state variable, surface metabolic c
+        elitst (numpy.ndarray): parameter, effect of litter on soil
+            temperature relative to live and standing dead biomass
+
+    Returns:
+        biomass, total biomass for purposes of soil shading
+    """
+    valid_mask = (
+        (weighted_live_c != _TARGET_NODATA) &
+        (weighted_dead_c != _TARGET_NODATA) &
+        (~numpy.isclose(strucc_1, _SV_NODATA)) &
+        (~numpy.isclose(metabc_1, _SV_NODATA)) &
+        (elitst != _IC_NODATA))
+    biomass = numpy.empty(weighted_live_c.shape, dtype=numpy.float32)
+    biomass[:] = _TARGET_NODATA
+    biomass[valid_mask] = (
+        (weighted_live_c[valid_mask] + weighted_dead_c[valid_mask]) * 2.5 +
+        (strucc_1[valid_mask] + metabc_1[valid_mask]) * 2.5 *
+        elitst[valid_mask])
+    return biomass
+
+
 def _decomposition(
-        aligned_inputs, current_month, month_index, site_param_table,
-        year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg):
+        aligned_inputs, current_month, month_index, pft_id_set,
+        site_param_table, year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg):
     """Update soil C, N and P after decomposition.
 
     C, N and P move from one surface or soil stock to another depending on the
@@ -6276,6 +6370,7 @@ def _decomposition(
             indicates January
         month_index (int): month of the simulation, such that month_index=13
             indicates month 13 of the simulation
+        pft_id_set (set): set of integers identifying plant functional types
         site_param_table (dict): map of site spatial indices to dictionaries
             containing site parameters
         year_reg (dict): map of key, path pairs giving paths to annual
@@ -6390,8 +6485,66 @@ def _decomposition(
         bgwfunc[(valid_mask & (rprpet > 9))] = 1
         return bgwfunc
 
-    def calc_defac(
-            bgwfunc, snow, min_temp, max_temp, teff_1, teff_2, teff_3, teff_4):
+    def calc_stemp(
+            biomass, snow, max_temp, min_temp, daylength, pmntmp, pmxtmp):
+        """Calculate mean soil surface temperature for decomposition.
+
+        Soil surface temperature is modified from monthly temperature inputs
+        by estimated impacts of shading by aboveground biomass and litter, and
+        estimated daylength. Surftemp.f
+
+        Parameters:
+            biomass (numpy.ndarray): derived, sum of aboveground biomass and
+                surface litter across plant functional types
+            snow (numpy.ndarray): state variable, current snowpack
+            max_temp (numpy.ndarray): input, maximum temperature this month
+            min_temp (numpy.ndarray): input, minimum temperature this month
+            daylength (numpy.ndarray): derived, estimated hours of daylight
+            pmntmp (numpy.ndarray): parameter, effect of biomass on minimum
+                surface temperature
+            pmxtmp (numpy.ndarray): parameter, effect of biomass on maximum
+                surface temperature
+
+        Returns:
+            stemp, mean soil surface temperature for decomposition
+        """
+        valid_mask = (
+            (biomass != _TARGET_NODATA) &
+            (snow != _SV_NODATA) &
+            (~numpy.isclose(max_temp, max_temp_nodata)) &
+            (~numpy.isclose(min_temp, min_temp_nodata)) &
+            (daylength != _TARGET_NODATA) &
+            (pmntmp != _IC_NODATA) &
+            (pmxtmp != _IC_NODATA))
+        tmxs = numpy.empty(biomass.shape, dtype=numpy.float32)
+        tmxs[valid_mask] = (
+            max_temp[valid_mask] + (25.4 / (1. + 18. * numpy.exp(
+                -0.2 * max_temp[valid_mask]))) *
+            (numpy.exp(pmxtmp[valid_mask] * biomass[valid_mask]) - 0.13))
+        tmns = numpy.empty(biomass.shape, dtype=numpy.float32)
+        tmns[valid_mask] = (
+            min_temp[valid_mask] + pmntmp[valid_mask] * biomass[valid_mask]
+            - 1.78)
+
+        shortday_mask = ((daylength < 12.) & valid_mask)
+        snow_mask = ((snow > 0) & valid_mask)
+
+        tmns_mlt = numpy.empty(biomass.shape, dtype=numpy.float32)
+        tmns_mlt[valid_mask] = (
+            ((12. - daylength[valid_mask]) * 1.2 + 12.) / 24.)
+        tmns_mlt[shortday_mask] = (
+            ((12 - daylength[shortday_mask]) * 3. + 12.) / 24.)
+        tmns_mlt[valid_mask] = numpy.clip(tmns_mlt[valid_mask], 0.05, 0.95)
+
+        stemp = numpy.empty(biomass.shape, dtype=numpy.float32)
+        stemp[:] = _TARGET_NODATA
+        stemp[valid_mask] = (
+            (1 - tmns_mlt[valid_mask]) * tmxs[valid_mask] +
+            tmns_mlt[valid_mask] * tmns[valid_mask])
+        stemp[snow_mask] = 0.
+        return stemp
+
+    def calc_defac(bgwfunc, stemp, teff_1, teff_2, teff_3, teff_4):
         """Calculate decomposition factor.
 
         The decomposition factor influences the rate of surface and soil
@@ -6401,9 +6554,7 @@ def _decomposition(
         Parameters:
             bgwfunc (numpy.ndarray): derived, effect of soil moisture on
                 decomposition
-            snow (numpy.ndarray): state variable, current snowpack
-            min_temp (numpy.ndarray): input, minimum temperature for the month
-            max_temp (numpy.ndarray): input, maximum temperature for the month
+            stemp (numpy.ndarray): derived, average soil surface temperature
             teff_1 (numpy.ndarray): parameter, x location of inflection point
                 for calculating the effect of soil temperature on decomposition
                 factor
@@ -6421,18 +6572,10 @@ def _decomposition(
         """
         valid_mask = (
             (bgwfunc != _TARGET_NODATA) &
-            (snow != _TARGET_NODATA) &
-            (~numpy.isclose(min_temp, min_temp_nodata)) &
-            (~numpy.isclose(max_temp, max_temp_nodata)) &
             (teff_1 != _IC_NODATA) &
             (teff_2 != _IC_NODATA) &
             (teff_3 != _IC_NODATA) &
             (teff_4 != _IC_NODATA))
-        stemp = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
-        stemp[:] = _TARGET_NODATA
-        stemp[valid_mask] = (min_temp[valid_mask] + max_temp[valid_mask]) / 2.
-        stemp[(valid_mask & (snow > 0))] = 0.
-
         tfunc = numpy.empty(bgwfunc.shape, dtype=numpy.float32)
         tfunc[:] = _TARGET_NODATA
         tfunc[valid_mask] = numpy.maximum(
@@ -6529,9 +6672,11 @@ def _decomposition(
     temp_val_dict = {}
     for val in [
             'd_statv_temp', 'operand_temp', 'shwave', 'pevap', 'rprpet',
+            'daylength', 'sum_aglivc', 'sum_stdedc', 'biomass', 'stemp',
             'defac', 'anerb', 'gromin_1', 'pheff_struc', 'pheff_metab',
-            'aminrl_1', 'aminrl_2', 'fsol', 'tcflow', 'tosom2', 'net_tosom2',
-            'tosom1', 'net_tosom1', 'tosom3', 'cleach', 'pheff_som3', 'pflow']:
+            'aminrl_1', 'aminrl_2', 'fsol', 'tcflow', 'tosom2',
+            'net_tosom2', 'tosom1', 'net_tosom1', 'tosom3', 'cleach',
+            'pheff_som3', 'pflow']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
         for iel in [1, 2]:
             for val in ['rceto1', 'rceto2', 'rceto3']:
@@ -6539,21 +6684,21 @@ def _decomposition(
                     temp_dir, '{}.tif'.format('{}_{}'.format(val, iel)))
     param_val_dict = {}
     for val in [
-            'fwloss_4', 'teff_1', 'teff_2', 'teff_3', 'teff_4', 'drain',
-            'aneref_1', 'aneref_2', 'aneref_3', 'sorpmx', 'pslsrb', 'strmax_1',
-            'dec1_1', 'pligst_1', 'strmax_2', 'dec1_2', 'pligst_2', 'rsplig',
-            'ps1co2_1', 'ps1co2_2', 'dec2_1', 'pcemic1_1_1', 'pcemic1_2_1',
-            'pcemic1_3_1', 'pcemic1_1_2', 'pcemic1_2_2', 'pcemic1_3_2',
-            'varat1_1_1', 'varat1_2_1', 'varat1_3_1', 'varat1_1_2',
-            'varat1_2_2', 'varat1_3_2', 'dec2_2', 'pmco2_1', 'pmco2_2',
-            'rad1p_1_1', 'rad1p_2_1', 'rad1p_3_1', 'rad1p_1_2', 'rad1p_2_2',
-            'rad1p_3_2', 'dec3_1', 'p1co2a_1', 'varat22_1_1', 'varat22_2_1',
-            'varat22_3_1', 'varat22_1_2', 'varat22_2_2', 'varat22_3_2',
-            'dec3_2', 'animpt', 'varat3_1_1', 'varat3_2_1', 'varat3_3_1',
-            'varat3_1_2', 'varat3_2_2', 'varat3_3_2', 'omlech_3',
-            'dec5_2', 'p2co2_2', 'dec5_1', 'p2co2_1', 'dec4', 'p3co2', 'cmix',
-            'pparmn_2', 'psecmn_2', 'nlayer', 'pmnsec_2', 'psecoc1', 'psecoc2',
-            'epnfs_2']:
+            'fwloss_4', 'elitst', 'pmntmp', 'pmxtmp', 'teff_1', 'teff_2',
+            'teff_3', 'teff_4', 'drain', 'aneref_1', 'aneref_2', 'aneref_3',
+            'sorpmx', 'pslsrb', 'strmax_1', 'dec1_1', 'pligst_1', 'strmax_2',
+            'dec1_2', 'pligst_2', 'rsplig', 'ps1co2_1', 'ps1co2_2', 'dec2_1',
+            'pcemic1_1_1', 'pcemic1_2_1', 'pcemic1_3_1', 'pcemic1_1_2',
+            'pcemic1_2_2', 'pcemic1_3_2', 'varat1_1_1', 'varat1_2_1',
+            'varat1_3_1', 'varat1_1_2', 'varat1_2_2', 'varat1_3_2', 'dec2_2',
+            'pmco2_1', 'pmco2_2', 'rad1p_1_1', 'rad1p_2_1', 'rad1p_3_1',
+            'rad1p_1_2', 'rad1p_2_2', 'rad1p_3_2', 'dec3_1', 'p1co2a_1',
+            'varat22_1_1', 'varat22_2_1', 'varat22_3_1', 'varat22_1_2',
+            'varat22_2_2', 'varat22_3_2', 'dec3_2', 'animpt', 'varat3_1_1',
+            'varat3_2_1', 'varat3_3_1', 'varat3_1_2', 'varat3_2_2',
+            'varat3_3_2', 'omlech_3', 'dec5_2', 'p2co2_2', 'dec5_1', 'p2co2_1',
+            'dec4', 'p3co2', 'cmix', 'pparmn_2', 'psecmn_2', 'nlayer',
+            'pmnsec_2', 'psecoc1', 'psecoc2', 'epnfs_2']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
@@ -6589,12 +6734,39 @@ def _decomposition(
         calc_bgwfunc, month_reg['bgwfunc'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
+    # estimated daylength
+    _calc_daylength(
+        aligned_inputs['site_index'], current_month,
+        temp_val_dict['daylength'])
+
+    # total biomass for purposes of soil shading
+    for sv in ['aglivc', 'stdedc']:
+        weighted_sum_path = temp_val_dict['sum_{}'.format(sv)]
+        weighted_state_variable_sum(
+            sv, prev_sv_reg, aligned_inputs, pft_id_set, weighted_sum_path)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['sum_aglivc'], temp_val_dict['sum_stdedc'],
+            prev_sv_reg['strucc_1_path'], prev_sv_reg['metabc_1_path'],
+            param_val_dict['elitst']]],
+        sum_biomass, temp_val_dict['biomass'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    # stemp, soil surface temperature for the purposes of decomposition
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['biomass'], sv_reg['snow_path'],
+            aligned_inputs['max_temp_{}'.format(current_month)],
+            aligned_inputs['min_temp_{}'.format(current_month)],
+            temp_val_dict['daylength'], param_val_dict['pmntmp'],
+            param_val_dict['pmxtmp']]],
+        calc_stemp, temp_val_dict['stemp'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
     # defac, decomposition factor calculated from soil temp and moisture
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
-            month_reg['bgwfunc'], sv_reg['snow_path'],
-            aligned_inputs['min_temp_{}'.format(current_month)],
-            aligned_inputs['max_temp_{}'.format(current_month)],
+            month_reg['bgwfunc'], temp_val_dict['stemp'],
             param_val_dict['teff_1'], param_val_dict['teff_2'],
             param_val_dict['teff_3'], param_val_dict['teff_4']]],
         calc_defac, temp_val_dict['defac'], gdal.GDT_Float32,
