@@ -2507,7 +2507,8 @@ class foragetests(unittest.TestCase):
                 'ps2s3_1': numpy.random.uniform(0.58, 0.78),
                 'ps2s3_2': numpy.random.uniform(0.001, 0.005),
                 'omlech_1': numpy.random.uniform(0.01, 0.05),
-                'omlech_2': numpy.random.uniform(0.06, 0.18)},
+                'omlech_2': numpy.random.uniform(0.06, 0.18),
+                'vlossg': 1},
                 }
 
         pp_reg = {
@@ -2519,6 +2520,7 @@ class foragetests(unittest.TestCase):
             'fps1s3_path': os.path.join(self.workspace_dir, 'fps1s3.tif'),
             'fps2s3_path': os.path.join(self.workspace_dir, 'fps2s3.tif'),
             'orglch_path': os.path.join(self.workspace_dir, 'orglch.tif'),
+            'vlossg_path': os.path.join(self.workspace_dir, 'vlossg.tif'),
         }
 
         site_index_path = os.path.join(self.workspace_dir, 'site_index.tif')
@@ -2562,6 +2564,11 @@ class foragetests(unittest.TestCase):
                 'maximum_acceptable_value': 0.14,
                 'nodata_value': _IC_NODATA,
                 },
+            'vlossg_path': {
+                'minimum_acceptable_value': 0.009999,
+                'maximum_acceptable_value': 0.03001,
+                'nodata_value': _IC_NODATA,
+                },
         }
 
         forage._persistent_params(
@@ -2597,6 +2604,7 @@ class foragetests(unittest.TestCase):
         site_param_table[1]['ps2s3_2'] = 0.0022
         site_param_table[1]['omlech_1'] = 0.022
         site_param_table[1]['omlech_2'] = 0.12
+        site_param_table[1]['vlossg'] = 1
 
         create_random_raster(sand_path, 0.22, 0.22)
         create_random_raster(clay_path, 0.22, 0.22)
@@ -2628,6 +2636,10 @@ class foragetests(unittest.TestCase):
                 'value': 0.0484,
                 'nodata_value': _IC_NODATA,
                 },
+            'vlossg_path': {
+                'value': 0.018,
+                'nodata_value': _IC_NODATA,
+            }
         }
         tolerance = 0.0001
 
@@ -3252,6 +3264,26 @@ class foragetests(unittest.TestCase):
                 month_reg['h2ogef_1_{}'.format(pft_i)],
                 minimum_acceptable_h2ogef_1,
                 maximum_acceptable_h2ogef_1, _TARGET_NODATA)
+            self.assert_all_values_in_raster_within_range(
+                month_reg['tgprod_pot_prod_{}'.format(pft_i)],
+                minimum_acceptable_potential_production,
+                maximum_acceptable_potential_production, _TARGET_NODATA)
+
+        # average temperature < 0, no potential for growth
+        create_constant_raster(
+            aligned_inputs['max_temp_{}'.format(current_month)], 2.,
+            n_cols=NCOLS, n_rows=NROWS)
+        create_constant_raster(
+            aligned_inputs['min_temp_{}'.format(current_month)], -10.,
+            n_cols=NCOLS, n_rows=NROWS)
+        minimum_acceptable_potential_production = 0
+        maximum_acceptable_potential_production = 0
+
+        forage._potential_production(
+            aligned_inputs, site_param_table, current_month, month_index,
+            pft_id_set, veg_trait_table, sv_reg, pp_reg, month_reg)
+
+        for pft_i in pft_id_set:
             self.assert_all_values_in_raster_within_range(
                 month_reg['tgprod_pot_prod_{}'.format(pft_i)],
                 minimum_acceptable_potential_production,
@@ -6205,85 +6237,6 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg']['avh2o_3_path'],
             results_dict['avh2o_3'] - tolerance,
             results_dict['avh2o_3'] + tolerance, _SV_NODATA)
-
-    def test_monthly_N_fixation(self):
-        """Test `_monthly_N_fixation`.
-
-        Use the function `_monthly_N_fixation` to calculate monthly atmospheric
-        N deposition and add it to the surface mineral N pool.  Compare results
-        to values calculated by point-based version.
-
-        Raises:
-            AssertionError if updated mineral_1_1 does not match value
-                calculated by point-based version
-
-        Returns:
-            None
-        """
-        from natcap.invest import forage
-
-        # known inputs
-        precip = 12.6
-        month_index = 4
-        annual_precip = 230.
-        baseNdep = 24.
-        epnfs_2 = 0.01
-        prev_minerl_1_1 = 3.2
-        minerl_1_1 = monthly_N_fixation_point(
-            precip, annual_precip, baseNdep, epnfs_2, prev_minerl_1_1)
-
-        aligned_inputs = {
-            'precip_{}'.format(month_index): os.path.join(
-                self.workspace_dir, 'precip_{}.tif'.format(month_index)),
-            'site_index': os.path.join(
-                    self.workspace_dir, 'site_index.tif'),
-        }
-        year_reg = {
-            'annual_precip_path': os.path.join(
-                self.workspace_dir, 'annual_precip.tif'),
-            'baseNdep_path': os.path.join(self.workspace_dir, 'baseNdep.tif')
-        }
-        prev_sv_reg = {
-            'minerl_1_1_path': os.path.join(
-                self.workspace_dir, 'minerl_1_1_prev.tif'),
-        }
-        sv_reg = {
-            'minerl_1_1_path': os.path.join(
-                self.workspace_dir, 'minerl_1_1.tif'),
-        }
-        site_param_table = {1: {'epnfs_2': epnfs_2}}
-
-        create_random_raster(
-            aligned_inputs['precip_{}'.format(month_index)], precip,
-            precip)
-        create_random_raster(aligned_inputs['site_index'], 1, 1)
-        create_random_raster(
-            year_reg['annual_precip_path'], annual_precip, annual_precip)
-        create_random_raster(year_reg['baseNdep_path'], baseNdep, baseNdep)
-        create_random_raster(
-            prev_sv_reg['minerl_1_1_path'], prev_minerl_1_1, prev_minerl_1_1)
-
-        tolerance = 0.000001
-        forage._monthly_N_fixation(
-            aligned_inputs, month_index, site_param_table,
-            year_reg, prev_sv_reg, sv_reg)
-        self.assert_all_values_in_raster_within_range(
-            sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
-            minerl_1_1 + tolerance, _SV_NODATA)
-
-        insert_nodata_values_into_raster(
-            aligned_inputs['precip_{}'.format(month_index)], -9999)
-        insert_nodata_values_into_raster(
-            year_reg['baseNdep_path'], _TARGET_NODATA)
-        insert_nodata_values_into_raster(
-            prev_sv_reg['minerl_1_1_path'], _SV_NODATA)
-
-        forage._monthly_N_fixation(
-            aligned_inputs, month_index, site_param_table,
-            year_reg, prev_sv_reg, sv_reg)
-        self.assert_all_values_in_raster_within_range(
-            sv_reg['minerl_1_1_path'], minerl_1_1 - tolerance,
-            minerl_1_1 + tolerance, _SV_NODATA)
 
     def test_calc_anerb(self):
         """Test `calc_anerb`.
@@ -9310,38 +9263,26 @@ class foragetests(unittest.TestCase):
         pft_id_set = set([key for key in veg_trait_table.iterkeys()])
         prev_sv_reg = {
             'aglivc_1_path': os.path.join(prev_sv_dir, 'aglivc_1.tif'),
-            'stdedc_1_path': os.path.join(prev_sv_dir, 'stdedc_1.tif'),
             'aglive_1_1_path': os.path.join(prev_sv_dir, 'aglive_1_1.tif'),
             'aglive_2_1_path': os.path.join(prev_sv_dir, 'aglive_2_1.tif'),
-            'stdede_1_1_path': os.path.join(prev_sv_dir, 'stdede_1_1.tif'),
-            'stdede_2_1_path': os.path.join(prev_sv_dir, 'stdede_2_1.tif'),
             'crpstg_1_1_path': os.path.join(prev_sv_dir, 'crpstg_1_1.tif'),
             'crpstg_2_1_path': os.path.join(prev_sv_dir, 'crpstg_2_1.tif'),
 
             'aglivc_2_path': os.path.join(prev_sv_dir, 'aglivc_2.tif'),
-            'stdedc_2_path': os.path.join(prev_sv_dir, 'stdedc_2.tif'),
             'aglive_1_2_path': os.path.join(prev_sv_dir, 'aglive_1_2.tif'),
             'aglive_2_2_path': os.path.join(prev_sv_dir, 'aglive_2_2.tif'),
-            'stdede_1_2_path': os.path.join(prev_sv_dir, 'stdede_1_2.tif'),
-            'stdede_2_2_path': os.path.join(prev_sv_dir, 'stdede_2_2.tif'),
             'crpstg_1_2_path': os.path.join(prev_sv_dir, 'crpstg_1_2.tif'),
             'crpstg_2_2_path': os.path.join(prev_sv_dir, 'crpstg_2_2.tif'),
         }
         create_constant_raster(prev_sv_reg['aglivc_1_path'], aglivc)
-        create_constant_raster(prev_sv_reg['stdedc_1_path'], stdedc)
         create_constant_raster(prev_sv_reg['aglive_1_1_path'], aglive_1)
         create_constant_raster(prev_sv_reg['aglive_2_1_path'], aglive_2)
-        create_constant_raster(prev_sv_reg['stdede_1_1_path'], stdede_1)
-        create_constant_raster(prev_sv_reg['stdede_2_1_path'], stdede_2)
         create_constant_raster(prev_sv_reg['crpstg_1_1_path'], crpstg_1)
         create_constant_raster(prev_sv_reg['crpstg_2_1_path'], crpstg_2)
 
         create_constant_raster(prev_sv_reg['aglivc_2_path'], aglivc)
-        create_constant_raster(prev_sv_reg['stdedc_2_path'], stdedc)
         create_constant_raster(prev_sv_reg['aglive_1_2_path'], aglive_1)
         create_constant_raster(prev_sv_reg['aglive_2_2_path'], aglive_2)
-        create_constant_raster(prev_sv_reg['stdede_1_2_path'], stdede_1)
-        create_constant_raster(prev_sv_reg['stdede_2_2_path'], stdede_2)
         create_constant_raster(prev_sv_reg['crpstg_1_2_path'], crpstg_1)
         create_constant_raster(prev_sv_reg['crpstg_2_2_path'], crpstg_2)
 
@@ -9368,6 +9309,12 @@ class foragetests(unittest.TestCase):
             'bgwfunc': os.path.join(self.workspace_dir, 'bgwfunc.tif'),
         }
         create_constant_raster(month_reg['bgwfunc'], bgwfunc)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdedc_2_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+        create_constant_raster(sv_reg['stdede_2_1_path'], stdede_2)
+        create_constant_raster(sv_reg['stdede_1_2_path'], stdede_1)
+        create_constant_raster(sv_reg['stdede_2_2_path'], stdede_2)
 
         # known modified state variables
         aglivc_after_1 = 8.16325
@@ -10530,4 +10477,76 @@ class foragetests(unittest.TestCase):
                     minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] -
                     tolerance,
                     minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] +
+                    tolerance, _SV_NODATA)
+
+        # match Century
+        starting_minerl_dict = {
+            'minerl_1_1': 7.96845627,
+            'minerl_2_1': 0.,
+            'minerl_3_1': 0.,
+            'minerl_4_1': 0.,
+            'minerl_1_2': 13.826642,
+            'minerl_2_2': 0.,
+            'minerl_3_2': 0.,
+            'minerl_4_2': 0.,
+            }
+        amov_dict = {
+            'amov_1': 0.146463394,
+            'amov_2': 0,
+            'amov_3': 0,
+            'amov_4': 0,
+            }
+        sand = 0.43999
+        minlch = 18.
+        fleach_1 = 0.2
+        fleach_2 = 0.7
+        fleach_3 = 1.
+        fleach_4 = 0.
+        pslsrb = 1
+        sorpmx = 2
+
+        # raster-based inputs
+        create_constant_raster(aligned_inputs['sand'], sand)
+        for iel in [1, 2]:
+            for lyr in xrange(1, 5):
+                create_constant_raster(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                    starting_minerl_dict['minerl_{}_{}'.format(lyr, iel)])
+        for lyr in xrange(1, 5):
+            create_constant_raster(
+                month_reg['amov_{}'.format(lyr)],
+                amov_dict['amov_{}'.format(lyr)])
+        site_param_table = {
+            1: {
+                'minlch': minlch,
+                'fleach_1': fleach_1,
+                'fleach_2': fleach_2,
+                'fleach_3': fleach_3,
+                'fleach_4': fleach_4,
+                'pslsrb': pslsrb,
+                'sorpmx': sorpmx,
+                'nlayer': 4,
+            }
+        }
+        forage._leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+
+        # known outputs from Century
+        ending_minerl_dict = {
+            'minerl_1_1': 7.93551874,
+            'minerl_2_1': 0.032937,
+            'minerl_3_1': 0.,
+            'minerl_4_1': 0.,
+            'minerl_1_2': 13.826642,
+            'minerl_2_2': 0.,
+            'minerl_3_2': 0.,
+            'minerl_4_2': 0.,
+        }
+
+        for iel in [1, 2]:
+            for lyr in xrange(1, 5):
+                self.assert_all_values_in_raster_within_range(
+                    sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
+                    ending_minerl_dict['minerl_{}_{}'.format(lyr, iel)] -
+                    tolerance,
+                    ending_minerl_dict['minerl_{}_{}'.format(lyr, iel)] +
                     tolerance, _SV_NODATA)
