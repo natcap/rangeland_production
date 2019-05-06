@@ -333,6 +333,7 @@ def execute(args):
 
     Returns:
         None.
+
     """
     LOGGER.info("model execute: %s", args)
     starting_month = int(args['starting_month'])
@@ -729,6 +730,7 @@ def raster_multiplication(
 
     Returns:
         None
+
     """
     def raster_multiply_op(raster1, raster2):
         """Multiply two rasters."""
@@ -759,6 +761,7 @@ def raster_division(
 
     Returns:
         None
+
     """
     def raster_divide_op(raster1, raster2):
         """Divide raster1 by raster2."""
@@ -805,6 +808,7 @@ def raster_list_sum(
 
     Returns:
         None
+
     """
     def raster_sum_op(*raster_list):
         """Add the rasters in raster_list without removing nodata values."""
@@ -856,6 +860,7 @@ def raster_sum(
 
     Returns:
         None
+
     """
     def raster_sum_op(raster1, raster2):
         """Add raster1 and raster2 without removing nodata values."""
@@ -911,6 +916,7 @@ def raster_difference(
 
     Returns:
         None
+
     """
     def raster_difference_op(raster1, raster2):
         """Subtract raster2 from raster1 without removing nodata values."""
@@ -956,6 +962,7 @@ def reclassify_nodata(target_path, new_nodata_value):
 
     Returns:
         None
+
     """
     def reclassify_op(target_raster):
         reclassified_raster = numpy.copy(target_raster)
@@ -1002,6 +1009,7 @@ def weighted_state_variable_sum(
 
     Returns:
         None
+
     """
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
@@ -1050,6 +1058,7 @@ def _calc_ompc(
 
     Returns:
         None
+
     """
     def ompc_op(som1c_2, som2c_2, som3c, bulkd, edepth):
         """Estimate total soil organic matter.
@@ -1069,6 +1078,7 @@ def _calc_ompc(
         Returns:
             ompc, total soil organic matter weighted by bulk
             density.
+
         """
         ompc = numpy.empty(som1c_2.shape, dtype=numpy.float32)
         ompc[:] = _TARGET_NODATA
@@ -1110,6 +1120,7 @@ def _calc_afiel(
 
     Returns:
         None
+
     """
     def afiel_op(sand, silt, clay, ompc, bulkd):
         """Calculate field capacity for one soil layer.
@@ -1129,6 +1140,7 @@ def _calc_afiel(
 
         Returns:
             afiel, field capacity for this soil layer
+
         """
         afiel = numpy.empty(sand.shape, dtype=numpy.float32)
         afiel[:] = _TARGET_NODATA
@@ -1179,6 +1191,7 @@ def _calc_awilt(
 
     Returns:
         None
+
     """
     def awilt_op(sand, silt, clay, ompc, bulkd):
         """Calculate wilting point for one soil layer.
@@ -1198,6 +1211,7 @@ def _calc_awilt(
 
         Returns:
             awilt, wilting point for this soil layer
+
         """
         awilt = numpy.empty(sand.shape, dtype=numpy.float32)
         awilt[:] = _TARGET_NODATA
@@ -1258,6 +1272,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
     Returns:
         None
+
     """
     def decrement_ompc(ompc_orig_path, ompc_dec_path):
         """Decrease estimated organic matter to 85% of its value.
@@ -1276,6 +1291,7 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
 
         Returns:
             None
+
         """
         def decrement_op(ompc_orig):
             """Reduce organic matter to 85% of its previous value."""
@@ -1355,6 +1371,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
 
     Returns:
         None
+
     """
     sand_nodata = pygeoprocessing.get_raster_info(sand_path)['nodata'][0]
     clay_nodata = pygeoprocessing.get_raster_info(clay_path)['nodata'][0]
@@ -1396,6 +1413,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
 
         Returns:
             eftext, coefficient that modifies microbe decomposition rate.
+
         """
         eftext = numpy.empty(sand.shape, dtype=numpy.float32)
         eftext[:] = _IC_NODATA
@@ -1429,6 +1447,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Returns:
             p1co2_2, fraction of carbon that flows to CO2 from active
             organic soil carbon
+
         """
         p1co2_2 = numpy.empty(sand.shape, dtype=numpy.float32)
         p1co2_2[:] = _IC_NODATA
@@ -1461,6 +1480,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Returns:
             fps1s3, coefficient that modifies rate of decomposition
             from som1c_2
+
         """
         fps1s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps1s3[:] = _IC_NODATA
@@ -1492,6 +1512,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Returns:
             fps2s3, coefficient that modifies rate of decomposition from
             som2c_2 to som3c
+
         """
         fps2s3 = numpy.empty(clay.shape, dtype=numpy.float32)
         fps2s3[:] = _IC_NODATA
@@ -1523,6 +1544,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
         Returns:
             orglch, the fraction of organic compounds leaching from soil
             with drainage from soil layer 1 to layer 2
+
         """
         orglch = numpy.empty(sand.shape, dtype=numpy.float32)
         orglch[:] = _IC_NODATA
@@ -1553,6 +1575,7 @@ def _persistent_params(site_index_path, site_param_table, sand_path,
 
         Returns:
             vlossg, proportion of gross mineralized N that is volatized
+
         """
         valid_mask = (
             (vlossg_param != _IC_NODATA) &
@@ -1592,6 +1615,7 @@ def _aboveground_ratio(anps, tca, pcemic_1, pcemic_2, pcemic_3):
 
     Returns:
         agdrat, the C/<iel> ratio of new material
+
     """
     valid_mask = (
         (~numpy.isclose(anps, _SV_NODATA)) &
@@ -1639,6 +1663,7 @@ def _belowground_ratio(aminrl, varat_1_iel, varat_2_iel, varat_3_iel):
 
     Returns:
         bgdrat, the C/<iel> ratio of new material
+
     """
     valid_mask = (
         (~numpy.isclose(aminrl, _SV_NODATA)) &
@@ -1690,6 +1715,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
     Returns:
         None
+
     """
     # temporary parameter rasters for structural ratios calculations
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -1746,6 +1772,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
         Returns:
             rnewas2, required ratio for decomposition of structural material
             into som2 for one nutrient
+
         """
         valid_mask = (
             (pcemic2_2 != _IC_NODATA) &
@@ -1860,6 +1887,7 @@ def _yearly_tasks(
 
     Raises:
         ValueError if fewer than 12 monthly precipitation rasters can be found
+
     """
     def calc_base_N_dep(epnfa_1, epnfa_2, prcann):
         """Calculate base annual atmospheric N deposition.
@@ -1873,6 +1901,7 @@ def _yearly_tasks(
 
         Returns:
             baseNdep, annual atmospheric N deposition
+
         """
         baseNdep = numpy.empty(prcann.shape, dtype=numpy.float32)
         baseNdep[:] = 0.
@@ -1904,6 +1933,7 @@ def _yearly_tasks(
 
         Returns:
             pltlig_lyr, fraction of residue that is lignin
+
         """
         valid_mask = (
             (fligni_1_lyr != _IC_NODATA) &
@@ -1998,13 +2028,11 @@ def _yearly_tasks(
 
 def calc_latitude(template_raster, latitude_raster_path):
     """Calculate latitude at the center of each pixel in a template raster."""
-
-    # TODO if we allow projected inputs in the future, must reproject the
-    # template raster here to ensure we collect geographic coordinates
     pygeoprocessing.new_raster_from_base(
         template_raster, latitude_raster_path, gdal.GDT_Float32,
         [_IC_NODATA])
-    latitude_raster = gdal.OpenEx(latitude_raster_path, gdal.GA_Update)
+    latitude_raster = gdal.OpenEx(
+        latitude_raster_path, gdal.OF_RASTER | gdal.GA_Update)
     target_band = latitude_raster.GetRasterBand(1)
     base_raster_info = pygeoprocessing.get_raster_info(template_raster)
     geotransform = base_raster_info['geotransform']
@@ -2060,6 +2088,7 @@ def _calc_daylength(template_raster, month, daylength_path):
 
     Returns:
         None
+
     """
     def daylength(month):
         def _daylength(latitude):
@@ -2117,6 +2146,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
 
     Returns:
         None
+
     """
     def shwave(month):
         def _shwave(latitude):
@@ -2129,6 +2159,7 @@ def _shortwave_radiation(template_raster, month, shwave_path):
 
             Returns:
                 shwave, short wave solar radiation outside the atmosphere
+
             """
             # Julian date in middle of each month of the year
             jday_list = [
@@ -2201,6 +2232,7 @@ def _reference_evapotranspiration(
 
     Returns:
         None
+
     """
     def _calc_pevap(max_temp, min_temp, shwave, fwloss_4):
         """Calculate reference evapotranspiration.
@@ -2217,6 +2249,7 @@ def _reference_evapotranspiration(
 
         Returns:
             pevap, reference evapotranspiration
+
         """
         const1 = 0.0023
         const2 = 17.8
@@ -2308,6 +2341,7 @@ def _potential_production(
 
     Returns:
         None
+
     """
     # if growth does not occur this month for all PFTs,
     # skip the rest of the function
@@ -2339,6 +2373,7 @@ def _potential_production(
 
         Returns:
             ctemp, effect of soil temperature on potential production
+
 
         """
         bio = numpy.empty(aglivc.shape, dtype=numpy.float32)
@@ -2400,6 +2435,7 @@ def _potential_production(
         Returns:
             potprd, scaling factor describing potential production limited
                 by temperature
+
         """
         valid_mask = (
             (~numpy.isclose(mintmp, mintmp_nodata)) &
@@ -2508,6 +2544,7 @@ def _potential_production(
         Returns:
             biof, scaling factor describing potential production limited
                 by obstruction
+
         """
         valid_mask = (
             (~numpy.isclose(strucc_1, _SV_NODATA)) &
@@ -2572,6 +2609,7 @@ def _potential_production(
         Returns:
             tgprod_pot_prod, total above- and belowground potential biomass
                 production (g biomass)
+
         """
         valid_mask = (
             (prdx_1 != _IC_NODATA) &
@@ -2739,6 +2777,7 @@ def _calc_favail_P(sv_reg, param_val_dict):
 
     Returns:
         None
+
     """
     def favail_P_op(minerl_1_1, favail_4, favail_5, favail_6):
         """Calculate the fraction of P in surface layer available to plants.
@@ -2759,6 +2798,7 @@ def _calc_favail_P(sv_reg, param_val_dict):
 
         Returns:
             favail_P, fraction of mineral P available to plants
+
         """
         valid_mask = (
             (~numpy.isclose(minerl_1_1, _SV_NODATA)) &
@@ -2814,6 +2854,7 @@ def _calc_avail_mineral_nutrient(pft_param_dict, sv_reg, iel, target_path):
 
     Returns:
         None
+
     """
     nlay = int(pft_param_dict['nlaypg'])
     mineral_raster_list = [
@@ -2861,6 +2902,7 @@ def _calc_available_nutrient(
 
     Returns:
         None
+
     """
     def calc_eavail(rictrl, bglivc, riint, availm, favail, crpstg):
         """Calculate available nutrient.
@@ -2881,6 +2923,7 @@ def _calc_available_nutrient(
 
         Returns:
             eavail, the nutrient available to the plant functional type
+
         """
         valid_mask = (
             (rictrl != _IC_NODATA) &
@@ -3008,6 +3051,7 @@ def _calc_nutrient_demand(
 
     Returns:
         None
+
     """
     def nutrient_demand_op(
             biomass_production, root_fraction, cercrp_min_above,
@@ -3026,6 +3070,7 @@ def _calc_nutrient_demand(
 
         Returns:
             demand_e, nutrient demand
+
         """
         valid_mask = (
             (biomass_production != _TARGET_NODATA) &
@@ -3103,6 +3148,7 @@ def calc_provisional_fracrc(
 
     Returns:
         fracrc_p, provisional fraction of carbon allocated to roots
+
     """
     valid_mask = (
         (annual_precip != _TARGET_NODATA) &
@@ -3181,6 +3227,7 @@ def calc_ce_ratios(
 
     Returns:
         None
+
     """
     def calc_above_ratio(pra_1, pra_2, aglivc, biomax):
         """Calculate carbon to nutrient ratio for aboveground material.
@@ -3228,6 +3275,7 @@ def calc_ce_ratios(
         Returns:
             cercrp_below, carbon to nutrient ratio for belowground
                 material
+
         """
         valid_mask = (
             (prb_1 != _IC_NODATA) &
@@ -3315,6 +3363,7 @@ def calc_revised_fracrc(
 
     Returns:
         None
+
     """
     def calc_a2drat(totale, demand):
         """Calculate the ratio of available nutrient to nutrient demand.
@@ -3373,6 +3422,7 @@ def calc_revised_fracrc(
         Returns:
             fracrc_perennial, revised fraction of C allocated to roots for
                 a perennial plant
+
         """
         valid_mask = (
             (h2ogef != _TARGET_NODATA) &
@@ -3434,6 +3484,7 @@ def calc_revised_fracrc(
 
         Returns:
             fracrc_r, revised fraction of carbon allocated to roots
+
         """
         valid_mask = (
             (frtcindx != _IC_NODATA) &
@@ -3507,6 +3558,7 @@ def grazing_effect_on_aboveground_production(
 
     Returns:
         agprod, aboveground production impacted by grazing
+
     """
     valid_mask = (
         (tgprod != _TARGET_NODATA) &
@@ -3570,6 +3622,7 @@ def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
 
     Returns:
         rtsh, root:shoot ratio impacted by grazing
+
     """
     valid_mask = (
         (fracrc != _TARGET_NODATA) &
@@ -3620,6 +3673,7 @@ def calc_tgprod_final(rtsh, agprod):
 
     Returns:
         tgprod, final total potential production
+
     """
     valid_mask = (
         (rtsh != _TARGET_NODATA) &
@@ -3670,6 +3724,7 @@ def calc_final_tgprod_rtsh(
 
     Returns:
         None
+
     """
     # temporary intermediate rasters for grazing effect
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -3934,6 +3989,7 @@ def _snow(
 
     Returns:
         None
+
     """
     def calc_snow_moisture(return_type):
         """Calculate change in snow, pet, snow liquid, and moisture inputs.
@@ -3948,6 +4004,7 @@ def _snow(
 
         Returns:
             the function `_calc_snow_moisture`
+
         """
         def _calc_snow_moisture(
                 tave, precip, snow, snlq, pet, tmelt_1, tmelt_2, shwave):
@@ -3978,6 +4035,7 @@ def _snow(
                 snlq_revised if return_type is 'snlq'
                 pet_revised if return_type is 'pet'
                 inputs_after_snow if return_type is 'inputs_after_snow'
+
             """
             valid_mask = (
                 (tave != _IC_NODATA) &
@@ -4160,6 +4218,7 @@ def _calc_aboveground_live_biomass(sum_aglivc, sum_tgprod):
 
     Returns:
         aliv, aboveground live biomass for soil water submodel
+
     """
     valid_mask = (
         (sum_aglivc != _TARGET_NODATA) &
@@ -4187,6 +4246,7 @@ def _calc_standing_biomass(aliv, sum_stdedc):
 
     Returns:
         sd, total aboveground standing biomass for soil water.
+
     """
     valid_mask = (
         (aliv != _TARGET_NODATA) &
@@ -4250,6 +4310,7 @@ def subtract_surface_losses(return_type):
             absevap, bare soil evaporation, if return_type is 'absevap'
             evap_losses, total surface evaporation, if return_type is
                 'evap_losses'
+
         """
         valid_mask = (
             (inputs_after_snow != _TARGET_NODATA) &
@@ -4324,6 +4385,7 @@ def calc_potential_transpiration(return_type):
 
     Returns:
         the function `_calc_potential_transpiration`
+
     """
     def _calc_potential_transpiration(
             pet_rem, evap_losses, tave, aliv, current_moisture_inputs):
@@ -4354,6 +4416,7 @@ def calc_potential_transpiration(return_type):
             pevp if return_type is 'pevp'
             modified_moisture_inputs if return_type is
                 'modified_moisture_inputs'
+
         """
         valid_mask = (
             (pet_rem != _TARGET_NODATA) &
@@ -4434,6 +4497,7 @@ def distribute_water_to_soil_layer(return_type):
                 is 'asmos_revised'
             amov, moisture flowing from this layer into the next, if
                 return_type is 'amov'
+
         """
         valid_mask = (
             (adep != _IC_NODATA) &
@@ -4484,6 +4548,7 @@ def calc_available_water_for_transpiration(asmos, awilt, adep):
 
     Returns:
         avw, available water for transpiration
+
     """
     valid_mask = (
         (asmos != _TARGET_NODATA) &
@@ -4511,6 +4576,7 @@ def revise_potential_transpiration(trap, tot):
 
     Returns:
         trap_revised, revised total potential transpiration
+
     """
     valid_mask = (
         (trap != _TARGET_NODATA) &
@@ -4535,6 +4601,7 @@ def remove_transpiration(return_type):
 
     Returns:
         the function `_remove_transpiration`
+
     """
     def _remove_transpiration(asmos, awilt, adep, trap, awwt, tot2):
         """Remove water from a soil layer via transpiration by plants.
@@ -4557,6 +4624,7 @@ def remove_transpiration(return_type):
                 losses to transpiration, if return type is 'avinj'
             asmos_revised, total water in this layer after losses to
                 transpiration, if return type is 'asmos'
+
         """
         valid_mask = (
             (asmos != _TARGET_NODATA) &
@@ -4607,6 +4675,7 @@ def calc_relative_water_content_lyr_1(asmos_1, adep_1, awilt_1, afiel_1):
 
     Returns:
         rwcf_1, relative water content of soil layer 1
+
     """
     valid_mask = (
         (asmos_1 != _TARGET_NODATA) &
@@ -4640,6 +4709,7 @@ def calc_evaporation_loss(rwcf_1, pevp, absevap, asmos_1, awilt_1, adep_1):
 
     Returns:
         evlos, moisture evaporated from soil layer 1
+
     """
     valid_mask = (
         (rwcf_1 != _TARGET_NODATA) &
@@ -4713,6 +4783,7 @@ def _soil_water(
 
     Returns:
         None
+
     """
     def calc_avg_temp(max_temp, min_temp):
         """Calculate average temperature from maximum and minimum temp."""
@@ -5114,6 +5185,7 @@ def calc_anerb(rprpet, pevap, drain, aneref_1, aneref_2, aneref_3):
 
     Returns:
         anerb, the effect of soil anaerobic conditions on decomposition
+
     """
     valid_mask = (
         (rprpet != _TARGET_NODATA) &
@@ -5158,6 +5230,7 @@ def esched(return_type):
 
     Returns:
         the function `_esched`
+
     """
     def _esched(cflow, tca, rcetob, anps, labile):
         """Calculate the flow of one element (iel) to accompany decomp of C.
@@ -5191,6 +5264,7 @@ def esched(return_type):
                 if return_type is 'material_arriving_b'
             mnrflo, flow to or from mineral pool, if return_type is
                 'mineral_flow'
+
         """
         valid_mask = (
             (cflow != _IC_NODATA) &
@@ -5277,6 +5351,7 @@ def fsfunc(minerl_1_2, sorpmx, pslsrb):
 
     Returns:
         fsol, fraction of P in solution
+
     """
     valid_mask = (
         (~numpy.isclose(minerl_1_2, _SV_NODATA)) &
@@ -5325,6 +5400,7 @@ def calc_surface_som2_ratio(
 
     Returns:
         rceto2_surface, required C/iel ratio of material entering surface SOM2
+
     """
     valid_mask = (
         (~numpy.isclose(som1c_1, _SV_NODATA)) &
@@ -5381,6 +5457,7 @@ def calc_tcflow_strucc_1(
     Returns:
         tcflow_strucc_1, total flow of C out of surface structural
             material
+
     """
     valid_mask = (
         (~numpy.isclose(aminrl_1, _SV_NODATA)) &
@@ -5453,6 +5530,7 @@ def calc_tcflow_strucc_2(
     Returns:
         tcflow_strucc_2, total flow of C out of soil structural
             material
+
     """
     valid_mask = (
         (~numpy.isclose(aminrl_1, _SV_NODATA)) &
@@ -5516,6 +5594,7 @@ def calc_tcflow_surface(
 
     Returns:
         tcflow, total flow of C out of the decomposing pool
+
     """
     valid_mask = (
         (~numpy.isclose(aminrl_1, _SV_NODATA)) &
@@ -5577,6 +5656,7 @@ def calc_tcflow_soil(
     Returns:
         tcflow_soil, total flow of C out of soil metabolic
             material
+
     """
     valid_mask = (
         (~numpy.isclose(aminrl_1, _SV_NODATA)) &
@@ -5641,6 +5721,7 @@ def calc_tcflow_som1c_2(
 
     Returns:
         tcflow_som1c_2, total flow of C out of soil SOM1
+
     """
     valid_mask = (
         (~numpy.isclose(aminrl_1, _SV_NODATA)) &
@@ -5691,6 +5772,7 @@ def calc_som3_flow(tcflow, fps, animpt, anerb):
 
     Returns:
         tosom3, C flowing to SOM3
+
     """
     valid_mask = (
         (tcflow != _IC_NODATA) &
@@ -5718,6 +5800,7 @@ def calc_som2_flow(som2c_1, cmix, defac):
 
     Returns:
         tcflow, C flowing to soil SOM2 via mixing
+
     """
     valid_mask = (
         (~numpy.isclose(som2c_1, _SV_NODATA)) &
@@ -5750,6 +5833,7 @@ def calc_respiration_mineral_flow(cflow, frac_co2, estatv, cstatv):
 
     Returns:
         mineral_flow, flow of iel (N or P) accompanying respiration
+
     """
     valid_mask = (
         (cflow != _IC_NODATA) &
@@ -5781,6 +5865,7 @@ def update_gross_mineralization(gross_mineralization, mineral_flow):
 
     Returns:
         gromin_updated, updated gross mineralization
+
     """
     valid_mask = (
         (gross_mineralization != _TARGET_NODATA) &
@@ -5813,6 +5898,7 @@ def calc_net_cflow(cflow, frac_co2):
     Returns:
         net_cflow, amount of decomposing C that flows after accounting
             for CO2 losses
+
     """
     valid_mask = (
         (cflow != _IC_NODATA) &
@@ -5844,6 +5930,7 @@ def calc_net_cflow_tosom2(tcflow, frac_co2, tosom3, cleach):
 
     Returns:
         net_tosom2, amount of C that flows from soil SOM1 to soil SOm2
+
     """
     valid_mask = (
         (tcflow != _IC_NODATA) &
@@ -5874,6 +5961,7 @@ def calc_net_cflow_tosom1(tcflow, frac_co2, tosom3):
 
     Returns:
         net_tosom1, amount of C that flows from soil SOM2 to soil SOM1
+
     """
     valid_mask = (
         (tcflow != _IC_NODATA) &
@@ -5919,6 +6007,7 @@ def respiration(
 
     Returns:
         None
+
     """
     with tempfile.NamedTemporaryFile(
             prefix='operand_temp', delete=False,
@@ -5997,6 +6086,7 @@ def nutrient_flow(
 
     Returns:
         None
+
     """
     with tempfile.NamedTemporaryFile(
             prefix='operand_temp', delete=False,
@@ -6068,6 +6158,7 @@ def calc_c_leach(amov_2, tcflow, omlech_3, orglch):
 
     Returns:
         cleach, C leaching from soil SOM1 to stream flow
+
     """
     valid_mask = (
         (amov_2 != _TARGET_NODATA) &
@@ -6113,6 +6204,7 @@ def remove_leached_iel(
 
     Returns:
         None
+
     """
     def calc_leached_N(som1c_2, som1e_2_1, cleach):
         """Calculate the N leaching from soil SOM1."""
@@ -6189,6 +6281,7 @@ def calc_pflow(pstatv, rate_param, defac):
 
     Returns:
         pflow, mineral P flowing from donating to receiving pool
+
     """
     valid_mask = (
         (~numpy.isclose(pstatv, _SV_NODATA)) &
@@ -6218,6 +6311,7 @@ def calc_pflow_to_secndy(minerl_lyr_2, pmnsec_2, fsol, defac):
 
     Returns:
         fmnsec, flow of mineral P to secondary in one soil layer
+
     """
     valid_mask = (
         (~numpy.isclose(minerl_lyr_2, _SV_NODATA)) &
@@ -6255,8 +6349,10 @@ def update_aminrl(
     Modifies:
         the raster indicated by `aminrl_1_path`
         the raster indicated by `aminrl_2_path
+
     Returns:
         None
+
     """
     def update_aminrl_1(aminrl_1_prev, minerl_1_1):
         """Update average mineral N."""
@@ -6284,6 +6380,7 @@ def update_aminrl(
 
         Returns:
             aminrl_2, updated average mineral P
+
         """
         valid_mask = (
             (~numpy.isclose(aminrl_2_prev, _SV_NODATA)) &
@@ -6336,6 +6433,7 @@ def sum_biomass(
 
     Returns:
         biomass, total biomass for purposes of soil shading
+
     """
     valid_mask = (
         (weighted_live_c != _TARGET_NODATA) &
@@ -6393,6 +6491,7 @@ def _decomposition(
 
     Returns:
         None
+
     """
     def calc_N_fixation(precip, annual_precip, baseNdep, epnfs_2):
         """Calculate monthly atmospheric N fixation.
@@ -6412,6 +6511,7 @@ def _decomposition(
 
         Returns:
             wdfxm, atmospheric N deposition for the current month
+
         """
         valid_mask = (
             (~numpy.isclose(precip, precip_nodata)) &
@@ -6443,6 +6543,7 @@ def _decomposition(
         Returns:
             rprpet, the ratio of precipitation or snowmelt to reference
                 evapotranspiration
+
         """
         valid_mask = (
             (pevap != _TARGET_NODATA) &
@@ -6476,6 +6577,7 @@ def _decomposition(
 
         Returns:
             bgwfunc, the effect of soil moisture on decomposition
+
         """
         valid_mask = (rprpet != _TARGET_NODATA)
         bgwfunc = numpy.empty(rprpet.shape, dtype=numpy.float32)
@@ -6507,6 +6609,7 @@ def _decomposition(
 
         Returns:
             stemp, mean soil surface temperature for decomposition
+
         """
         valid_mask = (
             (biomass != _TARGET_NODATA) &
@@ -6569,6 +6672,7 @@ def _decomposition(
 
         Returns:
             defac, aboveground and belowground decomposition factor
+
         """
         valid_mask = (
             (bgwfunc != _TARGET_NODATA) &
@@ -6607,6 +6711,7 @@ def _decomposition(
         Returns:
             pheff_struc, the effect of soil pH on decomposition rate of
                 structural material
+
         """
         valid_mask = (~numpy.isclose(pH, pH_nodata))
         pheff_struc = numpy.empty(pH.shape, dtype=numpy.float32)
@@ -6629,6 +6734,7 @@ def _decomposition(
         Returns:
             pheff_metab, the effect of soil pH on decomposition rate of
                 metabolic material
+
         """
         valid_mask = (~numpy.isclose(pH, pH_nodata))
         pheff_metab = numpy.empty(pH.shape, dtype=numpy.float32)
@@ -6651,6 +6757,7 @@ def _decomposition(
         Returns:
             pheff_som3, the effect of soil pH on decomposition rate of
                 SOM3
+
         """
         valid_mask = (~numpy.isclose(pH, pH_nodata))
         pheff_metab = numpy.empty(pH.shape, dtype=numpy.float32)
@@ -7769,6 +7876,7 @@ def partit(
 
     Returns:
         None
+
     """
     def calc_dirabs(
             cpart, epart_iel, minerl_1_iel, damr_lyr_iel, pabres, damrmn_iel):
@@ -7792,6 +7900,7 @@ def partit(
 
         Returns:
             dirabs_iel, <iel> (N or P) absorbed from the surface mineral pool
+
         """
         valid_mask = (
             (cpart != _TARGET_NODATA) &
@@ -7842,6 +7951,7 @@ def partit(
 
         Returns:
             d_metabc_lyr, change in metabc_lyr
+
         """
         valid_mask = (
             (cpart != _TARGET_NODATA) &
@@ -7884,6 +7994,7 @@ def partit(
 
         Returns:
             d_strucc_lyr, change in strucc_lyr
+
         """
         valid_mask = (
             (cpart != _TARGET_NODATA) &
@@ -7905,6 +8016,7 @@ def partit(
 
         Returns:
             d_struce_lyr_iel, change in structural N or P in layer lyr
+
         """
         valid_mask = (
             (d_strucc_lyr != _TARGET_NODATA) &
@@ -7928,6 +8040,7 @@ def partit(
 
         Returns:
             d_metabe_lyr_iel, change in metabolic N or P in layer lyr
+
         """
         valid_mask = (
             (cpart != _TARGET_NODATA) &
@@ -7959,6 +8072,7 @@ def partit(
         Returns:
             d_strlig_lyr, change in fraction of lignin in structural material
                 in layer lyr
+
         """
         valid_mask = (
             (frlign != _TARGET_NODATA) &
@@ -8126,6 +8240,7 @@ def calc_fall_standing_dead(stdedc, fallrt):
 
     Returns:
         delta_c_standing_dead, change in C in standing dead
+
     """
     valid_mask = (
         (~numpy.isclose(stdedc, _SV_NODATA)) &
@@ -8160,6 +8275,7 @@ def calc_root_death(
 
     Returns:
         delta_c_root_death, change in C during root death
+
     """
     valid_mask = (
         (average_temperature != _IC_NODATA) &
@@ -8202,6 +8318,7 @@ def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
 
     Returns:
         delta_iel, change in N or P accompanying the change in C
+
     """
     valid_mask = (
         (~numpy.isclose(c_state_variable, _SV_NODATA)) &
@@ -8266,6 +8383,7 @@ def _death_and_partition(
 
     Returns:
         None
+
     """
     def calc_avg_temp(max_temp, min_temp):
         """Calculate average temperature from maximum and minimum temp."""
@@ -8471,6 +8589,7 @@ def calc_senescence_water_shading(
     Returns:
         fdeth, fraction of aboveground live biomass that is converted to
             standing dead
+
     """
     valid_mask = (
         (~numpy.isclose(aglivc, _SV_NODATA)) &
@@ -8525,6 +8644,7 @@ def _shoot_senescence(
 
     Returns:
         None
+
     """
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
@@ -8641,6 +8761,7 @@ def convert_biomass_to_C(biomass_path, c_path):
 
     Returns:
         None
+
     """
     def convert_op(biomass):
         """Convert grams of biomass to grams of carbon."""
@@ -8672,6 +8793,7 @@ def restrict_potential_growth(potenc, availm_1, availm_2, snfxmx_1):
     Returns:
         potenc_lim_minerl, potential C production limited by availability of
             mineral nutrients
+
     """
     valid_mask = (
         (potenc != _TARGET_NODATA) &
@@ -8706,6 +8828,7 @@ def c_uptake_aboveground(aglivc, cprodl, rtsh):
 
     Returns:
         modified_aglivc, modified C in aboveground live biomass
+
     """
     valid_mask = (
         (~numpy.isclose(aglivc, _SV_NODATA)) &
@@ -8740,6 +8863,7 @@ def c_uptake_belowground(bglivc, cprodl, rtsh):
 
     Returns:
         modified_bglivc, modified C in belowground live biomass
+
     """
     valid_mask = (
         (~numpy.isclose(bglivc, _SV_NODATA)) &
@@ -8790,6 +8914,7 @@ def calc_uptake_source(return_type):
                 by the plant function type, if return_type is 'uptake_soil'
             uptake_Nfix, uptake from symbiotically fixed nitrogen, if
                 return_type is 'uptake_Nfix'
+
         """
         valid_mask = (
             (eup_above_iel != _TARGET_NODATA) &
@@ -8852,6 +8977,7 @@ def calc_aboveground_uptake(total_uptake, eup_above_iel, eup_below_iel):
     Returns:
         uptake_above, uptake from one source that is apportioned to aboveground
             biomass
+
     """
     valid_mask = (
         (total_uptake != _TARGET_NODATA) &
@@ -8882,6 +9008,7 @@ def calc_belowground_uptake(total_uptake, eup_above_iel, eup_below_iel):
     Returns:
         uptake_below, uptake from one source that is apportioned to belowground
             biomass
+
     """
     valid_mask = (
         (total_uptake != _TARGET_NODATA) &
@@ -8915,6 +9042,7 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
 
     Returns:
         minerl_uptake_lyr, uptake of iel from this soil layer
+
     """
     valid_mask = (
         (uptake_soil != _TARGET_NODATA) &
@@ -8977,6 +9105,7 @@ def nutrient_uptake(
 
     Returns:
         None
+
     """
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
@@ -9197,6 +9326,7 @@ def calc_nutrient_limitation(return_type):
                 'eup_below_2'
             plantNfix, N fixation that actually occurs, if return_type is
                 'plantNfix'
+
         """
         valid_mask = (
             (potenc != _TARGET_NODATA) &
@@ -9416,6 +9546,7 @@ def _new_growth(
 
     Returns:
         None
+
     """
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
@@ -9663,6 +9794,7 @@ def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
     Returns:
         amount_leached, mineral N or P leaching from the current soil layer to
             the next adjacent soil layer
+
     """
     valid_mask = (
         (minlch != _IC_NODATA) &
@@ -9706,6 +9838,7 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
 
     Returns:
         None
+
     """
     def calc_frlech_N(fleach_1, fleach_2, sand, fleach_3):
         """Calculate the potential fraction of N leaching.
@@ -9728,6 +9861,7 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
 
         Returns:
             frlech_N, the potential fraction of mineral N leaching
+
         """
         valid_mask = (
             (fleach_1 != _IC_NODATA) &
@@ -9764,6 +9898,7 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
 
         Returns:
             frlech_P, the potential fraction of mineral P leaching
+
         """
         valid_mask = (
             (fleach_1 != _IC_NODATA) &

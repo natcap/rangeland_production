@@ -45,6 +45,7 @@ def create_random_raster(
 
     Returns:
         None
+
     """
     geotransform = [0, 0.0001, 0, 44.5, 0, 0.0001]
     n_bands = 1
@@ -79,10 +80,11 @@ def create_complementary_raster(
         result_raster_path (string): path to result raster
 
     Modifies:
-        the raster indicated by `result_raster_path
+        the raster indicated by `result_raster_path`
 
     Returns:
         None
+
     """
     def complement_op(input1, input2):
         """Generate an array that adds to 1 with input1 and input2."""
@@ -183,6 +185,7 @@ def calc_raster_difference_stats(
         nested dictionary indexed by aggregating feature id, and then by one
         of 'min' 'max' 'sum' 'count' and 'nodata_count'.  Example:
         {0: {'min': 0, 'max': 1, 'sum': 1.7, count': 3, 'nodata_count': 1}}
+
     """
     def raster_difference_op(raster1, raster2):
         """Subtract raster2 from raster1 without removing nodata values."""
@@ -206,8 +209,10 @@ def calc_raster_difference_stats(
         raster_difference_op, target_path, gdal.GDT_Float32,
         _TARGET_NODATA)
 
-    return pygeoprocessing.zonal_statistics(
+    zonal_stats = pygeoprocessing.zonal_statistics(
         (target_path, 1), aggregate_vector_path)
+    os.remove(target_path)
+    return zonal_stats
 
 
 def monthly_N_fixation_point(
@@ -228,6 +233,7 @@ def monthly_N_fixation_point(
 
     Returns:
         minerl_1_1, updated mineral N in the surface layer
+
     """
     wdfxm = (
         baseNdep * (precip / annual_precip) + epnfs_2 *
@@ -252,6 +258,7 @@ def rprpet_point(pet, snowmelt, avh2o_3, precip):
     Returns:
         rprpet, the ratio of precipitation or snowmelt to reference
             evapotranspiration
+
     """
     if snowmelt > 0:
         rprpet = snowmelt / pet
@@ -287,6 +294,7 @@ def defac_point(
 
     Returns:
         defac, aboveground and belowground decomposition factor
+
     """
     if rprpet > 9:
         agwfunc = 1
@@ -331,6 +339,7 @@ def calc_anerb_point(
 
     Returns:
         anerb, the effect of soil anaerobic conditions on decomposition
+
     """
     anerb = 1
     if rprpet > aneref_1:
@@ -361,6 +370,7 @@ def bgdrat_point(aminrl, varat_1_iel, varat_2_iel, varat_3_iel):
 
     Returns:
         bgdrat, the required C/iel ratio for decomposition
+
     """
     if aminrl <= 0:
         bgdrat = varat_1_iel
@@ -387,6 +397,7 @@ def esched_point(return_type):
 
     Returns:
         the function `_esched`
+
     """
     def _esched(cflow, tca, rcetob, anps, labile):
         """Calculate the flow of one element to accompany decomp of C.
@@ -416,6 +427,7 @@ def esched_point(return_type):
                 if return_type is 'material_arriving_b'
             mnrflo, flow in or out of mineral pool, if return_type is
                 'mineral_flow'
+
         """
         outofa = anps * (cflow/tca)
         if (cflow/outofa > rcetob):
@@ -453,6 +465,7 @@ def declig_point(return_type):
 
     Returns:
         the function `_declig`
+
     """
     def _declig(
             aminrl_1, aminrl_2, ligcon, rsplig, ps1co2_lyr, strucc_lyr, tcflow,
@@ -510,6 +523,7 @@ def declig_point(return_type):
                     'd_som1e_1'
                 d_som1e_lyr_2, change in P in SOM1, if return_type is
                     'd_som1e_2'
+
         """
         # initialize change (delta, d) in state variables
         d_strucc_lyr = 0  # change in structural C in decomposing lyr
@@ -688,6 +702,7 @@ def agdrat_point(anps, tca, pcemic_1_iel, pcemic_2_iel, pcemic_3_iel):
 
     Returns:
         agdrat, the C/<iel> ratio of new material
+
     """
     cemicb = (pcemic_2_iel - pcemic_1_iel) / pcemic_3_iel
     if ((tca * 2.5) <= 0.0000000001):
@@ -714,6 +729,7 @@ def fsfunc_point(minerl_1_2, pslsrb, sorpmx):
 
     Returns:
         fsol, fraction of P in solution
+
     """
     if minerl_1_2 == 0:
         return 0
@@ -767,6 +783,7 @@ def calc_nutrient_limitation_point(
             'eup_above_2', P in new aboveground production
             'eup_below_2', P in new belowground production
             'plantNfix', N fixation that actually occurs
+
     """
     cfrac_below = rtsh / (rtsh + 1.)
     cfrac_above = 1. - cfrac_below
@@ -912,6 +929,7 @@ def nutrient_uptake_point(
             minerl_5_iel: modified iel in soil layer 5
             minerl_6_iel: modified iel in soil layer 6
             minerl_7_iel: modified iel in soil layer 7
+
     """
     eprodl_iel = eup_above_iel + eup_below_iel
     if eprodl_iel < storage_iel:
@@ -1049,6 +1067,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         for offset_map, raster_block in pygeoprocessing.iterblocks(
                 (raster_to_test, 1)):
@@ -1083,6 +1102,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         if len(array_to_test[array_to_test != nodata_value]) == 0:
             return
@@ -1128,6 +1148,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         fill_value = 0
@@ -1168,6 +1189,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1217,6 +1239,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1265,6 +1288,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1317,6 +1341,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1439,6 +1464,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1616,6 +1642,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1721,6 +1748,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -1831,6 +1859,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2008,6 +2037,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2082,6 +2112,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2252,6 +2283,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2321,6 +2353,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2409,6 +2442,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2489,6 +2523,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2615,6 +2650,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2697,6 +2733,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2782,6 +2819,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -2921,6 +2959,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -3045,6 +3084,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -3185,6 +3225,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -3214,6 +3255,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def snow_point(
                 precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
@@ -3240,6 +3282,7 @@ class foragetests(unittest.TestCase):
             Returns:
                 dict of modified quantities: snowmelt, snow, snlq, pet,
                 inputs_after_snow
+
             """
             tave = (max_temp + min_temp) / 2.
             inputs_after_snow = precip
@@ -3591,6 +3634,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -3619,6 +3663,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -3657,6 +3702,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def surface_losses_point(
                 inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
@@ -3689,6 +3735,7 @@ class foragetests(unittest.TestCase):
                     water inputs to soil after runoff and surface evaporation
                     are subtracted; absevap, moisture lost to surface
                     evaporation; and evap_losses, total surface evaporation
+
             """
             runoff = max(fracro * (inputs_after_snow - precro), 0.)
             inputs_after_runoff = inputs_after_snow - runoff
@@ -3977,6 +4024,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def potential_transpiration_point(
                 pet_rem, evap_losses, tave, aliv, current_moisture_inputs):
@@ -3996,6 +4044,7 @@ class foragetests(unittest.TestCase):
                     pevp, potential evaporation from surface soil layer;
                     modified_moisture_inputs, water to be added to soil layers
                     before transpiration losses are accounted
+
             """
             trap = pet_rem - evap_losses
             if tave < 2:
@@ -4166,6 +4215,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_size = (10, 10)
@@ -4246,6 +4296,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_size = (10, 10)
@@ -4292,6 +4343,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_size = (10, 10)
@@ -4396,6 +4448,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_size = (10, 10)
@@ -4440,6 +4493,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_size = (10, 10)
@@ -4523,6 +4577,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -4575,6 +4630,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -4628,6 +4684,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def soil_water_point(
                 precip, max_temp, min_temp, snow, snlq, pet, tmelt_1, tmelt_2,
@@ -4677,6 +4734,7 @@ class foragetests(unittest.TestCase):
                     avh2o_1_<PFT>, water available for plant growth, for PFT
                         in pft_id_set
                     avh2o_3, available soil moisture in top two soil layers
+
             """
             # snow
             tave = (max_temp + min_temp) / 2.
@@ -5197,6 +5255,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
 
         from natcap.invest import forage
@@ -5283,6 +5342,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         # no decomposition happens, mineral ratios are insufficient
         aminrl_1 = 0.
@@ -5494,6 +5554,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00000001
@@ -5747,6 +5808,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00000001
@@ -5919,6 +5981,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -5974,6 +6037,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def tcflow_strucc_1_point(
                 aminrl_1, aminrl_2, strucc_1, struce_1_1, struce_1_2,
@@ -6138,6 +6202,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
 
@@ -6208,6 +6273,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def respir_minr_flow_point(cflow, frac_co2, estatv, cstatv):
             co2_loss = cflow * frac_co2
@@ -6260,6 +6326,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (10, 10)
@@ -6324,6 +6391,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (10, 10)
@@ -6363,6 +6431,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def calc_tcflow_surface_point(
                 aminrl_1, aminrl_2, metabc_1, metabe_1_1, metabe_1_2,
@@ -6502,6 +6571,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def calc_tcflow_soil_point(
                 aminrl_1, aminrl_2, metabc_2, metabe_2_1, metabe_2_2, rceto1_1,
@@ -6642,6 +6712,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (10, 10)
@@ -6756,6 +6827,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (10, 10)
@@ -6850,6 +6922,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (10, 10)
@@ -6921,6 +6994,7 @@ class foragetests(unittest.TestCase):
         Raises:
             AssertionError if calculated values do not match values calculated
                 by hand
+
         """
         from natcap.invest import forage
         nrows = 10
@@ -7023,6 +7097,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def partit_point(
                 cpart, epart_1, epart_2, damr_lyr_1, damr_lyr_2, minerl_1_1,
@@ -7086,6 +7161,7 @@ class foragetests(unittest.TestCase):
                     mod_struce_lyr_2: modified STRUCE_lyr_2
                     mod_metabe_lyr_2: modified METABE_lyr_2
                     mod_strlig_lyr: modified strlig_lyr
+
             """
             # calculate direct absorption of mineral N by residue
             if minerl_1_1 < 0:
@@ -7303,6 +7379,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.000001
@@ -7392,6 +7469,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00001
@@ -7527,6 +7605,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00001
@@ -7577,6 +7656,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00001
@@ -7758,6 +7838,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (3, 3)
@@ -8074,6 +8155,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00001
@@ -8250,6 +8332,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (3, 3)
@@ -8341,6 +8424,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         array_shape = (3, 3)
@@ -8390,6 +8474,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         from natcap.invest import forage
         tolerance = 0.00001
@@ -8642,6 +8727,7 @@ class foragetests(unittest.TestCase):
 
         Returns:
             None
+
         """
         def leach_point(
                 starting_mineral_dict, amov_dict, sand, minlch, fleach_1,
@@ -8651,6 +8737,7 @@ class foragetests(unittest.TestCase):
             Returns:
                 dictionary of modified mineral element content of each soil
                     layer
+
             """
             ending_minerl_dict = starting_minerl_dict.copy()
             fsol = fsfunc_point(
