@@ -1,9 +1,22 @@
 .. :changelog:
 
-.. Unreleased Changes
-
 Unreleased Changes
 ------------------
+* Refactoring Coastal Vulnerability (CV) model. CV now uses TaskGraph and
+  Pygeoprocessing >=1.6.1. The model is now largely vector-based instead of
+  raster-based. Fewer input datasets are required for the same functionality.
+  Runtime in sycnhronous mode is similar to previous versions, but runtime can
+  be reduced with multiprocessing. CV also supports avoided recomputation for
+  successive runs in the same workspace, even if a different file suffix is used.
+  Output vector files are in CSV and geopackage formats.
+* Model User Interface 'Report an Issue' link points to our new 
+  community.naturalcapitalproject.org
+* Correcting an issue with the Coastal Blue Carbon preprocessor where
+  using misaligned landcover rasters would cause an exception to be raised.
+* Correcting an issue with RouteDEM where runs of the tool with Flow Direction
+  enabled would cause the tool to crash if ``n_workers > 0``.
+* Correcting an issue with Habitat Quality's error checking where nodata values
+  in landcover rasters were not being taken into account.
 * Valuation is now an optional component of the InVEST Scenic Quality model.
 * Fixing a bug in the percentiles algorithm used by Scenic Quality that
   would result in incorrect visual quality outputs.
@@ -27,6 +40,20 @@ Unreleased Changes
   in the same workspace but use a different file suffix. This is useful when
   users need to do a parameter study or run scenarios with otherwise minor
   changes to inputs.
+* Refactoring Habitat Risk Assessment (HRA) Model to use TaskGraph >= 0.8.2 and
+  Pygeoprocessing >= 1.6.1. The HRA Proprocessor is removed and its previous
+  functionality was simplified and merged into the HRA model itself.
+  The model will no longer generate HTML plots and tables.
+* Add a software update notification button, dialog, and a link to the download
+  page on the User Interface when a new InVEST version is available.
+* Migrate the subversion sample and test data repositories to Git LFS
+  repositories on BitBucket. Update the repository URL and fetch commands on
+  Makefile accordingly.
+* Fixing a bug in Habitat Quality UI where the absence of the required
+  half_saturation_constant variable did not raise an exception.
+* Adding encoding='utf-8-sig' to pandas.read_csv() to support
+  utils.build_lookup_from_csv() to read CSV files encoded with UTF-8 BOM
+  (byte-order mark) properly.
 
 3.6.0 (2019-01-30)
 ------------------
