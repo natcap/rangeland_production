@@ -79,8 +79,8 @@ def create_complementary_raster(
         raster2_path (string): path to raster of floast between 0 and 1
         result_raster_path (string): path to result raster
 
-    Modifies:
-        the raster indicated by `result_raster_path`
+    Side effects:
+        modifies or creates the raster indicated by `result_raster_path`
 
     Returns:
         None

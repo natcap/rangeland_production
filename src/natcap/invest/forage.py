@@ -725,8 +725,8 @@ def raster_multiplication(
     raster2 is nodata, the result is nodata. The result is always of float
     datatype.
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies or creates the raster indicated by `target_path`
 
     Returns:
         None
@@ -756,8 +756,8 @@ def raster_division(
     raster2 is nodata, the result is nodata. The result is always of float
     datatype.
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies or creates the raster indicated by `target_path`
 
     Returns:
         None
@@ -803,8 +803,8 @@ def raster_list_sum(
             rasters as zero. If false, the sum in a pixel where any input
             raster is nodata is nodata.
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies or creates the raster indicated by `target_path`
 
     Returns:
         None
@@ -855,8 +855,8 @@ def raster_sum(
             rasters as zero. If false, the sum in a pixel where any
             input raster is nodata is nodata.
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies or creates the raster indicated by `target_path`
 
     Returns:
         None
@@ -911,8 +911,8 @@ def raster_difference(
             rasters as zero. If false, the difference in a pixel where any
             input raster is nodata is nodata.
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies or creates the raster indicated by `target_path`
 
     Returns:
         None
@@ -957,8 +957,8 @@ def reclassify_nodata(target_path, new_nodata_value):
         target_path (string): path to target raster
         new_nodata_value (integer): new value to set as nodata
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies the raster indicated by `target_path`
 
     Returns:
         None
@@ -1004,8 +1004,8 @@ def weighted_state_variable_sum(
         weighted_sum_path (string): path to raster that should contain the
             weighted sum across PFTs
 
-    Modifies:
-        the raster indicated by `weighted_sum_path`
+    Side effects:
+        modifies or creates the raster indicated by `weighted_sum_path`
 
     Returns:
         None
@@ -1053,8 +1053,8 @@ def _calc_ompc(
         edepth (string): path to depth of soil raster
         ompc_path (string): path to result, total soil organic matter
 
-    Modifies:
-        the raster indicated by `ompc_path`
+    Side effects:
+        modifies or creates the raster indicated by `ompc_path`
 
     Returns:
         None
@@ -1115,8 +1115,8 @@ def _calc_afiel(
         afiel_path (string): path to result raster, field capacity for this
             soil layer
 
-    Modifies:
-        the raster indicated by `afiel_path`
+    Side effects:
+        creates the raster indicated by `afiel_path`
 
     Returns:
         None
@@ -1186,8 +1186,8 @@ def _calc_awilt(
         awilt_path (string): path to result raster, wilting point for this
             soil layer
 
-    Modifies:
-        the raster indicated by `awilt_path`
+    Side effects:
+        creates the raster indicated by `awilt_path`
 
     Returns:
         None
@@ -1286,8 +1286,8 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
             ompc_dec_path (string): path to result raster, estimated soil
                 organic matter decreased to 85% of its previous value
 
-        Modifies:
-            the raster indicated by `ompc_dec_path`
+        Side effects:
+            modifies or creates the raster indicated by `ompc_dec_path`
 
         Returns:
             None
@@ -1875,8 +1875,8 @@ def _yearly_tasks(
             precipitation and N deposition rasters
         pft_id_set (set): set of integers identifying plant functional types
 
-    Modifies:
-        the rasters indicated by:
+    Side effects:
+        modifies or creates the rasters indicated by:
             year_reg['annual_precip_path']
             year_reg['baseNdep_path']
             year_reg['pltlig_above_<pft>'] for each pft
@@ -2083,8 +2083,8 @@ def _calc_daylength(template_raster, month, daylength_path):
             January
         daylength_path (string): path to shortwave radiation raster
 
-    Modifies:
-        the raster indicated by `daylength_path`
+    Side effects:
+        modifies or creates the raster indicated by `daylength_path`
 
     Returns:
         None
@@ -2227,8 +2227,8 @@ def _reference_evapotranspiration(
             pevap_path (string): path to result, reference evapotranspiration
                 raster
 
-    Modifies:
-        The raster indicated by `pevap_path`
+    Side effects:
+        modifies or creates the raster indicated by `pevap_path`
 
     Returns:
         None
@@ -2331,13 +2331,13 @@ def _potential_production(
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
 
-    Modifies:
-        The raster indicated by `month_reg['h2ogef_1_<PFT>']` for each
+    Side effects:
+        creates the raster indicated by `month_reg['h2ogef_1_<PFT>']` for each
             plant functional type (PFT) where growth is scheduled to occur in
             this month
-        The raster indicated by `month_reg['tgprod_pot_prod_<PFT>']` for each
-            plant functional type (PFT) where growth is scheduled to occur in
-            this month
+        creates the raster indicated by `month_reg['tgprod_pot_prod_<PFT>']`
+            for each plant functional type (PFT) where growth is scheduled to
+            occur in this month
 
     Returns:
         None
@@ -2772,8 +2772,9 @@ def _calc_favail_P(sv_reg, param_val_dict):
             site-level parameters, including favail_4, favail_5, favail_6,
             and favail_2
 
-    Modifies:
-        The raster indicated by `param_val_dict['favail_2']`
+    Side effects:
+        modifies or creates the raster indicated by
+            `param_val_dict['favail_2']`
 
     Returns:
         None
@@ -2849,8 +2850,8 @@ def _calc_avail_mineral_nutrient(pft_param_dict, sv_reg, iel, target_path):
         target_path (string): path to raster to contain available mineral
             nutrient for this plant functional type and nutrient
 
-    Modifies:
-        the raster indicated by `target_path`
+    Side effects:
+        modifies or creates the raster indicated by `target_path`
 
     Returns:
         None
@@ -2897,8 +2898,8 @@ def _calc_available_nutrient(
         eavail_path (string): path to location to store the result, nutrient
             available to the plant functional type
 
-    Modifies:
-        the raster indicated by `eavail_path`
+    Side effects:
+        modifies or creates the raster indicated by `eavail_path`
 
     Returns:
         None
@@ -3046,8 +3047,8 @@ def _calc_nutrient_demand(
         cercrp_min_below_path (string): path to raster giving the minimum
             ratio of carbon to nutrient in belowground live biomass
 
-    Modifies:
-        The raster indicated by `demand_path`
+    Side effects:
+        modifies or creates the raster indicated by `demand_path`
 
     Returns:
         None
@@ -3218,8 +3219,8 @@ def calc_ce_ratios(
         pft_i (int): plant functional type index
         iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
 
-    Modifies:
-        rasters indicated by
+    Side effects:
+        creates the rasters indicated by
             `month_reg['cercrp_min_above_<iel>_<pft_i>']`,
             `month_reg['cercrp_max_above_<iel>_<pft_i>']`,
             `month_reg['cercrp_min_below_<iel>_<pft_i>']`,
@@ -3358,8 +3359,8 @@ def calc_revised_fracrc(
         fracrc_r_path (string): path to raster that should contain the
             result, revised fraction of carbon allocated to roots
 
-    Modifies:
-        the raster indicated by `fracrc_r_path`
+    Side effects:
+        creates the raster indicated by `fracrc_r_path`
 
     Returns:
         None
@@ -3718,9 +3719,9 @@ def calc_final_tgprod_rtsh(
         rtsh_path (string): path to raster containing final root:shoot
             ratio of potential production
 
-    Modifies:
-        The raster indicated by tgprod_path
-        The raster indicated by rtsh_path
+    Side effects:
+        creates the raster indicated by tgprod_path
+        creates the raster indicated by rtsh_path
 
     Returns:
         None
@@ -3779,10 +3780,11 @@ def _root_shoot_ratio(
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
 
-    Modifies:
-        The raster indicated by `month_reg['tgprod_<PFT>']`, total potential
-            production (g biomass) for each plant functional type (PFT)
-        The raster indicated by `month_reg['rtsh_<PFT>']` for each
+    Side effects:
+        creates the raster indicated by
+            `month_reg['tgprod_<PFT>']`, total potential production (g biomass)
+            for each plant functional type (PFT)
+        creates the raster indicated by `month_reg['rtsh_<PFT>']` for each
             plant functional type (PFT)
 
     Returns:
@@ -3980,12 +3982,12 @@ def _snow(
         pet_rem_path (string): path to raster containing potential
             evapotranspiration remaining after any evaporation of snow
 
-    Modifies:
-        the raster indicated by `snowmelt_path`
-        the raster indicated by `snow_path`
-        the raster indicated by `snlq_path`
-        the raster indicated by `inputs_after_snow_path`
-        the raster indicated by `pet_rem_path`
+    Side effects:
+        creates the raster indicated by `snowmelt_path`
+        creates the raster indicated by `snow_path`
+        creates the raster indicated by `snlq_path`
+        creates the raster indicated by `inputs_after_snow_path`
+        creates the raster indicated by `pet_rem_path`
 
     Returns:
         None
@@ -4768,18 +4770,19 @@ def _soil_water(
             calculated values that are shared between submodels
         pft_id_set (set): set of integers identifying plant functional types
 
-    Modifies:
-        the raster indicated by `sv_reg['snow_path']`, current snowpack
-        the raster indicated by `sv_reg['snlq_path']`, current liquid in snow
-        the raster indicated by `sv_reg['asmos_<lyr>_path']`, soil moisture
-            content, for each soil layer accessible by roots of any plant
-            functional type
-        the rasters indicated by `month_reg['amov_<lyr>']` for each soil layer,
-            saturated flow of water from that soil layer
-        the raster indicated by `sv_reg['avh2o_1_<PFT>_path']`, soil moisture
-            available for growth, for each plant functional type (PFT)
-        the raster indicated by `sv_reg['avh2o_3_path']`, available water in
-            the top two soil layers
+    Side effects:
+        creates the raster indicated by `sv_reg['snow_path']`, current snowpack
+        creates the raster indicated by `sv_reg['snlq_path']`, current liquid
+            in snow
+        creates the raster indicated by
+            `sv_reg['asmos_<lyr>_path']`, soil moisture content, for each soil
+            layer accessible by roots of any plant functional type
+        creates the rasters indicated by `month_reg['amov_<lyr>']` for each
+            soil layer, saturated flow of water from that soil layer
+        creates the raster indicated by `sv_reg['avh2o_1_<PFT>_path']`, soil
+            moisture available for growth, for each plant functional type (PFT)
+        creates the raster indicated by `sv_reg['avh2o_3_path']`, available
+            water in the top two soil layers
 
     Returns:
         None
@@ -6000,10 +6003,11 @@ def respiration(
         gromin_1_path (string): path to raster containing gross
             mineralization of N
 
-    Modifies:
-        the raster indicated by `delta_estatv_path`
-        the raster indicated by `delta_minerl_1_iel_path`
-        the raster indicated by `gromin_1_path`, if supplied
+    Side effects:
+        modifies or creates the raster indicated by `delta_estatv_path`
+        modifies or creates the raster indicated by `delta_minerl_1_iel_path`
+        modifies or creates the raster indicated by `gromin_1_path`, if
+            supplied
 
     Returns:
         None
@@ -6078,11 +6082,11 @@ def nutrient_flow(
         gromin_path (string): path to raster containing gross mineralization
             of N
 
-    Modifies:
-        the raster indicated by `d_estatv_donating_path`
-        the raster indicated by `d_estatv_receiving_path`
-        the raster indicated by `d_minerl_path`
-        the raster indicated by `gromin_path`, if supplied
+    Side effects:
+        modifies or creates the raster indicated by `d_estatv_donating_path`
+        modifies or creates the raster indicated by `d_estatv_receiving_path`
+        modifies or creates the raster indicated by `d_minerl_path`
+        modifies or creates the raster indicated by `gromin_path`, if supplied
 
     Returns:
         None
@@ -6199,8 +6203,8 @@ def remove_leached_iel(
             som1e_2_iel
         iel (int): index indicating N (iel == 1) or P (iel == 2))
 
-    Modifies:
-        the raster indicated by `d_som1e_2_iel_path`
+    Side effects:
+        modifies the raster indicated by `d_som1e_2_iel_path`
 
     Returns:
         None
@@ -6346,9 +6350,9 @@ def update_aminrl(
         fsol_path (string): path to raster giving fraction of mineral P in
             solution
 
-    Modifies:
-        the raster indicated by `aminrl_1_path`
-        the raster indicated by `aminrl_2_path
+    Side effects:
+        modifies or creates the raster indicated by `aminrl_1_path`
+        modifies or creates the raster indicated by `aminrl_2_path
 
     Returns:
         None
@@ -6484,10 +6488,10 @@ def _decomposition(
             texture on decomposition rate, and the effect of soil texture on
             the rate of organic leaching
 
-    Modifies:
-        all rasters in sv_reg pertaining to structural, metabolic, som1, som2,
-            and som3 C, N, and P; mineral N and P; and parent, secondary, and
-            occluded mineral P
+    Side effects:
+        creates all rasters in sv_reg pertaining to structural, metabolic,
+            som1, som2, and som3 C, N, and P; mineral N and P; and parent,
+            secondary, and occluded mineral P
 
     Returns:
         None
@@ -7862,8 +7866,8 @@ def partit(
         lyr (int): layer which is receiving the incoming material (i.e.,
             1=surface layer, 2=soil layer)
 
-    Modifies:
-        the rasters indicated by the following paths:
+    Side effects:
+        modifies the rasters indicated by the following paths:
             sv_reg['minerl_1_1_path']
             sv_reg['minerl_1_2_path']
             sv_reg['metabc_{}_path'.format(lyr)]
@@ -8364,11 +8368,12 @@ def _death_and_partition(
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
 
-    Modifies:
-        The rasters indicated by
+    Side effects:
+        creates the rasters indicated by
             sv_reg['<state_variable>c_<pft>_path'] for each pft
             sv_reg['<state_variable>e_1_<pft>_path'] for each pft
             sv_reg['<state_variable>e_2_<pft>_path'] for each pft
+        modifies the rasters indicated by
             sv_reg['minerl_1_1_path']
             sv_reg['minerl_1_2_path']
             sv_reg['metabc_<lyr>_path']
@@ -8631,14 +8636,15 @@ def _shoot_senescence(
         current_month (int): month of the year, such that current_month=1
             indicates January
 
-    Modifies:
-        the rasters indicated by
+    Side effects:
+        creates the rasters indicated by
             sv_reg['aglivc_<pft>_path'] for each pft
-            sv_reg['stdedc_<pft>_path'] for each pft
             sv_reg['aglive_1_<pft>_path'] for each pft
             sv_reg['aglive_2_<pft>_path'] for each pft
             sv_reg['crpstg_1_<pft>_path'] for each pft
             sv_reg['crpstg_2_<pft>_path'] for each pft
+        modifies the rasters indicated by
+            sv_reg['stdedc_<pft>_path'] for each pft
             sv_reg['stdede_1_<pft>_path'] for each pft
             sv_reg['stdede_2_<pft>_path'] for each pft
 
@@ -8756,8 +8762,8 @@ def convert_biomass_to_C(biomass_path, c_path):
         c_path (string): path to raster that should contain the equivalent
             grams of carbon
 
-    Modifies:
-        the raster indicated by `c_path`
+    Side effects:
+        modifies or creates the raster indicated by `c_path`
 
     Returns:
         None
@@ -9092,8 +9098,8 @@ def nutrient_uptake(
         sorpmx_path (string): path to raster giving sorpmx paramter, maximum P
             sorption potential
 
-    Modifies:
-        The rasters indicated by
+    Side effects:
+        modifies the rasters indicated by
             sv_reg['aglive_<iel>_<pft>_path'], iel in aboveground live biomass,
                 for the given iel and current pft
             sv_reg['bglive_<iel>_<pft>_path'], iel in belowground live biomass,
@@ -9531,8 +9537,8 @@ def _new_growth(
         current_month (int): month of the year, such that current_month=1
             indicates January
 
-    Modifies:
-        The rasters indicated by
+    Side effects:
+        modifies the rasters indicated by
             sv_reg['aglivc_<pft>_path'] for each pft
             sv_reg['aglive_1_<pft>_path'] for each pft
             sv_reg['aglive_2_<pft>_path'] for each pft
@@ -9830,11 +9836,11 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
             calculated values that are shared between submodels, including
             saturated flow of water between soil layers
 
-    Modifies:
-        the raster indicated by sv_reg['minerl_<lyr>_1'], mineral N in the soil
-            layer, for each soil layer
-        the raster indicated by sv_reg['minerl_<lyr>_2'], mineral P in the soil
-            layer, for each soil layer
+    Side effects:
+        modifies the raster indicated by sv_reg['minerl_<lyr>_1'], mineral N in
+            the soil layer, for each soil layer
+        modofies the raster indicated by sv_reg['minerl_<lyr>_2'], mineral P in
+            the soil layer, for each soil layer
 
     Returns:
         None
