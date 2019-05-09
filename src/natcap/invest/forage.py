@@ -178,7 +178,7 @@ _PFT_INTERMEDIATE_VALUES = [
     'cercrp_max_above_1', 'cercrp_max_above_2',
     'cercrp_min_below_1', 'cercrp_min_below_2',
     'cercrp_max_below_1', 'cercrp_max_below_2',
-    'tgprod', 'rtsh']
+    'tgprod', 'rtsh', 'aglivc_removed', 'stdedc_removed']
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
@@ -680,6 +680,8 @@ def execute(args):
         LOGGER.info(
             "Main simulation loop: month %d of %d" % (
                 month_index, n_months))
+
+        _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set)
 
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
@@ -2298,6 +2300,46 @@ def _reference_evapotranspiration(
         _calc_pevap, pevap_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
+def _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set):
+    """Calculate offtake of live and dead biomass by herbivores.
+
+    This is a placeholder indicating where this calculation will take place.
+    Eventually, this function will do the following:
+        - summarize available forage according to aglivc and stdedc rasters
+            indicated by prev_sv_reg['aglivc_<pft>_path'] and
+            prev_sv_reg['stdedc_<pft>_path'] for each plant functional type
+        - perform diet selection according to available forage and density of
+            herbivores on each pixel
+
+    Parameters:
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+        pft_id_set (set): set of integers identifying plant functional types
+        TODO: raster indicating number of herbivores on each pixel
+
+    Side effects:
+        creates or modifies the raster indicated by
+            month_reg['aglivc_removed_<pft>'] for each plant functional type
+        creates or modifies the raster indicated by
+            month_reg['stdedc_removed_<pft>'] for each plant functional type
+
+    Returns:
+        None
+
+    """
+    for pft_i in pft_id_set:
+        pygeoprocessing.new_raster_from_base(
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+            month_reg['aglivc_removed_{}'.format(pft_i)],
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
+        pygeoprocessing.new_raster_from_base(
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+            month_reg['stdedc_removed_{}'.format(pft_i)],
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
+
+
 def _potential_production(
         aligned_inputs, site_param_table, current_month, month_index,
         pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg):
@@ -3806,6 +3848,7 @@ def _root_shoot_ratio(
     # temporary intermediate rasters for root:shoot submodel
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
+    temp_val_dict['flgrem'] = os.path.join(temp_dir, 'flgrem.tif')
     for pft_i in do_PFT:
         for val in ['fracrc_p', 'fracrc', 'availm']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
@@ -3928,15 +3971,15 @@ def _root_shoot_ratio(
             temp_val_dict['fracrc_{}'.format(pft_i)])
         # final potential production and root:shoot ratio accounting for
         # impacts of grazing
-        # for now: TODO how to store flgrem and fdgrem?
-        flgrem_path = os.path.join(temp_dir, 'flgrem.tif')
-        pygeoprocessing.new_raster_from_base(
-            param_val_dict['grzeff_{}'.format(pft_i)], flgrem_path,
-            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
+        # calculate fraction of live biomass removed by grazing
+        raster_division(
+            month_reg['aglivc_removed_{}'.format(pft_i)], _TARGET_NODATA,
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
+            temp_val_dict['flgrem'], _TARGET_NODATA)
         calc_final_tgprod_rtsh(
             month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             temp_val_dict['fracrc_{}'.format(pft_i)],
-            flgrem_path,
+            temp_val_dict['flgrem'],
             param_val_dict['grzeff_{}'.format(pft_i)],
             param_val_dict['gremb_{}'.format(pft_i)],
             month_reg['tgprod_{}'.format(pft_i)],
