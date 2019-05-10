@@ -178,7 +178,7 @@ _PFT_INTERMEDIATE_VALUES = [
     'cercrp_max_above_1', 'cercrp_max_above_2',
     'cercrp_min_below_1', 'cercrp_min_below_2',
     'cercrp_max_below_1', 'cercrp_max_below_2',
-    'tgprod', 'rtsh', 'aglivc_removed', 'stdedc_removed']
+    'tgprod', 'rtsh', 'flgrem', 'fdgrem']
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
@@ -2301,7 +2301,7 @@ def _reference_evapotranspiration(
 
 
 def _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set):
-    """Calculate offtake of live and dead biomass by herbivores.
+    """Calculate fraction of live and dead biomass removed by herbivores.
 
     This is a placeholder indicating where this calculation will take place.
     Eventually, this function will do the following:
@@ -2321,9 +2321,9 @@ def _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set):
 
     Side effects:
         creates or modifies the raster indicated by
-            month_reg['aglivc_removed_<pft>'] for each plant functional type
+            month_reg['flgrem_<pft>'] for each plant functional type
         creates or modifies the raster indicated by
-            month_reg['stdedc_removed_<pft>'] for each plant functional type
+            month_reg['fdgrem_<pft>'] for each plant functional type
 
     Returns:
         None
@@ -2332,11 +2332,11 @@ def _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set):
     for pft_i in pft_id_set:
         pygeoprocessing.new_raster_from_base(
             prev_sv_reg['aglivc_{}_path'.format(pft_i)],
-            month_reg['aglivc_removed_{}'.format(pft_i)],
+            month_reg['flgrem_{}'.format(pft_i)],
             gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
         pygeoprocessing.new_raster_from_base(
             prev_sv_reg['aglivc_{}_path'.format(pft_i)],
-            month_reg['stdedc_removed_{}'.format(pft_i)],
+            month_reg['fdgrem_{}'.format(pft_i)],
             gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
 
 
@@ -3848,7 +3848,6 @@ def _root_shoot_ratio(
     # temporary intermediate rasters for root:shoot submodel
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
-    temp_val_dict['flgrem'] = os.path.join(temp_dir, 'flgrem.tif')
     for pft_i in do_PFT:
         for val in ['fracrc_p', 'fracrc', 'availm']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
@@ -3971,15 +3970,10 @@ def _root_shoot_ratio(
             temp_val_dict['fracrc_{}'.format(pft_i)])
         # final potential production and root:shoot ratio accounting for
         # impacts of grazing
-        # calculate fraction of live biomass removed by grazing
-        raster_division(
-            month_reg['aglivc_removed_{}'.format(pft_i)], _TARGET_NODATA,
-            prev_sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA,
-            temp_val_dict['flgrem'], _TARGET_NODATA)
         calc_final_tgprod_rtsh(
             month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             temp_val_dict['fracrc_{}'.format(pft_i)],
-            temp_val_dict['flgrem'],
+            month_reg['flgrem_{}'.format(pft_i)],
             param_val_dict['grzeff_{}'.format(pft_i)],
             param_val_dict['gremb_{}'.format(pft_i)],
             month_reg['tgprod_{}'.format(pft_i)],
