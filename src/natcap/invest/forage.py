@@ -7873,6 +7873,9 @@ def _decomposition(
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['minerl_1_1_path'], _SV_NODATA)
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def partit(
         cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
@@ -8267,6 +8270,9 @@ def partit(
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['strlig_{}_path'.format(lyr)], _SV_NODATA)
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def calc_fall_standing_dead(stdedc, fallrt):
     """Calculate delta C with fall of standing dead.
@@ -8608,6 +8614,9 @@ def _death_and_partition(
         temp_val_dict['fraction_lignin'],
         sv_reg, aligned_inputs['site_index'], site_param_table, lyr)
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def calc_senescence_water_shading(
         aglivc, bgwfunc, fsdeth_1, fsdeth_3, fsdeth_4):
@@ -8783,6 +8792,9 @@ def _shoot_senescence(
                 temp_val_dict['operand_temp'], _SV_NODATA,
                 temp_val_dict['to_stdede'], _TARGET_NODATA,
                 sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
 
 
 def convert_biomass_to_C(biomass_path, c_path):
@@ -9317,6 +9329,9 @@ def nutrient_uptake(
             temp_val_dict['uptake_below'], _TARGET_NODATA,
             sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def calc_nutrient_limitation(return_type):
     """Calculate C, N, and P in new production given nutrient availability."""
@@ -9816,6 +9831,9 @@ def _new_growth(
                     sv_reg, pft_i, param_val_dict['pslsrb'],
                     param_val_dict['sorpmx'])
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
     """Calculate amount of mineral nutrient leaching from one soil layer.
@@ -10023,3 +10041,6 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
                     temp_val_dict['amount_leached'], _TARGET_NODATA,
                     sv_reg['minerl_{}_{}_path'.format(lyr + 1, iel)],
                     _SV_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
