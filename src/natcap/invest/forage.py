@@ -10061,13 +10061,13 @@ def calc_c_removed(c_state_variable, percent_removed):
         c_consumed, C in the given state variable consumed by grazing
 
     """
-    valid_mask = (
-        (~numpy.isclose(c_state_variable, _SV_NODATA)) &
-        (percent_removed != _TARGET_NODATA))
+    valid_mask = (~numpy.isclose(c_state_variable, _SV_NODATA))
+    consumed_mask = ((percent_removed != _TARGET_NODATA) & valid_mask)
     c_consumed = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
     c_consumed[:] = _TARGET_NODATA
-    c_consumed[valid_mask] = (
-        c_state_variable[valid_mask] * percent_removed[valid_mask])
+    c_consumed[valid_mask] = 0.
+    c_consumed[consumed_mask] = (
+        c_state_variable[consumed_mask] * percent_removed[consumed_mask])
     return c_consumed
 
 
@@ -10272,18 +10272,21 @@ def _grazing(
             weighted_iel_returned_urine, N or P returned in urine
 
         """
-        valid_mask = (
+        valid_mask = (~numpy.isclose(pft_cover, pft_nodata))
+        consumed_mask = (
             (shreme != _TARGET_NODATA) &
             (sdreme != _TARGET_NODATA) &
             (gret != _IC_NODATA) &
             (fecf != _IC_NODATA) &
-            (~numpy.isclose(pft_cover, pft_nodata)))
+            valid_mask)
         weighted_iel_returned_urine = numpy.empty(
             shreme.shape, dtype=numpy.float32)
         weighted_iel_returned_urine[:] = _TARGET_NODATA
-        weighted_iel_returned_urine[valid_mask] = (
-            (1. - fecf[valid_mask]) * gret[valid_mask] *
-            (shreme[valid_mask] + sdreme[valid_mask]) * pft_cover[valid_mask])
+        weighted_iel_returned_urine[valid_mask] = 0.
+        weighted_iel_returned_urine[consumed_mask] = (
+            (1. - fecf[consumed_mask]) * gret[consumed_mask] *
+            (shreme[consumed_mask] + sdreme[consumed_mask]) *
+            pft_cover[consumed_mask])
         return weighted_iel_returned_urine
 
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
