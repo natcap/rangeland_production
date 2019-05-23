@@ -10044,3 +10044,409 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+
+def calc_c_removed(c_state_variable, percent_removed):
+    """Calculate C consumed by grazing.
+
+    Parameters:
+        c_state_variable (numpy.ndarray): state variable, C in state variable
+            consumed by grazing
+        percent_removed (numpy.ndarray): derived, percent of state variable
+            consumed by grazing
+
+    Returns:
+        c_consumed, C in the given state variable consumed by grazing
+
+    """
+    valid_mask = (
+        (~numpy.isclose(c_state_variable, _SV_NODATA)) &
+        (percent_removed != _TARGET_NODATA))
+    c_consumed = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
+    c_consumed[:] = _TARGET_NODATA
+    c_consumed[valid_mask] = (
+        c_state_variable[valid_mask] * percent_removed[valid_mask])
+    return c_consumed
+
+
+def calc_iel_removed(c_consumed, iel_state_variable, c_state_variable):
+    """Calculate N or P consumed by grazing.
+
+    N or P in a state variable consumed by grazing is calculated according to
+    its proportional content relative to carbon in the material consumed, and
+    the amount of carbon consumed.
+
+    Parameters:
+        c_consumed (numpy.ndarray): derived, C in the given state variable
+            consumed by grazing
+        iel_state_variable (numpy.ndarray): state variable, iel (N or P) in
+            state variable consumed by grazing
+        c_state_variable (numpy.ndarray): state variable, C in state variable
+            consumed by grazing
+
+    Returns:
+        iel_consumed, N or P in the given state variable consumed by grazing
+
+    """
+    valid_mask = (
+        (c_consumed != _TARGET_NODATA) &
+        (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
+        (~numpy.isclose(c_state_variable, _SV_NODATA)))
+    iel_consumed = numpy.empty(c_consumed.shape, dtype=numpy.float32)
+    iel_consumed[:] = _TARGET_NODATA
+    iel_consumed[valid_mask] = (
+        c_consumed[valid_mask] * (
+            iel_state_variable[valid_mask] / c_state_variable[valid_mask]))
+    return iel_consumed
+
+
+def _grazing(
+        aligned_inputs, site_param_table, sv_reg, month_reg,
+        animal_trait_table, pft_id_set):
+    """Perform offtake of biomass and return of nutrients by herbivores.
+
+    Biomass consumed by herbivores is removed from aboveground live biomass
+    and standing dead biomass. The return of C, N and P in feces are
+    partitioned into surface and structural metabolic material, while N and P
+    in urine are returned to the surface mineral pool.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fraction of clay
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            flgrem_<pft>, the fraction of live biomass removed by grazing, and
+            fdtrem_<pft>, the fraction of standing dead biomass removed by
+            grazing
+        animal_trait_table (dict): dictionary containing animal parameters
+
+    Side effects:
+        modifies the rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+            sv_reg['stdedc_<pft>_path'] for each pft
+            sv_reg['stdede_1_<pft>_path'] for each pft
+            sv_reg['stdede_2_<pft>_path'] for each pft
+            sv_reg['minerl_1_1_path']
+            sv_reg['minerl_1_2_path']
+            sv_reg['metabc_1_path']
+            sv_reg['strucc_1_path']
+            sv_reg['metabe_1_1_path']
+            sv_reg['metabe_1_2_path']
+            sv_reg['struce_1_1_path']
+            sv_reg['struce_1_2_path']
+            sv_reg['strlig_1_path']
+
+    Returns:
+        None
+
+    """
+    def calc_gret_1(clay):
+        """Calculate the fraction of consumed N returned in feces and urine.
+
+        The fraction of N consumed by animals that is returned in feces and
+        urine is linearly related soil clay content, bounded to be between
+        0.7 and 0.85.
+
+        Parameters:
+            clay (numpy.ndarray): input, soil clay fraction
+
+        Returns:
+            gret_1, fraction of consumed N that is returned in feces and urine
+
+        """
+        valid_mask = (clay != clay_nodata)
+        gret_1 = numpy.empty(clay.shape, dtype=numpy.float32)
+        gret_1[:] = _IC_NODATA
+        gret_1[valid_mask] = numpy.clip(
+            ((0.85 - 0.7) / 0.3 * (clay[valid_mask] - 0.3) + 0.85), 0.7, 0.85)
+        return gret_1
+
+    def calc_weighted_c_returned(shremc, sdremc, gfcret, pft_cover):
+        """Calculate carbon returned in feces from grazing of one pft.
+
+        The fraction of carbon removed by herbivores that is returned in their
+        feces is given by the parameter gfcret. Because carbon returned in
+        feces is partitioned into soil structural and metabolic pools, carbon
+        returned from grazing of one plant functional type (pft) must be
+        weighted by the percent cover of the pft.
+
+        Parameters:
+            shremc (numpy.ndarray): derived, C in aboveground live biomass
+                removed by grazing
+            sdremc (numpy.ndarray): derived, C in standing dead biomass removed
+                by grazing
+            gfcret (numpy.ndarray): parameter, fraction of consumed C that is
+                returned in feces
+            pft_cover (numpy.ndarray): input, percent cover of this plant
+                functional type
+
+        Returns:
+            weighted_c_returned, carbon returned from grazing of this plant
+                functional type
+
+        """
+        valid_mask = (
+            (shremc != _TARGET_NODATA) &
+            (sdremc != _TARGET_NODATA) &
+            (gfcret != _IC_NODATA) &
+            (~numpy.isclose(pft_cover, pft_nodata)))
+        weighted_c_returned = numpy.empty(shremc.shape, dtype=numpy.float32)
+        weighted_c_returned[:] = _TARGET_NODATA
+        weighted_c_returned[valid_mask] = (
+            (gfcret[valid_mask] * (shremc[valid_mask] + sdremc[valid_mask]) *
+                pft_cover[valid_mask]))
+        return weighted_c_returned
+
+    def calc_weighted_iel_returned_feces(
+            shreme, sdreme, gret, fecf, pft_cover):
+        """Calculate N or P returned in feces from grazing of one pft.
+
+        The fraction of N or P removed by herbivores that is returned in their
+        feces is calculated from the parameters gret_<iel> and fecf_<iel>.
+        Nutrients returned in feces from grazing of one functional type (pft)
+        are partitioned into soil structural and metabolic pools, so they
+        must be weighted by the percent cover of the pft.
+
+        Parameters:
+            shreme (numpy.ndarray): derived, iel in aboveground live biomass
+                removed by grazing
+            sdreme (numpy.ndarray): derived, iel in standing dead biomass
+                removed by grazing
+            gret (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned
+            fecf (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned in feces
+            pft_cover (numpy.ndarray): input, percent cover of this plant
+                functional type
+
+        Returns:
+            weighted_iel_returned_feces, N or P returned in feces
+
+        """
+        valid_mask = (
+            (shreme != _TARGET_NODATA) &
+            (sdreme != _TARGET_NODATA) &
+            (gret != _IC_NODATA) &
+            (fecf != _IC_NODATA) &
+            (~numpy.isclose(pft_cover, pft_nodata)))
+        weighted_iel_returned_feces = numpy.empty(
+            shreme.shape, dtype=numpy.float32)
+        weighted_iel_returned_feces[:] = _TARGET_NODATA
+        weighted_iel_returned_feces[valid_mask] = (
+            fecf[valid_mask] * gret[valid_mask] *
+            (shreme[valid_mask] + sdreme[valid_mask]) * pft_cover[valid_mask])
+        return weighted_iel_returned_feces
+
+    def calc_weighted_iel_returned_urine(
+            shreme, sdreme, gret, fecf, pft_cover):
+        """Calculate N or P returned in urine from grazing of one pft.
+
+        While N and P returned by herbivores in feces is partitioned into
+        soil structural and metabolic pools, N and P returned in urine flows
+        directly to the surface mineral pool. The amount of N and P returned in
+        urine is determined according to the complement of the parameter fecf,
+        the fraction of N and P returned in feces.
+
+        Parameters:
+            shreme (numpy.ndarray): derived, iel in aboveground live biomass
+                removed by grazing
+            sdreme (numpy.ndarray): derived, iel in standing dead biomass
+                removed by grazing
+            gret (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned
+            fecf (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned in feces
+            pft_cover (numpy.ndarray): input, percent cover of this plant
+                functional type
+
+        Returns:
+            weighted_iel_returned_urine, N or P returned in urine
+
+        """
+        valid_mask = (
+            (shreme != _TARGET_NODATA) &
+            (sdreme != _TARGET_NODATA) &
+            (gret != _IC_NODATA) &
+            (fecf != _IC_NODATA) &
+            (~numpy.isclose(pft_cover, pft_nodata)))
+        weighted_iel_returned_urine = numpy.empty(
+            shreme.shape, dtype=numpy.float32)
+        weighted_iel_returned_urine[:] = _TARGET_NODATA
+        weighted_iel_returned_urine[valid_mask] = (
+            (1. - fecf[valid_mask]) * gret[valid_mask] *
+            (shreme[valid_mask] + sdreme[valid_mask]) * pft_cover[valid_mask])
+        return weighted_iel_returned_urine
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'd_statv_temp', 'shremc', 'sdremc', 'shreme', 'sdreme',
+            'weighted_iel_urine', 'sum_weighted_C_returned',
+            'sum_weighted_N_returned', 'sum_weighted_P_returned']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for val in [
+            'weighted_C_feces', 'weighted_iel_feces_1',
+            'weighted_iel_feces_2']:
+        for pft_i in pft_id_set:
+            temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+
+    param_val_dict = {}
+    param_val_dict['gret_1'] = os.path.join(temp_dir, 'gret_1.tif')
+    for val in ['gfcret', 'gret_2', 'fecf_1', 'fecf_2', 'feclig']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        fill_val = animal_trait_table[val]
+        pygeoprocessing.new_raster_from_base(
+            aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
+            [_IC_NODATA], fill_value_list=[fill_val])
+
+    clay_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['clay'])['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(aligned_inputs['clay'], 1)],
+        calc_gret_1, param_val_dict['gret_1'], gdal.GDT_Float32, _IC_NODATA)
+
+    weighted_C_returned_list = []
+    weighted_N_returned_list = []
+    weighted_P_returned_list = []
+    for pft_i in pft_id_set:
+        # calculate C consumed
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                month_reg['flgrem_{}'.format(pft_i)]]],
+            calc_c_removed, temp_val_dict['shremc'], gdal.GDT_Float32,
+            _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['stdedc_{}_path'.format(pft_i)],
+                month_reg['fdgrem_{}'.format(pft_i)]]],
+            calc_c_removed, temp_val_dict['sdremc'], gdal.GDT_Float32,
+            _TARGET_NODATA)
+
+        # calculate C returned in feces
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['shremc'], temp_val_dict['sdremc'],
+                param_val_dict['gfcret'],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
+            calc_weighted_c_returned,
+            temp_val_dict['weighted_C_feces_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        weighted_C_returned_list.append(
+            temp_val_dict['weighted_C_feces_{}'.format(pft_i)])
+
+        # calculate N and P consumed
+        for iel in [1, 2]:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['shremc'],
+                    sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                    sv_reg['aglivc_{}_path'.format(pft_i)]]],
+                calc_iel_removed, temp_val_dict['shreme'], gdal.GDT_Float32,
+                _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['sdremc'],
+                    sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                    sv_reg['stdedc_{}_path'.format(pft_i)]]],
+                calc_iel_removed, temp_val_dict['sdreme'], gdal.GDT_Float32,
+                _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['shreme'], _TARGET_NODATA,
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            shutil.copyfile(
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['sdreme'], _TARGET_NODATA,
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+            # calculate N or P returned in feces
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['shreme'], temp_val_dict['sdreme'],
+                    param_val_dict['gret_{}'.format(iel)],
+                    param_val_dict['fecf_{}'.format(iel)],
+                    aligned_inputs['pft_{}'.format(pft_i)]]],
+                calc_weighted_iel_returned_feces,
+                temp_val_dict['weighted_iel_feces_{}_{}'.format(iel, pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            if iel == 1:
+                weighted_N_returned_list.append(
+                    temp_val_dict['weighted_iel_feces_{}_{}'.format(
+                        iel, pft_i)])
+            else:
+                weighted_P_returned_list.append(
+                    temp_val_dict['weighted_iel_feces_{}_{}'.format(
+                        iel, pft_i)])
+
+            # calculate N or P returned in urine
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['shreme'], temp_val_dict['sdreme'],
+                    param_val_dict['gret_{}'.format(iel)],
+                    param_val_dict['fecf_{}'.format(iel)],
+                    aligned_inputs['pft_{}'.format(pft_i)]]],
+                calc_weighted_iel_returned_urine,
+                temp_val_dict['weighted_iel_urine'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['minerl_1_{}_path'.format(iel)],
+                temp_val_dict['d_statv_temp'])
+            raster_sum(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['weighted_iel_urine'], _TARGET_NODATA,
+                sv_reg['minerl_1_{}_path'.format(iel)], _SV_NODATA)
+
+        # remove consumed biomass from C state variables
+        shutil.copyfile(
+            sv_reg['aglivc_{}_path'.format(pft_i)],
+            temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['shremc'], _TARGET_NODATA,
+            sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA)
+        shutil.copyfile(
+            sv_reg['stdedc_{}_path'.format(pft_i)],
+            temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['sdremc'], _TARGET_NODATA,
+            sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA)
+
+    raster_list_sum(
+        weighted_C_returned_list, _TARGET_NODATA,
+        temp_val_dict['sum_weighted_C_returned'], _TARGET_NODATA,
+        nodata_remove=True)
+    raster_list_sum(
+        weighted_N_returned_list, _TARGET_NODATA,
+        temp_val_dict['sum_weighted_N_returned'], _TARGET_NODATA,
+        nodata_remove=True)
+    raster_list_sum(
+        weighted_P_returned_list, _TARGET_NODATA,
+        temp_val_dict['sum_weighted_P_returned'], _TARGET_NODATA,
+        nodata_remove=True)
+    partit(
+        temp_val_dict['sum_weighted_C_returned'],
+        temp_val_dict['sum_weighted_N_returned'],
+        temp_val_dict['sum_weighted_P_returned'],
+        param_val_dict['feclig'], sv_reg, aligned_inputs['site_index'],
+        site_param_table, 1)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)

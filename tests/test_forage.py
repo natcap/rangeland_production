@@ -1121,7 +1121,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -8994,3 +8994,307 @@ class foragetests(unittest.TestCase):
                     tolerance,
                     ending_minerl_dict['minerl_{}_{}'.format(lyr, iel)] +
                     tolerance, _SV_NODATA)
+
+    def test_grazing(self):
+        """Test `_grazing.
+
+        Use the function `_grazing` to calculate change in aboveground live
+        and dead biomass and return of nutrients to soil with grazing.
+        Compare calculated change in state variables to values calculated by
+        hand.
+
+        Raises:
+            AssertionError if `_grazing` does not match values calculated by
+            hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known inputs: one pft
+        clay = 0.18
+
+        aglivc = 6.84782124
+        aglive_1 = 0.318333626
+        aglive_2 = 0.00915864483
+        stdedc = 4.27673721
+        stdede_1 = 0.167467803
+        stdede_2 = 0.00570994569
+        minerl_1_1 = 40.45
+        minerl_1_2 = 24.19
+        strucc_lyr = 157.976
+        metabc_lyr = 7.7447
+        struce_lyr_1 = 0.8046
+        metabe_lyr_1 = 0.4243
+        struce_lyr_2 = 0.3152
+        metabe_lyr_2 = 0.0555
+        strlig_lyr = 0.224
+
+        damr_lyr_1 = 0.02
+        damr_lyr_2 = 0.02
+        pabres = 100.
+        damrmn_1 = 15.
+        damrmn_2 = 150.
+        spl_1 = 0.85
+        spl_2 = 0.013
+        rcestr_1 = 200.
+        rcestr_2 = 500.
+
+        gfcret = 0.3
+        gret_2 = 0.95
+        fecf_1 = 0.5
+        fecf_2 = 0.9
+        feclig = 0.25
+
+        flgrem = 0.1
+        fdgrem = 0.05
+
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'clay': os.path.join(self.workspace_dir, 'clay.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        create_constant_raster(aligned_inputs['clay'], clay)
+        site_param_table = {
+            1: {
+                'damr_1_1': damr_lyr_1,
+                'damr_1_2': damr_lyr_2,
+                'pabres': pabres,
+                'damrmn_1': damrmn_1,
+                'damrmn_2': damrmn_2,
+                'spl_1': spl_1,
+                'spl_2': spl_2,
+                'rcestr_1': rcestr_1,
+                'rcestr_2': rcestr_2,
+            }
+        }
+        sv_reg = {
+            'aglivc_1_path': os.path.join(
+                self.workspace_dir, 'aglivc_1.tif'),
+            'aglive_1_1_path': os.path.join(
+                self.workspace_dir, 'aglive_1_1.tif'),
+            'aglive_2_1_path': os.path.join(
+                self.workspace_dir, 'aglive_2_1.tif'),
+            'stdedc_1_path': os.path.join(
+                self.workspace_dir, 'stdedc_1.tif'),
+            'stdede_1_1_path': os.path.join(
+                self.workspace_dir, 'stdede_1_1.tif'),
+            'stdede_2_1_path': os.path.join(
+                self.workspace_dir, 'stdede_2_1.tif'),
+            'minerl_1_1_path': os.path.join(
+                self.workspace_dir, 'minerl_1_1.tif'),
+            'minerl_1_2_path': os.path.join(
+                self.workspace_dir, 'minerl_1_2.tif'),
+            'metabc_1_path': os.path.join(
+                self.workspace_dir, 'metabc.tif'),
+            'strucc_1_path': os.path.join(
+                self.workspace_dir, 'strucc.tif'),
+            'struce_1_1_path': os.path.join(
+                self.workspace_dir, 'struce_1_1.tif'),
+            'metabe_1_1_path': os.path.join(
+                self.workspace_dir, 'metabe_1_1.tif'),
+            'struce_1_2_path': os.path.join(
+                self.workspace_dir, 'struce_1_2.tif'),
+            'metabe_1_2_path': os.path.join(
+                self.workspace_dir, 'metabe_1_2.tif'),
+            'strlig_1_path': os.path.join(self.workspace_dir, 'strlig.tif')
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(sv_reg['aglive_2_1_path'], aglive_2)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+        create_constant_raster(sv_reg['stdede_2_1_path'], stdede_2)
+        create_constant_raster(sv_reg['minerl_1_1_path'], minerl_1_1)
+        create_constant_raster(sv_reg['minerl_1_2_path'], minerl_1_2)
+        create_constant_raster(sv_reg['metabc_1_path'], metabc_lyr)
+        create_constant_raster(sv_reg['strucc_1_path'], strucc_lyr)
+        create_constant_raster(sv_reg['struce_1_1_path'], struce_lyr_1)
+        create_constant_raster(sv_reg['metabe_1_1_path'], metabe_lyr_1)
+        create_constant_raster(sv_reg['struce_1_2_path'], struce_lyr_2)
+        create_constant_raster(sv_reg['metabe_1_2_path'], metabe_lyr_2)
+        create_constant_raster(sv_reg['strlig_1_path'], strlig_lyr)
+
+        month_reg = {
+            'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
+            'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
+        }
+        create_constant_raster(month_reg['flgrem_1'], flgrem)
+        create_constant_raster(month_reg['fdgrem_1'], fdgrem)
+
+        animal_trait_table = {
+            'gfcret': gfcret,
+            'gret_2': gret_2,
+            'fecf_1': fecf_1,
+            'fecf_2': fecf_2,
+            'feclig': feclig,
+        }
+        pft_id_set = [1]
+
+        # known state variables after grazing
+        aglivc_after = 6.163039
+        stdedc_after = 4.062901
+        aglive_1_after = 0.2865
+        aglive_2_after = 0.00824278
+        stdede_1_after = 0.159094
+        stdede_2_after = 0.00542445
+        minerl_1_1_after = 40.46379
+        minerl_1_2_after = 24.189344
+        metabc_1_after = 7.940992
+        strucc_after = 158.04929
+        metabe_1_1_after = 0.441906
+        metabe_1_2_after = 0.0571507
+        struce_1_1_after = 0.8049664
+        struce_1_2_after = 0.315347
+        strlig_1_after = 0.224322
+
+        forage._grazing(
+            aligned_inputs, site_param_table, sv_reg, month_reg,
+            animal_trait_table, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], aglivc_after - tolerance,
+            aglivc_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdedc_1_path'], stdedc_after - tolerance,
+            stdedc_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], aglive_1_after - tolerance,
+            aglive_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], aglive_2_after - tolerance,
+            aglive_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_1_1_path'], stdede_1_after - tolerance,
+            stdede_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_2_1_path'], stdede_2_after - tolerance,
+            stdede_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], minerl_1_1_after - tolerance,
+            minerl_1_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_2_path'], minerl_1_2_after - tolerance,
+            minerl_1_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabc_1_path'], metabc_1_after - tolerance,
+            metabc_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strucc_1_path'], strucc_after - tolerance,
+            strucc_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_1_path'], metabe_1_1_after - tolerance,
+            metabe_1_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_2_path'], metabe_1_2_after - tolerance,
+            metabe_1_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_1_path'], struce_1_1_after - tolerance,
+            struce_1_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_2_path'], struce_1_2_after - tolerance,
+            struce_1_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strlig_1_path'], strlig_1_after - tolerance,
+            strlig_1_after + tolerance, _SV_NODATA)
+
+        # known inputs: two pfts, 50% cover each
+        aligned_inputs['pft_2'] = os.path.join(self.workspace_dir, 'pft_2.tif')
+        create_constant_raster(aligned_inputs['pft_1'], 0.5)
+        create_constant_raster(aligned_inputs['pft_2'], 0.5)
+
+        sv_reg['aglivc_2_path'] = os.path.join(
+            self.workspace_dir, 'aglivc_2.tif')
+        sv_reg['aglive_1_2_path'] = os.path.join(
+            self.workspace_dir, 'aglive_1_2.tif')
+        sv_reg['aglive_2_2_path'] = os.path.join(
+            self.workspace_dir, 'aglive_2_2.tif')
+        sv_reg['stdedc_2_path'] = os.path.join(
+            self.workspace_dir, 'stdedc_2.tif')
+        sv_reg['stdede_1_2_path'] = os.path.join(
+            self.workspace_dir, 'stdede_1_2.tif')
+        sv_reg['stdede_2_2_path'] = os.path.join(
+            self.workspace_dir, 'stdede_2_2.tif')
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(sv_reg['aglive_2_1_path'], aglive_2)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+        create_constant_raster(sv_reg['stdede_2_1_path'], stdede_2)
+        create_constant_raster(sv_reg['minerl_1_1_path'], minerl_1_1)
+        create_constant_raster(sv_reg['minerl_1_2_path'], minerl_1_2)
+        create_constant_raster(sv_reg['metabc_1_path'], metabc_lyr)
+        create_constant_raster(sv_reg['strucc_1_path'], strucc_lyr)
+        create_constant_raster(sv_reg['struce_1_1_path'], struce_lyr_1)
+        create_constant_raster(sv_reg['metabe_1_1_path'], metabe_lyr_1)
+        create_constant_raster(sv_reg['struce_1_2_path'], struce_lyr_2)
+        create_constant_raster(sv_reg['metabe_1_2_path'], metabe_lyr_2)
+        create_constant_raster(sv_reg['strlig_1_path'], strlig_lyr)
+        create_constant_raster(sv_reg['aglivc_2_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_2_path'], aglive_1)
+        create_constant_raster(sv_reg['aglive_2_2_path'], aglive_2)
+        create_constant_raster(sv_reg['stdedc_2_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_2_path'], stdede_1)
+        create_constant_raster(sv_reg['stdede_2_2_path'], stdede_2)
+
+        month_reg['flgrem_2'] = os.path.join(
+            self.workspace_dir, 'flgrem_2.tif')
+        month_reg['fdgrem_2'] = os.path.join(
+            self.workspace_dir, 'fdgrem_2.tif')
+        create_constant_raster(month_reg['flgrem_2'], flgrem)
+        create_constant_raster(month_reg['fdgrem_2'], fdgrem)
+
+        pft_id_set = [1, 2]
+
+        forage._grazing(
+            aligned_inputs, site_param_table, sv_reg, month_reg,
+            animal_trait_table, pft_id_set)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], aglivc_after - tolerance,
+            aglivc_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdedc_1_path'], stdedc_after - tolerance,
+            stdedc_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], aglive_1_after - tolerance,
+            aglive_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], aglive_2_after - tolerance,
+            aglive_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_1_1_path'], stdede_1_after - tolerance,
+            stdede_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['stdede_2_1_path'], stdede_2_after - tolerance,
+            stdede_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_1_path'], minerl_1_1_after - tolerance,
+            minerl_1_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['minerl_1_2_path'], minerl_1_2_after - tolerance,
+            minerl_1_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabc_1_path'], metabc_1_after - tolerance,
+            metabc_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strucc_1_path'], strucc_after - tolerance,
+            strucc_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_1_path'], metabe_1_1_after - tolerance,
+            metabe_1_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['metabe_1_2_path'], metabe_1_2_after - tolerance,
+            metabe_1_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_1_path'], struce_1_1_after - tolerance,
+            struce_1_1_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['struce_1_2_path'], struce_1_2_after - tolerance,
+            struce_1_2_after + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['strlig_1_path'], strlig_1_after - tolerance,
+            strlig_1_after + tolerance, _SV_NODATA)
