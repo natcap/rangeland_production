@@ -319,8 +319,8 @@ def execute(args):
             giving the location of grazing animals. Must have a field named
             "animal_id", containing unique integers that correspond to the
             values in the "animal_id" column of the animal trait csv.
-        args['initial_conditions_dir'] (string): optional path to directory
-            containing initial conditions. If supplied, this directory must
+        args['initial_conditions_dir'] (string): path to directory
+            containing initial conditions. This directory must
             contain a series of rasters with initial values for each PFT and
             for the site.
                 Required rasters for each PFT:
@@ -489,10 +489,10 @@ def execute(args):
     for feature in layer:
         anim_id_list.append(feature.GetField('animal_id'))
 
-    anim_trait_table = utils.build_lookup_from_csv(
+    animal_trait_table = utils.build_lookup_from_csv(
         args['animal_trait_path'], 'animal_id')
     missing_animal_trait_list = set(
-        anim_id_list).difference(anim_trait_table.keys())
+        anim_id_list).difference(animal_trait_table.keys())
     if missing_animal_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following animal " +
@@ -529,79 +529,77 @@ def execute(args):
 
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
-    # if initial conditions are supplied, use them to initialize all state
-    # variables
-    if args['initial_conditions_dir']:
-        LOGGER.info(
-            "setting initial conditions from this directory: %s",
-            args['initial_conditions_dir'])
+    # use initial conditions to initialize all state variables
+    LOGGER.info(
+        "setting initial conditions from this directory: %s",
+        args['initial_conditions_dir'])
 
-        # check that all necessary state variables are supplied
-        missing_initial_values = []
-        # set _SV_NODATA from initial rasters
-        state_var_nodata = set([])
-        # align initial state variables to resampled inputs
-        resample_initial_path_map = {}
-        for sv in _SITE_STATE_VARIABLE_FILES.keys():
+    # check that all necessary state variables are supplied
+    missing_initial_values = []
+    # set _SV_NODATA from initial rasters
+    state_var_nodata = set([])
+    # align initial state variables to resampled inputs
+    resample_initial_path_map = {}
+    for sv in _SITE_STATE_VARIABLE_FILES.keys():
+        sv_path = os.path.join(
+            args['initial_conditions_dir'],
+            _SITE_STATE_VARIABLE_FILES[sv])
+        state_var_nodata.update(
+            set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
+        resample_initial_path_map[sv] = sv_path
+        if not os.path.exists(sv_path):
+            missing_initial_values.append(sv_path)
+    for pft_i in pft_id_set:
+        for sv in _PFT_STATE_VARIABLES:
+            sv_key = '{}_{}_path'.format(sv, pft_i)
             sv_path = os.path.join(
                 args['initial_conditions_dir'],
-                _SITE_STATE_VARIABLE_FILES[sv])
+                '{}_{}.tif'.format(sv, pft_i))
             state_var_nodata.update(
-                set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
-            resample_initial_path_map[sv] = sv_path
+                set([pygeoprocessing.get_raster_info(sv_path)['nodata']
+                    [0]]))
+            resample_initial_path_map[sv_key] = sv_path
             if not os.path.exists(sv_path):
                 missing_initial_values.append(sv_path)
-        for pft_i in pft_id_set:
-            for sv in _PFT_STATE_VARIABLES:
-                sv_key = '{}_{}_path'.format(sv, pft_i)
-                sv_path = os.path.join(
-                    args['initial_conditions_dir'],
-                    '{}_{}.tif'.format(sv, pft_i))
-                state_var_nodata.update(
-                    set([pygeoprocessing.get_raster_info(sv_path)['nodata']
-                        [0]]))
-                resample_initial_path_map[sv_key] = sv_path
-                if not os.path.exists(sv_path):
-                    missing_initial_values.append(sv_path)
-        if missing_initial_values:
-            raise ValueError(
-                "Couldn't find the following required initial values: " +
-                "\n\t".join(missing_initial_values))
-        if len(state_var_nodata) > 1:
-            raise ValueError(
-                "Initial state variable rasters contain >1 nodata value")
-        _SV_NODATA = list(state_var_nodata)[0]
+    if missing_initial_values:
+        raise ValueError(
+            "Couldn't find the following required initial values: " +
+            "\n\t".join(missing_initial_values))
+    if len(state_var_nodata) > 1:
+        raise ValueError(
+            "Initial state variable rasters contain >1 nodata value")
+    _SV_NODATA = list(state_var_nodata)[0]
 
-        # align and resample initialization rasters with inputs
-        sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
-        os.makedirs(sv_dir)
-        aligned_initial_path_map = dict(
-            [(key, os.path.join(sv_dir, os.path.basename(path)))
-                for key, path in resample_initial_path_map.items()])
-        initial_path_list = (
-            [resample_initial_path_map[k] for k in
-                sorted(resample_initial_path_map.keys())] +
-            source_input_path_list)
-        aligned_initial_path_list = (
-            [aligned_initial_path_map[k] for k in
-                sorted(aligned_initial_path_map.keys())] +
-            aligned_input_path_list)
-        pygeoprocessing.align_and_resize_raster_stack(
-            initial_path_list, aligned_initial_path_list,
-            ['near'] * len(initial_path_list),
-            target_pixel_size, 'intersection',
-            base_vector_path_list=[args['aoi_path']])
-        sv_reg = aligned_initial_path_map
-    else:
-        LOGGER.info("initial conditions not supplied")
-        LOGGER.info("aligning base raster inputs")
-        pygeoprocessing.align_and_resize_raster_stack(
-            source_input_path_list, aligned_input_path_list,
-            ['near'] * len(aligned_inputs),
-            target_pixel_size, 'intersection',
-            base_vector_path_list=[args['aoi_path']])
-        # TODO add spin-up or initialization with Burke's equations
-        raise ValueError("Initial conditions must be supplied")
+    # align and resample initialization rasters with inputs
+    sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
+    os.makedirs(sv_dir)
+    aligned_initial_path_map = dict(
+        [(key, os.path.join(sv_dir, os.path.basename(path)))
+            for key, path in resample_initial_path_map.items()])
+    initial_path_list = (
+        [resample_initial_path_map[k] for k in
+            sorted(resample_initial_path_map.keys())] +
+        source_input_path_list)
+    aligned_initial_path_list = (
+        [aligned_initial_path_map[k] for k in
+            sorted(aligned_initial_path_map.keys())] +
+        aligned_input_path_list)
+    pygeoprocessing.align_and_resize_raster_stack(
+        initial_path_list, aligned_initial_path_list,
+        ['near'] * len(initial_path_list),
+        target_pixel_size, 'intersection',
+        base_vector_path_list=[args['aoi_path']])
+    sv_reg = aligned_initial_path_map
+
+    # create animal trait spatial index raster from management polygon
+    aligned_inputs['animal_index'] = os.path.join(
+        args['workspace_dir'], 'animal_spatial_index.tif')
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], aligned_inputs['animal_index'],
+        gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
+    pygeoprocessing.rasterize(
+        args['animal_mgmt_layer_path'], aligned_inputs['animal_index'],
+        option_list=["ATTRIBUTE=animal_id"])
 
     # Initialization
     # calculate persistent intermediate parameters that do not change during
@@ -716,6 +714,10 @@ def execute(args):
             sv_reg, month_reg, current_month)
 
         _leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+
+        _grazing(
+            aligned_inputs, site_param_table, sv_reg, month_reg,
+            animal_trait_table, pft_id_set)
 
 
 def raster_multiplication(
@@ -10107,7 +10109,7 @@ def _grazing(
 
     Biomass consumed by herbivores is removed from aboveground live biomass
     and standing dead biomass. The return of C, N and P in feces are
-    partitioned into surface and structural metabolic material, while N and P
+    partitioned into surface structural and metabolic material, while N and P
     in urine are returned to the surface mineral pool.
 
     Parameters:
@@ -10119,10 +10121,11 @@ def _grazing(
             variables for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
-            flgrem_<pft>, the fraction of live biomass removed by grazing, and
-            fdtrem_<pft>, the fraction of standing dead biomass removed by
-            grazing
+            flgrem_<pft>, the fraction of live biomass of one pft removed by
+            grazing, and fdgrem_<pft>, the fraction of standing dead biomass
+            of one pft removed by grazing
         animal_trait_table (dict): dictionary containing animal parameters
+        pft_id_set (set): set of integers identifying plant functional types
 
     Side effects:
         modifies the rasters indicated by
@@ -10302,10 +10305,12 @@ def _grazing(
     for val in ['gfcret', 'gret_2', 'fecf_1', 'fecf_2', 'feclig']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
-        fill_val = animal_trait_table[val]
-        pygeoprocessing.new_raster_from_base(
-            aligned_inputs['site_index'], target_path, gdal.GDT_Float32,
-            [_IC_NODATA], fill_value_list=[fill_val])
+        animal_to_val = dict(
+            [(animal_code, float(table[val])) for
+                (animal_code, table) in animal_trait_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['animal_index'], 1), animal_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
 
     clay_nodata = pygeoprocessing.get_raster_info(
         aligned_inputs['clay'])['nodata'][0]

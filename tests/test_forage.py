@@ -1121,7 +1121,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -9054,10 +9054,12 @@ class foragetests(unittest.TestCase):
 
         aligned_inputs = {
             'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'animal_index': os.path.join(self.workspace_dir, 'animal.tif'),
             'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
             'clay': os.path.join(self.workspace_dir, 'clay.tif'),
         }
         create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['animal_index'], 1)
         create_constant_raster(aligned_inputs['pft_1'], 1)
         create_constant_raster(aligned_inputs['clay'], clay)
         site_param_table = {
@@ -9128,11 +9130,13 @@ class foragetests(unittest.TestCase):
         create_constant_raster(month_reg['fdgrem_1'], fdgrem)
 
         animal_trait_table = {
-            'gfcret': gfcret,
-            'gret_2': gret_2,
-            'fecf_1': fecf_1,
-            'fecf_2': fecf_2,
-            'feclig': feclig,
+            1: {
+                'gfcret': gfcret,
+                'gret_2': gret_2,
+                'fecf_1': fecf_1,
+                'fecf_2': fecf_2,
+                'feclig': feclig,
+            }
         }
         pft_id_set = [1]
 
