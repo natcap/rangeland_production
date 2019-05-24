@@ -6380,14 +6380,14 @@ def update_aminrl(
     across decomposition time steps.
 
     Parameters:
-        aminrl_1_path (string): path to raster containing average mineral N
         minerl_1_1_path (string): path to raster giving current mineral N
             in soil layer 1
-        aminrl_2_path (string): path to raster containing average mineral P
         minerl_1_2_path (string): path to raster giving current mineral N
             in soil layer 2
         fsol_path (string): path to raster giving fraction of mineral P in
             solution
+        aminrl_1_path (string): path to raster containing average mineral N
+        aminrl_2_path (string): path to raster containing average mineral P
 
     Side effects:
         modifies or creates the raster indicated by `aminrl_1_path`
