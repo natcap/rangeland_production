@@ -658,7 +658,7 @@ def execute(args):
             # Update yearly quantities
             _yearly_tasks(
                 aligned_inputs, site_param_table, veg_trait_table, month_index,
-                year_reg, pft_id_set)
+                pft_id_set, year_reg)
 
         current_month = (starting_month + month_index - 1) % 12 + 1
         year = starting_year + (starting_month + month_index - 1) // 12
@@ -679,7 +679,7 @@ def execute(args):
             "Main simulation loop: month %d of %d" % (
                 month_index, n_months))
 
-        _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set)
+        _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg)
 
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
@@ -691,33 +691,33 @@ def execute(args):
 
         _soil_water(
             aligned_inputs, site_param_table, veg_trait_table, current_month,
-            month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
+            month_index, prev_sv_reg, pp_reg, pft_id_set, month_reg, sv_reg)
 
         _decomposition(
             aligned_inputs, current_month, month_index, pft_id_set,
-            site_param_table, year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg)
+            site_param_table, year_reg, month_reg, prev_sv_reg, pp_reg, sv_reg)
 
         _death_and_partition(
             'stded', aligned_inputs, site_param_table, current_month,
-            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+            year_reg, pft_id_set, veg_trait_table, prev_sv_reg, sv_reg)
 
         _death_and_partition(
             'bgliv', aligned_inputs, site_param_table, current_month,
-            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+            year_reg, pft_id_set, veg_trait_table, prev_sv_reg, sv_reg)
 
         _shoot_senescence(
-            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
-            current_month)
+            pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
+            sv_reg)
 
         _new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
-            sv_reg, month_reg, current_month)
+            month_reg, current_month, sv_reg)
 
-        _leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
 
         _grazing(
-            aligned_inputs, site_param_table, sv_reg, month_reg,
-            animal_trait_table, pft_id_set)
+            aligned_inputs, site_param_table, month_reg, animal_trait_table,
+            pft_id_set, sv_reg)
 
 
 def raster_multiplication(
@@ -1242,9 +1242,9 @@ def _calc_awilt(
         awilt_op, awilt_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
-def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
-                 som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
-                 bulk_d_path, pp_reg):
+def _afiel_awilt(
+        site_index_path, site_param_table, som1c_2_path, som2c_2_path,
+        som3c_path, sand_path, silt_path, clay_path, bulk_d_path, pp_reg):
     """Calculate field capacity and wilting point for each soil layer.
 
     Computations based on Gupta and Larson 1979, 'Estimating soil and water
@@ -1347,8 +1347,8 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     shutil.rmtree(temp_dir)
 
 
-def _persistent_params(site_index_path, site_param_table, sand_path,
-                       clay_path, pp_reg):
+def _persistent_params(
+        site_index_path, site_param_table, sand_path, clay_path, pp_reg):
     """Calculate persistent parameters.
 
     The calculated values do not change over the course of the simulation.
@@ -1853,7 +1853,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
 def _yearly_tasks(
         aligned_inputs, site_param_table, veg_trait_table, month_index,
-        year_reg, pft_id_set):
+        pft_id_set, year_reg):
     """Calculate quantities that remain static for 12 months.
 
     These quantities are annual precipitation, annual atmospheric N
@@ -1875,9 +1875,9 @@ def _yearly_tasks(
             plant functional type parameters
         month_index (int): current monthly step, relative to 0 so that
             month_index=0 at first monthly time step
+        pft_id_set (set): set of integers identifying plant functional types
         year_reg (dict): map of key, path pairs giving paths to the annual
             precipitation and N deposition rasters
-        pft_id_set (set): set of integers identifying plant functional types
 
     Side effects:
         modifies or creates the rasters indicated by:
@@ -2146,7 +2146,8 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             January
         shwave_path (string): path to shortwave radiation raster
 
-    Modifies the raster indicated by `shwave_path`
+    Side effects:
+        Modifies the raster indicated by `shwave_path`
 
     Returns:
         None
@@ -2302,7 +2303,7 @@ def _reference_evapotranspiration(
         _calc_pevap, pevap_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
-def _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set):
+def _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg):
     """Calculate fraction of live and dead biomass removed by herbivores.
 
     This is a placeholder indicating where this calculation will take place.
@@ -2316,10 +2317,9 @@ def _calc_grazing_offtake(prev_sv_reg, month_reg, pft_id_set):
     Parameters:
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
+        pft_id_set (set): set of integers identifying plant functional types
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
-        pft_id_set (set): set of integers identifying plant functional types
-        TODO: raster indicating number of herbivores on each pixel
 
     Side effects:
         creates or modifies the raster indicated by
@@ -2417,7 +2417,6 @@ def _potential_production(
 
         Returns:
             ctemp, effect of soil temperature on potential production
-
 
         """
         bio = numpy.empty(aglivc.shape, dtype=numpy.float32)
@@ -3219,8 +3218,8 @@ def calc_provisional_fracrc(
 def calc_ce_ratios(
         pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
         pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
-        prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
-        pft_i, iel):
+        prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
+        month_reg):
     """Calculate minimum and maximum carbon to nutrient ratios.
 
     Minimum and maximum C/E ratios are used to calculate demand for a
@@ -3257,11 +3256,11 @@ def calc_ce_ratios(
             prbmx_<iel>_2, slope of regression to predict maximum belowground
             ratio from annual precipitation
         annual_precip_path (string): path to annual precipitation raster
+        pft_i (int): plant functional type index
+        iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
         month_reg (dict): map of key, path pairs giving paths to
             intermediate calculated values that are shared between
             submodels
-        pft_i (int): plant functional type index
-        iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
 
     Side effects:
         creates the rasters indicated by
@@ -3423,6 +3422,7 @@ def calc_revised_fracrc(
         Returns:
             a2drat, the ratio of available nutrient to demand, restricted
                 to be between 0 and 1
+
         """
         valid_mask = (
             (totale != _TARGET_NODATA) &
@@ -3579,8 +3579,7 @@ def calc_revised_fracrc(
     shutil.rmtree(temp_dir)
 
 
-def grazing_effect_on_aboveground_production(
-        tgprod, fracrc, flgrem, grzeff):
+def grazing_effect_on_aboveground_production(tgprod, fracrc, flgrem, grzeff):
     """Adjust aboveground production with the impact of grazing.
 
     Removal of biomass by herbivores directly impacts potential
@@ -3935,8 +3934,7 @@ def _root_shoot_ratio(
                 param_val_dict['prbmn_{}_2_{}'.format(iel, pft_i)],
                 param_val_dict['prbmx_{}_1_{}'.format(iel, pft_i)],
                 param_val_dict['prbmx_{}_2_{}'.format(iel, pft_i)],
-                year_reg['annual_precip_path'], month_reg,
-                pft_i, iel)
+                year_reg['annual_precip_path'], pft_i, iel, month_reg)
             # sum of mineral nutrient in accessible soil layers
             _calc_avail_mineral_nutrient(
                 veg_trait_table[pft_i], prev_sv_reg, iel,
@@ -4312,6 +4310,7 @@ def subtract_surface_losses(return_type):
 
     Returns:
         the function `_subtract_surface_losses`
+
     """
     def _subtract_surface_losses(
             inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
@@ -4517,6 +4516,7 @@ def distribute_water_to_soil_layer(return_type):
 
     Returns:
         the function `_distribute_water`
+
     """
     def _distribute_water(adep, afiel, asmos, current_moisture_inputs):
         """Revise soil moisture in this soil layer prior to transpiration.
@@ -4775,7 +4775,7 @@ def calc_evaporation_loss(rwcf_1, pevp, absevap, asmos_1, awilt_1, adep_1):
 
 def _soil_water(
         aligned_inputs, site_param_table, veg_trait_table, current_month,
-        month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
+        month_index, prev_sv_reg, pp_reg, pft_id_set, month_reg, sv_reg):
     """Allocate precipitation to runoff, transpiration, and soil moisture.
 
     Simulate snowfall and account for evaporation and melting of the snow pack.
@@ -4801,13 +4801,13 @@ def _soil_water(
             indicates month 1 of the simulation
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pp_reg (dict): map of key, path pairs giving persistent parameters
             including field capacity of each soil layer
+        pft_id_set (set): set of integers identifying plant functional types
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
-        pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates the raster indicated by `sv_reg['snow_path']`, current snowpack
@@ -6370,8 +6370,8 @@ def calc_pflow_to_secndy(minerl_lyr_2, pmnsec_2, fsol, defac):
 
 
 def update_aminrl(
-        aminrl_1_path, minerl_1_1_path, aminrl_2_path, minerl_1_2_path,
-        fsol_path):
+        minerl_1_1_path, minerl_1_2_path, fsol_path, aminrl_1_path,
+        aminrl_2_path):
     """Update aminrl_1 and aminrl_2, average mineral N and P in surface soil.
 
     Aminrl_1, average mineral N, and aminrl_2, average mineral P, represent
@@ -6495,7 +6495,7 @@ def sum_biomass(
 
 def _decomposition(
         aligned_inputs, current_month, month_index, pft_id_set,
-        site_param_table, year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg):
+        site_param_table, year_reg, month_reg, prev_sv_reg, pp_reg, sv_reg):
     """Update soil C, N and P after decomposition.
 
     C, N and P move from one surface or soil stock to another depending on the
@@ -6520,12 +6520,12 @@ def _decomposition(
             calculated values that are shared between submodels
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pp_reg (dict): map of key, path pairs giving persistent parameters
             including required ratios for decomposition, the effect of soil
             texture on decomposition rate, and the effect of soil texture on
             the rate of organic leaching
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates all rasters in sv_reg pertaining to structural, metabolic,
@@ -7859,9 +7859,9 @@ def _decomposition(
                 param_val_dict['pslsrb']]],
             fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32, _TARGET_NODATA)
         update_aminrl(
-            temp_val_dict['aminrl_1'], sv_reg['minerl_1_1_path'],
-            temp_val_dict['aminrl_2'], sv_reg['minerl_1_2_path'],
-            temp_val_dict['fsol'])
+            sv_reg['minerl_1_1_path'], sv_reg['minerl_1_2_path'],
+            temp_val_dict['fsol'], temp_val_dict['aminrl_1'],
+            temp_val_dict['aminrl_2'])
 
     # volatilization loss of N: line 323 Simsom.f
     raster_multiplication(
@@ -7880,8 +7880,8 @@ def _decomposition(
 
 
 def partit(
-        cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
-        site_index_path, site_param_table, lyr):
+        cpart_path, epart_1_path, epart_2_path, frlign_path,
+        site_index_path, site_param_table, lyr, sv_reg):
     """Partition incoming material into structural and metabolic pools.
 
     When organic material is added to the soil, for example as dead
@@ -7900,13 +7900,13 @@ def partit(
             material
         frlign_path (string): path to raster containing fraction of incoming
             material that is lignin
-        sv_reg (dict): map of key, path pairs giving paths to current state
-            variables
         site_index_path (string): path to site spatial index raster
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
         lyr (int): layer which is receiving the incoming material (i.e.,
             1=surface layer, 2=soil layer)
+        sv_reg (dict): map of key, path pairs giving paths to current state
+            variables
 
     Side effects:
         modifies the rasters indicated by the following paths:
@@ -8383,7 +8383,7 @@ def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
 
 def _death_and_partition(
         state_variable, aligned_inputs, site_param_table, current_month,
-        prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table):
+        year_reg, pft_id_set, veg_trait_table, prev_sv_reg, sv_reg):
     """Track movement of C, N and P from a pft-level state variable into soil.
 
     Calculate C, N and P leaving the specified state variable and entering
@@ -8407,11 +8407,13 @@ def _death_and_partition(
             containing site parameters
         current_month (int): month of the year, such that current_month=1
             indicates January
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pft_id_set (set): set of integers identifying plant functional types
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates the rasters indicated by
@@ -8614,7 +8616,7 @@ def _death_and_partition(
         temp_val_dict['sum_weighted_delta_N'],
         temp_val_dict['sum_weighted_delta_P'],
         temp_val_dict['fraction_lignin'],
-        sv_reg, aligned_inputs['site_index'], site_param_table, lyr)
+        aligned_inputs['site_index'], site_param_table, lyr, sv_reg)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -8661,8 +8663,8 @@ def calc_senescence_water_shading(
 
 
 def _shoot_senescence(
-        pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
-        current_month):
+        pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
+        sv_reg):
     """Senescence of live material to standing dead.
 
     Live aboveground biomass is converted to standing dead according to
@@ -8677,12 +8679,12 @@ def _shoot_senescence(
             plant functional type parameters
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
         current_month (int): month of the year, such that current_month=1
             indicates January
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates the rasters indicated by
@@ -9115,8 +9117,8 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
 
 def nutrient_uptake(
         iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
-        plantNfix_path, availm_path, eavail_path, sv_reg, pft_i,
-        pslsrb_path, sorpmx_path):
+        plantNfix_path, availm_path, eavail_path, pft_i, pslsrb_path,
+        sorpmx_path, sv_reg):
     """Do uptake of N or P from soil and crop storage to aglive and bglive.
 
     Perform the flows of iel from crop storage pool, soil mineral pools, and
@@ -9141,13 +9143,13 @@ def nutrient_uptake(
             across soil layers accessible by this plant functional type
         eavail_path (string): path to raster giving total iel available to
             this plant functional type
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pft_i (int): index identifying the current pft
         pslsrb_path (string): path to raster giving pslsrb paramter, slope term
             controlling fraction of mineral P that is labile
         sorpmx_path (string): path to raster giving sorpmx paramter, maximum P
             sorption potential
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         modifies the rasters indicated by
@@ -9565,8 +9567,8 @@ def calc_nutrient_limitation(return_type):
 
 
 def _new_growth(
-        pft_id_set, aligned_inputs, site_param_table, veg_trait_table, sv_reg,
-        month_reg, current_month):
+        pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+        month_reg, current_month, sv_reg):
     """Growth of new aboveground and belowground biomass.
 
     Add new growth to aboveground and belowground live biomass. C is taken up
@@ -9584,12 +9586,12 @@ def _new_growth(
             that contain site-level parameters
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
         current_month (int): month of the year, such that current_month=1
             indicates January
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         modifies the rasters indicated by
@@ -9830,8 +9832,8 @@ def _new_growth(
                     temp_val_dict['plantNfix_{}'.format(pft_i)],
                     temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
                     temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
-                    sv_reg, pft_i, param_val_dict['pslsrb'],
-                    param_val_dict['sorpmx'])
+                    pft_i, param_val_dict['pslsrb'],
+                    param_val_dict['sorpmx'], sv_reg)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -9875,7 +9877,7 @@ def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
     return amount_leached
 
 
-def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
+def _leach(aligned_inputs, site_param_table, month_reg, sv_reg):
     """Simulate the movement of N and P through soil layers by leaching.
 
     Mineral nutrients are carried downward through soil layers if there is
@@ -9887,11 +9889,11 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
             spatial index
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
-        sv_reg (dict):  map of key, path pairs giving paths to state
-            variables for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             saturated flow of water between soil layers
+        sv_reg (dict):  map of key, path pairs giving paths to state
+            variables for the current month
 
     Side effects:
         modifies the raster indicated by sv_reg['minerl_<lyr>_1'], mineral N in
@@ -10103,8 +10105,8 @@ def calc_iel_removed(c_consumed, iel_state_variable, c_state_variable):
 
 
 def _grazing(
-        aligned_inputs, site_param_table, sv_reg, month_reg,
-        animal_trait_table, pft_id_set):
+        aligned_inputs, site_param_table, month_reg, animal_trait_table,
+        pft_id_set, sv_reg):
     """Perform offtake of biomass and return of nutrients by herbivores.
 
     Biomass consumed by herbivores is removed from aboveground live biomass
@@ -10117,8 +10119,6 @@ def _grazing(
             to aligned model inputs, including fraction of clay
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
-        sv_reg (dict): map of key, path pairs giving paths to state
-            variables for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             flgrem_<pft>, the fraction of live biomass of one pft removed by
@@ -10126,6 +10126,8 @@ def _grazing(
             of one pft removed by grazing
         animal_trait_table (dict): dictionary containing animal parameters
         pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month
 
     Side effects:
         modifies the rasters indicated by
@@ -10453,8 +10455,8 @@ def _grazing(
         temp_val_dict['sum_weighted_C_returned'],
         temp_val_dict['sum_weighted_N_returned'],
         temp_val_dict['sum_weighted_P_returned'],
-        param_val_dict['feclig'], sv_reg, aligned_inputs['site_index'],
-        site_param_table, 1)
+        param_val_dict['feclig'], aligned_inputs['site_index'],
+        site_param_table, 1, sv_reg)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)

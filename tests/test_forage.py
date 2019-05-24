@@ -1912,7 +1912,7 @@ class foragetests(unittest.TestCase):
         with self.assertRaises(ValueError):
             forage._yearly_tasks(
                 modified_inputs, site_param_table, veg_trait_table,
-                month_index, year_reg, pft_id_set)
+                month_index, pft_id_set, year_reg)
 
         # 12 months of precip rasters supplied, but outside 12 month window of
         # current month
@@ -1921,7 +1921,7 @@ class foragetests(unittest.TestCase):
         with self.assertRaises(ValueError):
             forage._yearly_tasks(
                 modified_inputs, site_param_table, veg_trait_table,
-                month_index, year_reg, pft_id_set)
+                month_index, pft_id_set, year_reg)
 
         # complete intact inputs
         minimum_acceptable_annual_precip = 0
@@ -1934,7 +1934,7 @@ class foragetests(unittest.TestCase):
 
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
-            month_index, year_reg, pft_id_set)
+            month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['annual_precip_path'], minimum_acceptable_annual_precip,
             maximum_acceptabe_annual_precip, precip_nodata)
@@ -1946,7 +1946,7 @@ class foragetests(unittest.TestCase):
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
             forage._yearly_tasks(
                 complete_aligned_inputs, site_param_table, veg_trait_table,
-                month_index, year_reg, pft_id_set)
+                month_index, pft_id_set, year_reg)
             self.assert_all_values_in_raster_within_range(
                 year_reg['annual_precip_path'],
                 minimum_acceptable_annual_precip,
@@ -1962,7 +1962,7 @@ class foragetests(unittest.TestCase):
                 complete_aligned_inputs[key], 0, n_rows=3, n_cols=3)
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
-            month_index, year_reg, pft_id_set)
+            month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_above_1'], 0.02 - tolerance, 0.02 + tolerance,
             _TARGET_NODATA)
@@ -1975,7 +1975,7 @@ class foragetests(unittest.TestCase):
                 complete_aligned_inputs[key], 6, n_rows=3, n_cols=3)
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
-            month_index, year_reg, pft_id_set)
+            month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_above_1'], 0.106 - tolerance, 0.1064 + tolerance,
             _TARGET_NODATA)
@@ -1986,7 +1986,7 @@ class foragetests(unittest.TestCase):
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
-            month_index, year_reg, pft_id_set)
+            month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_above_1'], 0.1064 - tolerance, 0.1064 + tolerance,
             _TARGET_NODATA)
@@ -1999,7 +1999,7 @@ class foragetests(unittest.TestCase):
                 complete_aligned_inputs[key], 40, n_rows=3, n_cols=3)
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
-            month_index, year_reg, pft_id_set)
+            month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_above_1'], 0.5 - tolerance, 0.5 + tolerance,
             _TARGET_NODATA)
@@ -2012,7 +2012,7 @@ class foragetests(unittest.TestCase):
                 complete_aligned_inputs[key], 0.03, n_rows=3, n_cols=3)
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
-            month_index, year_reg, pft_id_set)
+            month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_above_1'], 0.020432 - tolerance,
             020432 + tolerance, _TARGET_NODATA)
@@ -2886,8 +2886,8 @@ class foragetests(unittest.TestCase):
         forage.calc_ce_ratios(
             pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
-            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
-            pft_i, iel)
+            prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
+            month_reg)
         for path, ranges in acceptable_range_dict.iteritems():
             self.assert_all_values_in_raster_within_range(
                 month_reg[path], ranges['minimum_acceptable_value'],
@@ -2899,8 +2899,8 @@ class foragetests(unittest.TestCase):
         forage.calc_ce_ratios(
             pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
-            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
-            pft_i, iel)
+            prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
+            month_reg)
         for path, ranges in acceptable_range_dict.iteritems():
             self.assert_all_values_in_raster_within_range(
                 month_reg[path], ranges['minimum_acceptable_value'],
@@ -2933,8 +2933,8 @@ class foragetests(unittest.TestCase):
         forage.calc_ce_ratios(
             pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
-            prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
-            pft_i, iel)
+            prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
+            month_reg)
         for path, value in known_value_dict.iteritems():
             self.assert_all_values_in_raster_within_range(
                 month_reg[path], value - tolerance,
@@ -5108,8 +5108,8 @@ class foragetests(unittest.TestCase):
             input_dict['aligned_inputs'], input_dict['site_param_table'],
             input_dict['veg_trait_table'], input_dict['current_month'],
             input_dict['month_index'], input_dict['prev_sv_reg'],
-            input_dict['sv_reg'], input_dict['pp_reg'],
-            input_dict['month_reg'], input_dict['pft_id_set'])
+            input_dict['pp_reg'], input_dict['pft_id_set'],
+            input_dict['month_reg'], input_dict['sv_reg'])
 
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snow_path'],
@@ -5212,8 +5212,8 @@ class foragetests(unittest.TestCase):
             input_dict['aligned_inputs'], input_dict['site_param_table'],
             input_dict['veg_trait_table'], input_dict['current_month'],
             input_dict['month_index'], input_dict['prev_sv_reg'],
-            input_dict['sv_reg'], input_dict['pp_reg'],
-            input_dict['month_reg'], input_dict['pft_id_set'])
+            input_dict['pp_reg'], input_dict['pft_id_set'],
+            input_dict['month_reg'], input_dict['sv_reg'])
 
         self.assert_all_values_in_raster_within_range(
             input_dict['sv_reg']['snow_path'],
@@ -7326,8 +7326,8 @@ class foragetests(unittest.TestCase):
             struce_lyr_1, metabe_lyr_1, struce_lyr_2, metabe_lyr_2)
 
         forage.partit(
-            cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
-            site_index_path, site_param_table, lyr)
+            cpart_path, epart_1_path, epart_2_path, frlign_path,
+            site_index_path, site_param_table, lyr, sv_reg)
 
         self.assert_all_values_in_raster_within_range(
             sv_reg['minerl_1_1_path'],
@@ -7773,8 +7773,8 @@ class foragetests(unittest.TestCase):
         crpstg_2_after_2 = 0.00006
 
         forage._shoot_senescence(
-            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
-            current_month)
+            pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
+            sv_reg)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglivc_1_path'], aglivc_after_1 - tolerance,
             aglivc_after_1 + tolerance, _SV_NODATA)
@@ -8277,7 +8277,7 @@ class foragetests(unittest.TestCase):
         forage.nutrient_uptake(
             iel, nlay, percent_cover_path, eup_above_iel_path,
             eup_below_iel_path, plantNfix_path, availm_path, eavail_path,
-            sv_reg, pft_i, pslsrb_path, sorpmx_path)
+            pft_i, pslsrb_path, sorpmx_path, sv_reg)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
             point_results['aglive_iel'] - tolerance,
@@ -8646,7 +8646,7 @@ class foragetests(unittest.TestCase):
 
         forage._new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
-            sv_reg, month_reg, current_month)
+            month_reg, current_month, sv_reg)
 
         # no growth for pft 1
         self.assert_all_values_in_raster_within_range(
@@ -8838,7 +8838,7 @@ class foragetests(unittest.TestCase):
                 month_reg['amov_{}'.format(lyr)],
                 amov_dict['amov_{}'.format(lyr)])
 
-        forage._leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        forage._leach(aligned_inputs, site_param_table, month_reg, sv_reg)
         for iel in [1, 2]:
             for lyr in xrange(1, 5):
                 self.assert_all_values_in_raster_within_range(
@@ -8913,7 +8913,7 @@ class foragetests(unittest.TestCase):
                 month_reg['amov_{}'.format(lyr)],
                 amov_dict['amov_{}'.format(lyr)])
 
-        forage._leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        forage._leach(aligned_inputs, site_param_table, month_reg, sv_reg)
         for iel in [1, 2]:
             for lyr in xrange(1, 5):
                 self.assert_all_values_in_raster_within_range(
@@ -8972,7 +8972,7 @@ class foragetests(unittest.TestCase):
                 'nlayer': 4,
             }
         }
-        forage._leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        forage._leach(aligned_inputs, site_param_table, month_reg, sv_reg)
 
         # known outputs from Century
         ending_minerl_dict = {
@@ -8996,7 +8996,7 @@ class foragetests(unittest.TestCase):
                     tolerance, _SV_NODATA)
 
     def test_grazing(self):
-        """Test `_grazing.
+        """Test `_grazing`.
 
         Use the function `_grazing` to calculate change in aboveground live
         and dead biomass and return of nutrients to soil with grazing.
@@ -9158,8 +9158,8 @@ class foragetests(unittest.TestCase):
         strlig_1_after = 0.224322
 
         forage._grazing(
-            aligned_inputs, site_param_table, sv_reg, month_reg,
-            animal_trait_table, pft_id_set)
+            aligned_inputs, site_param_table, month_reg, animal_trait_table,
+            pft_id_set, sv_reg)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglivc_1_path'], aglivc_after - tolerance,
             aglivc_after + tolerance, _SV_NODATA)
@@ -9255,8 +9255,8 @@ class foragetests(unittest.TestCase):
         pft_id_set = [1, 2]
 
         forage._grazing(
-            aligned_inputs, site_param_table, sv_reg, month_reg,
-            animal_trait_table, pft_id_set)
+            aligned_inputs, site_param_table, month_reg, animal_trait_table,
+            pft_id_set, sv_reg)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglivc_1_path'], aglivc_after - tolerance,
             aglivc_after + tolerance, _SV_NODATA)
