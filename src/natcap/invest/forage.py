@@ -178,7 +178,7 @@ _PFT_INTERMEDIATE_VALUES = [
     'cercrp_max_above_1', 'cercrp_max_above_2',
     'cercrp_min_below_1', 'cercrp_min_below_2',
     'cercrp_max_below_1', 'cercrp_max_below_2',
-    'tgprod', 'rtsh']
+    'tgprod', 'rtsh', 'flgrem', 'fdgrem']
 
 # intermediate site-level values that are shared between submodels,
 # but do not need to be saved as output
@@ -319,8 +319,8 @@ def execute(args):
             giving the location of grazing animals. Must have a field named
             "animal_id", containing unique integers that correspond to the
             values in the "animal_id" column of the animal trait csv.
-        args['initial_conditions_dir'] (string): optional path to directory
-            containing initial conditions. If supplied, this directory must
+        args['initial_conditions_dir'] (string): path to directory
+            containing initial conditions. This directory must
             contain a series of rasters with initial values for each PFT and
             for the site.
                 Required rasters for each PFT:
@@ -489,10 +489,10 @@ def execute(args):
     for feature in layer:
         anim_id_list.append(feature.GetField('animal_id'))
 
-    anim_trait_table = utils.build_lookup_from_csv(
+    animal_trait_table = utils.build_lookup_from_csv(
         args['animal_trait_path'], 'animal_id')
     missing_animal_trait_list = set(
-        anim_id_list).difference(anim_trait_table.keys())
+        anim_id_list).difference(animal_trait_table.keys())
     if missing_animal_trait_list:
         raise ValueError(
             "Couldn't find trait values for the following animal " +
@@ -529,79 +529,77 @@ def execute(args):
 
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
-    # if initial conditions are supplied, use them to initialize all state
-    # variables
-    if args['initial_conditions_dir']:
-        LOGGER.info(
-            "setting initial conditions from this directory: %s",
-            args['initial_conditions_dir'])
+    # use initial conditions to initialize all state variables
+    LOGGER.info(
+        "setting initial conditions from this directory: %s",
+        args['initial_conditions_dir'])
 
-        # check that all necessary state variables are supplied
-        missing_initial_values = []
-        # set _SV_NODATA from initial rasters
-        state_var_nodata = set([])
-        # align initial state variables to resampled inputs
-        resample_initial_path_map = {}
-        for sv in _SITE_STATE_VARIABLE_FILES.keys():
+    # check that all necessary state variables are supplied
+    missing_initial_values = []
+    # set _SV_NODATA from initial rasters
+    state_var_nodata = set([])
+    # align initial state variables to resampled inputs
+    resample_initial_path_map = {}
+    for sv in _SITE_STATE_VARIABLE_FILES.keys():
+        sv_path = os.path.join(
+            args['initial_conditions_dir'],
+            _SITE_STATE_VARIABLE_FILES[sv])
+        state_var_nodata.update(
+            set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
+        resample_initial_path_map[sv] = sv_path
+        if not os.path.exists(sv_path):
+            missing_initial_values.append(sv_path)
+    for pft_i in pft_id_set:
+        for sv in _PFT_STATE_VARIABLES:
+            sv_key = '{}_{}_path'.format(sv, pft_i)
             sv_path = os.path.join(
                 args['initial_conditions_dir'],
-                _SITE_STATE_VARIABLE_FILES[sv])
+                '{}_{}.tif'.format(sv, pft_i))
             state_var_nodata.update(
-                set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
-            resample_initial_path_map[sv] = sv_path
+                set([pygeoprocessing.get_raster_info(sv_path)['nodata']
+                    [0]]))
+            resample_initial_path_map[sv_key] = sv_path
             if not os.path.exists(sv_path):
                 missing_initial_values.append(sv_path)
-        for pft_i in pft_id_set:
-            for sv in _PFT_STATE_VARIABLES:
-                sv_key = '{}_{}_path'.format(sv, pft_i)
-                sv_path = os.path.join(
-                    args['initial_conditions_dir'],
-                    '{}_{}.tif'.format(sv, pft_i))
-                state_var_nodata.update(
-                    set([pygeoprocessing.get_raster_info(sv_path)['nodata']
-                        [0]]))
-                resample_initial_path_map[sv_key] = sv_path
-                if not os.path.exists(sv_path):
-                    missing_initial_values.append(sv_path)
-        if missing_initial_values:
-            raise ValueError(
-                "Couldn't find the following required initial values: " +
-                "\n\t".join(missing_initial_values))
-        if len(state_var_nodata) > 1:
-            raise ValueError(
-                "Initial state variable rasters contain >1 nodata value")
-        _SV_NODATA = list(state_var_nodata)[0]
+    if missing_initial_values:
+        raise ValueError(
+            "Couldn't find the following required initial values: " +
+            "\n\t".join(missing_initial_values))
+    if len(state_var_nodata) > 1:
+        raise ValueError(
+            "Initial state variable rasters contain >1 nodata value")
+    _SV_NODATA = list(state_var_nodata)[0]
 
-        # align and resample initialization rasters with inputs
-        sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
-        os.makedirs(sv_dir)
-        aligned_initial_path_map = dict(
-            [(key, os.path.join(sv_dir, os.path.basename(path)))
-                for key, path in resample_initial_path_map.items()])
-        initial_path_list = (
-            [resample_initial_path_map[k] for k in
-                sorted(resample_initial_path_map.keys())] +
-            source_input_path_list)
-        aligned_initial_path_list = (
-            [aligned_initial_path_map[k] for k in
-                sorted(aligned_initial_path_map.keys())] +
-            aligned_input_path_list)
-        pygeoprocessing.align_and_resize_raster_stack(
-            initial_path_list, aligned_initial_path_list,
-            ['near'] * len(initial_path_list),
-            target_pixel_size, 'intersection',
-            base_vector_path_list=[args['aoi_path']])
-        sv_reg = aligned_initial_path_map
-    else:
-        LOGGER.info("initial conditions not supplied")
-        LOGGER.info("aligning base raster inputs")
-        pygeoprocessing.align_and_resize_raster_stack(
-            source_input_path_list, aligned_input_path_list,
-            ['near'] * len(aligned_inputs),
-            target_pixel_size, 'intersection',
-            base_vector_path_list=[args['aoi_path']])
-        # TODO add spin-up or initialization with Burke's equations
-        raise ValueError("Initial conditions must be supplied")
+    # align and resample initialization rasters with inputs
+    sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
+    os.makedirs(sv_dir)
+    aligned_initial_path_map = dict(
+        [(key, os.path.join(sv_dir, os.path.basename(path)))
+            for key, path in resample_initial_path_map.items()])
+    initial_path_list = (
+        [resample_initial_path_map[k] for k in
+            sorted(resample_initial_path_map.keys())] +
+        source_input_path_list)
+    aligned_initial_path_list = (
+        [aligned_initial_path_map[k] for k in
+            sorted(aligned_initial_path_map.keys())] +
+        aligned_input_path_list)
+    pygeoprocessing.align_and_resize_raster_stack(
+        initial_path_list, aligned_initial_path_list,
+        ['near'] * len(initial_path_list),
+        target_pixel_size, 'intersection',
+        base_vector_path_list=[args['aoi_path']])
+    sv_reg = aligned_initial_path_map
+
+    # create animal trait spatial index raster from management polygon
+    aligned_inputs['animal_index'] = os.path.join(
+        args['workspace_dir'], 'animal_spatial_index.tif')
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], aligned_inputs['animal_index'],
+        gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
+    pygeoprocessing.rasterize(
+        args['animal_mgmt_layer_path'], aligned_inputs['animal_index'],
+        option_list=["ATTRIBUTE=animal_id"])
 
     # Initialization
     # calculate persistent intermediate parameters that do not change during
@@ -660,7 +658,7 @@ def execute(args):
             # Update yearly quantities
             _yearly_tasks(
                 aligned_inputs, site_param_table, veg_trait_table, month_index,
-                year_reg, pft_id_set)
+                pft_id_set, year_reg)
 
         current_month = (starting_month + month_index - 1) % 12 + 1
         year = starting_year + (starting_month + month_index - 1) // 12
@@ -681,6 +679,8 @@ def execute(args):
             "Main simulation loop: month %d of %d" % (
                 month_index, n_months))
 
+        _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg)
+
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
             pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg)
@@ -691,29 +691,33 @@ def execute(args):
 
         _soil_water(
             aligned_inputs, site_param_table, veg_trait_table, current_month,
-            month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set)
+            month_index, prev_sv_reg, pp_reg, pft_id_set, month_reg, sv_reg)
 
         _decomposition(
             aligned_inputs, current_month, month_index, pft_id_set,
-            site_param_table, year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg)
+            site_param_table, year_reg, month_reg, prev_sv_reg, pp_reg, sv_reg)
 
         _death_and_partition(
             'stded', aligned_inputs, site_param_table, current_month,
-            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+            year_reg, pft_id_set, veg_trait_table, prev_sv_reg, sv_reg)
 
         _death_and_partition(
             'bgliv', aligned_inputs, site_param_table, current_month,
-            prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table)
+            year_reg, pft_id_set, veg_trait_table, prev_sv_reg, sv_reg)
 
         _shoot_senescence(
-            pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
-            current_month)
+            pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
+            sv_reg)
 
         _new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
-            sv_reg, month_reg, current_month)
+            month_reg, current_month, sv_reg)
 
-        _leach(aligned_inputs, site_param_table, sv_reg, month_reg)
+        _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
+
+        _grazing(
+            aligned_inputs, site_param_table, month_reg, animal_trait_table,
+            pft_id_set, sv_reg)
 
 
 def raster_multiplication(
@@ -1238,9 +1242,9 @@ def _calc_awilt(
         awilt_op, awilt_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
-def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
-                 som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
-                 bulk_d_path, pp_reg):
+def _afiel_awilt(
+        site_index_path, site_param_table, som1c_2_path, som2c_2_path,
+        som3c_path, sand_path, silt_path, clay_path, bulk_d_path, pp_reg):
     """Calculate field capacity and wilting point for each soil layer.
 
     Computations based on Gupta and Larson 1979, 'Estimating soil and water
@@ -1343,8 +1347,8 @@ def _afiel_awilt(site_index_path, site_param_table, som1c_2_path,
     shutil.rmtree(temp_dir)
 
 
-def _persistent_params(site_index_path, site_param_table, sand_path,
-                       clay_path, pp_reg):
+def _persistent_params(
+        site_index_path, site_param_table, sand_path, clay_path, pp_reg):
     """Calculate persistent parameters.
 
     The calculated values do not change over the course of the simulation.
@@ -1849,7 +1853,7 @@ def _structural_ratios(site_index_path, site_param_table, sv_reg, pp_reg):
 
 def _yearly_tasks(
         aligned_inputs, site_param_table, veg_trait_table, month_index,
-        year_reg, pft_id_set):
+        pft_id_set, year_reg):
     """Calculate quantities that remain static for 12 months.
 
     These quantities are annual precipitation, annual atmospheric N
@@ -1871,9 +1875,9 @@ def _yearly_tasks(
             plant functional type parameters
         month_index (int): current monthly step, relative to 0 so that
             month_index=0 at first monthly time step
+        pft_id_set (set): set of integers identifying plant functional types
         year_reg (dict): map of key, path pairs giving paths to the annual
             precipitation and N deposition rasters
-        pft_id_set (set): set of integers identifying plant functional types
 
     Side effects:
         modifies or creates the rasters indicated by:
@@ -2142,7 +2146,8 @@ def _shortwave_radiation(template_raster, month, shwave_path):
             January
         shwave_path (string): path to shortwave radiation raster
 
-    Modifies the raster indicated by `shwave_path`
+    Side effects:
+        Modifies the raster indicated by `shwave_path`
 
     Returns:
         None
@@ -2298,6 +2303,45 @@ def _reference_evapotranspiration(
         _calc_pevap, pevap_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
+def _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg):
+    """Calculate fraction of live and dead biomass removed by herbivores.
+
+    This is a placeholder indicating where this calculation will take place.
+    Eventually, this function will do the following:
+        - summarize available forage according to aglivc and stdedc rasters
+            indicated by prev_sv_reg['aglivc_<pft>_path'] and
+            prev_sv_reg['stdedc_<pft>_path'] for each plant functional type
+        - perform diet selection according to available forage and density of
+            herbivores on each pixel
+
+    Parameters:
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        pft_id_set (set): set of integers identifying plant functional types
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels
+
+    Side effects:
+        creates or modifies the raster indicated by
+            month_reg['flgrem_<pft>'] for each plant functional type
+        creates or modifies the raster indicated by
+            month_reg['fdgrem_<pft>'] for each plant functional type
+
+    Returns:
+        None
+
+    """
+    for pft_i in pft_id_set:
+        pygeoprocessing.new_raster_from_base(
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+            month_reg['flgrem_{}'.format(pft_i)],
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
+        pygeoprocessing.new_raster_from_base(
+            prev_sv_reg['aglivc_{}_path'.format(pft_i)],
+            month_reg['fdgrem_{}'.format(pft_i)],
+            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
+
+
 def _potential_production(
         aligned_inputs, site_param_table, current_month, month_index,
         pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg):
@@ -2373,7 +2417,6 @@ def _potential_production(
 
         Returns:
             ctemp, effect of soil temperature on potential production
-
 
         """
         bio = numpy.empty(aglivc.shape, dtype=numpy.float32)
@@ -3175,8 +3218,8 @@ def calc_provisional_fracrc(
 def calc_ce_ratios(
         pramn_1_path, pramn_2_path, aglivc_path, biomax_path,
         pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
-        prbmx_1_path, prbmx_2_path, annual_precip_path, month_reg,
-        pft_i, iel):
+        prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
+        month_reg):
     """Calculate minimum and maximum carbon to nutrient ratios.
 
     Minimum and maximum C/E ratios are used to calculate demand for a
@@ -3213,11 +3256,11 @@ def calc_ce_ratios(
             prbmx_<iel>_2, slope of regression to predict maximum belowground
             ratio from annual precipitation
         annual_precip_path (string): path to annual precipitation raster
+        pft_i (int): plant functional type index
+        iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
         month_reg (dict): map of key, path pairs giving paths to
             intermediate calculated values that are shared between
             submodels
-        pft_i (int): plant functional type index
-        iel (int): nutrient index (iel=1 indicates N, iel=2 indicates P)
 
     Side effects:
         creates the rasters indicated by
@@ -3379,6 +3422,7 @@ def calc_revised_fracrc(
         Returns:
             a2drat, the ratio of available nutrient to demand, restricted
                 to be between 0 and 1
+
         """
         valid_mask = (
             (totale != _TARGET_NODATA) &
@@ -3535,8 +3579,7 @@ def calc_revised_fracrc(
     shutil.rmtree(temp_dir)
 
 
-def grazing_effect_on_aboveground_production(
-        tgprod, fracrc, flgrem, grzeff):
+def grazing_effect_on_aboveground_production(tgprod, fracrc, flgrem, grzeff):
     """Adjust aboveground production with the impact of grazing.
 
     Removal of biomass by herbivores directly impacts potential
@@ -3891,8 +3934,7 @@ def _root_shoot_ratio(
                 param_val_dict['prbmn_{}_2_{}'.format(iel, pft_i)],
                 param_val_dict['prbmx_{}_1_{}'.format(iel, pft_i)],
                 param_val_dict['prbmx_{}_2_{}'.format(iel, pft_i)],
-                year_reg['annual_precip_path'], month_reg,
-                pft_i, iel)
+                year_reg['annual_precip_path'], pft_i, iel, month_reg)
             # sum of mineral nutrient in accessible soil layers
             _calc_avail_mineral_nutrient(
                 veg_trait_table[pft_i], prev_sv_reg, iel,
@@ -3928,15 +3970,10 @@ def _root_shoot_ratio(
             temp_val_dict['fracrc_{}'.format(pft_i)])
         # final potential production and root:shoot ratio accounting for
         # impacts of grazing
-        # for now: TODO how to store flgrem and fdgrem?
-        flgrem_path = os.path.join(temp_dir, 'flgrem.tif')
-        pygeoprocessing.new_raster_from_base(
-            param_val_dict['grzeff_{}'.format(pft_i)], flgrem_path,
-            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
         calc_final_tgprod_rtsh(
             month_reg['tgprod_pot_prod_{}'.format(pft_i)],
             temp_val_dict['fracrc_{}'.format(pft_i)],
-            flgrem_path,
+            month_reg['flgrem_{}'.format(pft_i)],
             param_val_dict['grzeff_{}'.format(pft_i)],
             param_val_dict['gremb_{}'.format(pft_i)],
             month_reg['tgprod_{}'.format(pft_i)],
@@ -4273,6 +4310,7 @@ def subtract_surface_losses(return_type):
 
     Returns:
         the function `_subtract_surface_losses`
+
     """
     def _subtract_surface_losses(
             inputs_after_snow, fracro, precro, snow, alit, sd, fwloss_1,
@@ -4478,6 +4516,7 @@ def distribute_water_to_soil_layer(return_type):
 
     Returns:
         the function `_distribute_water`
+
     """
     def _distribute_water(adep, afiel, asmos, current_moisture_inputs):
         """Revise soil moisture in this soil layer prior to transpiration.
@@ -4736,7 +4775,7 @@ def calc_evaporation_loss(rwcf_1, pevp, absevap, asmos_1, awilt_1, adep_1):
 
 def _soil_water(
         aligned_inputs, site_param_table, veg_trait_table, current_month,
-        month_index, prev_sv_reg, sv_reg, pp_reg, month_reg, pft_id_set):
+        month_index, prev_sv_reg, pp_reg, pft_id_set, month_reg, sv_reg):
     """Allocate precipitation to runoff, transpiration, and soil moisture.
 
     Simulate snowfall and account for evaporation and melting of the snow pack.
@@ -4762,13 +4801,13 @@ def _soil_water(
             indicates month 1 of the simulation
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pp_reg (dict): map of key, path pairs giving persistent parameters
             including field capacity of each soil layer
+        pft_id_set (set): set of integers identifying plant functional types
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
-        pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates the raster indicated by `sv_reg['snow_path']`, current snowpack
@@ -6331,8 +6370,8 @@ def calc_pflow_to_secndy(minerl_lyr_2, pmnsec_2, fsol, defac):
 
 
 def update_aminrl(
-        aminrl_1_path, minerl_1_1_path, aminrl_2_path, minerl_1_2_path,
-        fsol_path):
+        minerl_1_1_path, minerl_1_2_path, fsol_path, aminrl_1_path,
+        aminrl_2_path):
     """Update aminrl_1 and aminrl_2, average mineral N and P in surface soil.
 
     Aminrl_1, average mineral N, and aminrl_2, average mineral P, represent
@@ -6341,14 +6380,14 @@ def update_aminrl(
     across decomposition time steps.
 
     Parameters:
-        aminrl_1_path (string): path to raster containing average mineral N
         minerl_1_1_path (string): path to raster giving current mineral N
             in soil layer 1
-        aminrl_2_path (string): path to raster containing average mineral P
         minerl_1_2_path (string): path to raster giving current mineral N
             in soil layer 2
         fsol_path (string): path to raster giving fraction of mineral P in
             solution
+        aminrl_1_path (string): path to raster containing average mineral N
+        aminrl_2_path (string): path to raster containing average mineral P
 
     Side effects:
         modifies or creates the raster indicated by `aminrl_1_path`
@@ -6456,7 +6495,7 @@ def sum_biomass(
 
 def _decomposition(
         aligned_inputs, current_month, month_index, pft_id_set,
-        site_param_table, year_reg, month_reg, prev_sv_reg, sv_reg, pp_reg):
+        site_param_table, year_reg, month_reg, prev_sv_reg, pp_reg, sv_reg):
     """Update soil C, N and P after decomposition.
 
     C, N and P move from one surface or soil stock to another depending on the
@@ -6481,12 +6520,12 @@ def _decomposition(
             calculated values that are shared between submodels
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pp_reg (dict): map of key, path pairs giving persistent parameters
             including required ratios for decomposition, the effect of soil
             texture on decomposition rate, and the effect of soil texture on
             the rate of organic leaching
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates all rasters in sv_reg pertaining to structural, metabolic,
@@ -7820,9 +7859,9 @@ def _decomposition(
                 param_val_dict['pslsrb']]],
             fsfunc, temp_val_dict['fsol'], gdal.GDT_Float32, _TARGET_NODATA)
         update_aminrl(
-            temp_val_dict['aminrl_1'], sv_reg['minerl_1_1_path'],
-            temp_val_dict['aminrl_2'], sv_reg['minerl_1_2_path'],
-            temp_val_dict['fsol'])
+            sv_reg['minerl_1_1_path'], sv_reg['minerl_1_2_path'],
+            temp_val_dict['fsol'], temp_val_dict['aminrl_1'],
+            temp_val_dict['aminrl_2'])
 
     # volatilization loss of N: line 323 Simsom.f
     raster_multiplication(
@@ -7836,10 +7875,13 @@ def _decomposition(
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['minerl_1_1_path'], _SV_NODATA)
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def partit(
-        cpart_path, epart_1_path, epart_2_path, frlign_path, sv_reg,
-        site_index_path, site_param_table, lyr):
+        cpart_path, epart_1_path, epart_2_path, frlign_path,
+        site_index_path, site_param_table, lyr, sv_reg):
     """Partition incoming material into structural and metabolic pools.
 
     When organic material is added to the soil, for example as dead
@@ -7858,13 +7900,13 @@ def partit(
             material
         frlign_path (string): path to raster containing fraction of incoming
             material that is lignin
-        sv_reg (dict): map of key, path pairs giving paths to current state
-            variables
         site_index_path (string): path to site spatial index raster
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
         lyr (int): layer which is receiving the incoming material (i.e.,
             1=surface layer, 2=soil layer)
+        sv_reg (dict): map of key, path pairs giving paths to current state
+            variables
 
     Side effects:
         modifies the rasters indicated by the following paths:
@@ -8230,6 +8272,9 @@ def partit(
         temp_val_dict['operand_temp'], _TARGET_NODATA,
         sv_reg['strlig_{}_path'.format(lyr)], _SV_NODATA)
 
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
 
 def calc_fall_standing_dead(stdedc, fallrt):
     """Calculate delta C with fall of standing dead.
@@ -8338,7 +8383,7 @@ def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
 
 def _death_and_partition(
         state_variable, aligned_inputs, site_param_table, current_month,
-        prev_sv_reg, sv_reg, year_reg, pft_id_set, veg_trait_table):
+        year_reg, pft_id_set, veg_trait_table, prev_sv_reg, sv_reg):
     """Track movement of C, N and P from a pft-level state variable into soil.
 
     Calculate C, N and P leaving the specified state variable and entering
@@ -8362,11 +8407,13 @@ def _death_and_partition(
             containing site parameters
         current_month (int): month of the year, such that current_month=1
             indicates January
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pft_id_set (set): set of integers identifying plant functional types
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
+        prev_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates the rasters indicated by
@@ -8569,7 +8616,10 @@ def _death_and_partition(
         temp_val_dict['sum_weighted_delta_N'],
         temp_val_dict['sum_weighted_delta_P'],
         temp_val_dict['fraction_lignin'],
-        sv_reg, aligned_inputs['site_index'], site_param_table, lyr)
+        aligned_inputs['site_index'], site_param_table, lyr, sv_reg)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
 
 
 def calc_senescence_water_shading(
@@ -8613,8 +8663,8 @@ def calc_senescence_water_shading(
 
 
 def _shoot_senescence(
-        pft_id_set, veg_trait_table, prev_sv_reg, sv_reg, month_reg,
-        current_month):
+        pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
+        sv_reg):
     """Senescence of live material to standing dead.
 
     Live aboveground biomass is converted to standing dead according to
@@ -8629,12 +8679,12 @@ def _shoot_senescence(
             plant functional type parameters
         prev_sv_reg (dict): map of key, path pairs giving paths to state
             variables for the previous month
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
         current_month (int): month of the year, such that current_month=1
             indicates January
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         creates the rasters indicated by
@@ -8746,6 +8796,9 @@ def _shoot_senescence(
                 temp_val_dict['operand_temp'], _SV_NODATA,
                 temp_val_dict['to_stdede'], _TARGET_NODATA,
                 sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
 
 
 def convert_biomass_to_C(biomass_path, c_path):
@@ -9064,8 +9117,8 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
 
 def nutrient_uptake(
         iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
-        plantNfix_path, availm_path, eavail_path, sv_reg, pft_i,
-        pslsrb_path, sorpmx_path):
+        plantNfix_path, availm_path, eavail_path, pft_i, pslsrb_path,
+        sorpmx_path, sv_reg):
     """Do uptake of N or P from soil and crop storage to aglive and bglive.
 
     Perform the flows of iel from crop storage pool, soil mineral pools, and
@@ -9090,13 +9143,13 @@ def nutrient_uptake(
             across soil layers accessible by this plant functional type
         eavail_path (string): path to raster giving total iel available to
             this plant functional type
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         pft_i (int): index identifying the current pft
         pslsrb_path (string): path to raster giving pslsrb paramter, slope term
             controlling fraction of mineral P that is labile
         sorpmx_path (string): path to raster giving sorpmx paramter, maximum P
             sorption potential
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         modifies the rasters indicated by
@@ -9279,6 +9332,9 @@ def nutrient_uptake(
             temp_val_dict['statv_temp'], _SV_NODATA,
             temp_val_dict['uptake_below'], _TARGET_NODATA,
             sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
 
 
 def calc_nutrient_limitation(return_type):
@@ -9511,8 +9567,8 @@ def calc_nutrient_limitation(return_type):
 
 
 def _new_growth(
-        pft_id_set, aligned_inputs, site_param_table, veg_trait_table, sv_reg,
-        month_reg, current_month):
+        pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+        month_reg, current_month, sv_reg):
     """Growth of new aboveground and belowground biomass.
 
     Add new growth to aboveground and belowground live biomass. C is taken up
@@ -9530,12 +9586,12 @@ def _new_growth(
             that contain site-level parameters
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
-        sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels
         current_month (int): month of the year, such that current_month=1
             indicates January
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
 
     Side effects:
         modifies the rasters indicated by
@@ -9776,8 +9832,11 @@ def _new_growth(
                     temp_val_dict['plantNfix_{}'.format(pft_i)],
                     temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
                     temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
-                    sv_reg, pft_i, param_val_dict['pslsrb'],
-                    param_val_dict['sorpmx'])
+                    pft_i, param_val_dict['pslsrb'],
+                    param_val_dict['sorpmx'], sv_reg)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
 
 
 def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
@@ -9818,7 +9877,7 @@ def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
     return amount_leached
 
 
-def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
+def _leach(aligned_inputs, site_param_table, month_reg, sv_reg):
     """Simulate the movement of N and P through soil layers by leaching.
 
     Mineral nutrients are carried downward through soil layers if there is
@@ -9830,11 +9889,11 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
             spatial index
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
-        sv_reg (dict):  map of key, path pairs giving paths to state
-            variables for the current month
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             saturated flow of water between soil layers
+        sv_reg (dict):  map of key, path pairs giving paths to state
+            variables for the current month
 
     Side effects:
         modifies the raster indicated by sv_reg['minerl_<lyr>_1'], mineral N in
@@ -9986,3 +10045,418 @@ def _leach(aligned_inputs, site_param_table, sv_reg, month_reg):
                     temp_val_dict['amount_leached'], _TARGET_NODATA,
                     sv_reg['minerl_{}_{}_path'.format(lyr + 1, iel)],
                     _SV_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def calc_c_removed(c_state_variable, percent_removed):
+    """Calculate C consumed by grazing.
+
+    Parameters:
+        c_state_variable (numpy.ndarray): state variable, C in state variable
+            consumed by grazing
+        percent_removed (numpy.ndarray): derived, percent of state variable
+            consumed by grazing
+
+    Returns:
+        c_consumed, C in the given state variable consumed by grazing
+
+    """
+    valid_mask = (~numpy.isclose(c_state_variable, _SV_NODATA))
+    consumed_mask = ((percent_removed != _TARGET_NODATA) & valid_mask)
+    c_consumed = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
+    c_consumed[:] = _TARGET_NODATA
+    c_consumed[valid_mask] = 0.
+    c_consumed[consumed_mask] = (
+        c_state_variable[consumed_mask] * percent_removed[consumed_mask])
+    return c_consumed
+
+
+def calc_iel_removed(c_consumed, iel_state_variable, c_state_variable):
+    """Calculate N or P consumed by grazing.
+
+    N or P in a state variable consumed by grazing is calculated according to
+    its proportional content relative to carbon in the material consumed, and
+    the amount of carbon consumed.
+
+    Parameters:
+        c_consumed (numpy.ndarray): derived, C in the given state variable
+            consumed by grazing
+        iel_state_variable (numpy.ndarray): state variable, iel (N or P) in
+            state variable consumed by grazing
+        c_state_variable (numpy.ndarray): state variable, C in state variable
+            consumed by grazing
+
+    Returns:
+        iel_consumed, N or P in the given state variable consumed by grazing
+
+    """
+    valid_mask = (
+        (c_consumed != _TARGET_NODATA) &
+        (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
+        (~numpy.isclose(c_state_variable, _SV_NODATA)))
+    iel_consumed = numpy.empty(c_consumed.shape, dtype=numpy.float32)
+    iel_consumed[:] = _TARGET_NODATA
+    iel_consumed[valid_mask] = (
+        c_consumed[valid_mask] * (
+            iel_state_variable[valid_mask] / c_state_variable[valid_mask]))
+    return iel_consumed
+
+
+def _grazing(
+        aligned_inputs, site_param_table, month_reg, animal_trait_table,
+        pft_id_set, sv_reg):
+    """Perform offtake of biomass and return of nutrients by herbivores.
+
+    Biomass consumed by herbivores is removed from aboveground live biomass
+    and standing dead biomass. The return of C, N and P in feces are
+    partitioned into surface structural and metabolic material, while N and P
+    in urine are returned to the surface mineral pool.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fraction of clay
+        site_param_table (dict): map of site spatial index to dictionaries
+            that contain site-level parameters
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            flgrem_<pft>, the fraction of live biomass of one pft removed by
+            grazing, and fdgrem_<pft>, the fraction of standing dead biomass
+            of one pft removed by grazing
+        animal_trait_table (dict): dictionary containing animal parameters
+        pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month
+
+    Side effects:
+        modifies the rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+            sv_reg['stdedc_<pft>_path'] for each pft
+            sv_reg['stdede_1_<pft>_path'] for each pft
+            sv_reg['stdede_2_<pft>_path'] for each pft
+            sv_reg['minerl_1_1_path']
+            sv_reg['minerl_1_2_path']
+            sv_reg['metabc_1_path']
+            sv_reg['strucc_1_path']
+            sv_reg['metabe_1_1_path']
+            sv_reg['metabe_1_2_path']
+            sv_reg['struce_1_1_path']
+            sv_reg['struce_1_2_path']
+            sv_reg['strlig_1_path']
+
+    Returns:
+        None
+
+    """
+    def calc_gret_1(clay):
+        """Calculate the fraction of consumed N returned in feces and urine.
+
+        The fraction of N consumed by animals that is returned in feces and
+        urine is linearly related soil clay content, bounded to be between
+        0.7 and 0.85.
+
+        Parameters:
+            clay (numpy.ndarray): input, soil clay fraction
+
+        Returns:
+            gret_1, fraction of consumed N that is returned in feces and urine
+
+        """
+        valid_mask = (clay != clay_nodata)
+        gret_1 = numpy.empty(clay.shape, dtype=numpy.float32)
+        gret_1[:] = _IC_NODATA
+        gret_1[valid_mask] = numpy.clip(
+            ((0.85 - 0.7) / 0.3 * (clay[valid_mask] - 0.3) + 0.85), 0.7, 0.85)
+        return gret_1
+
+    def calc_weighted_c_returned(shremc, sdremc, gfcret, pft_cover):
+        """Calculate carbon returned in feces from grazing of one pft.
+
+        The fraction of carbon removed by herbivores that is returned in their
+        feces is given by the parameter gfcret. Because carbon returned in
+        feces is partitioned into soil structural and metabolic pools, carbon
+        returned from grazing of one plant functional type (pft) must be
+        weighted by the percent cover of the pft.
+
+        Parameters:
+            shremc (numpy.ndarray): derived, C in aboveground live biomass
+                removed by grazing
+            sdremc (numpy.ndarray): derived, C in standing dead biomass removed
+                by grazing
+            gfcret (numpy.ndarray): parameter, fraction of consumed C that is
+                returned in feces
+            pft_cover (numpy.ndarray): input, percent cover of this plant
+                functional type
+
+        Returns:
+            weighted_c_returned, carbon returned from grazing of this plant
+                functional type
+
+        """
+        valid_mask = (
+            (shremc != _TARGET_NODATA) &
+            (sdremc != _TARGET_NODATA) &
+            (gfcret != _IC_NODATA) &
+            (~numpy.isclose(pft_cover, pft_nodata)))
+        weighted_c_returned = numpy.empty(shremc.shape, dtype=numpy.float32)
+        weighted_c_returned[:] = _TARGET_NODATA
+        weighted_c_returned[valid_mask] = (
+            (gfcret[valid_mask] * (shremc[valid_mask] + sdremc[valid_mask]) *
+                pft_cover[valid_mask]))
+        return weighted_c_returned
+
+    def calc_weighted_iel_returned_feces(
+            shreme, sdreme, gret, fecf, pft_cover):
+        """Calculate N or P returned in feces from grazing of one pft.
+
+        The fraction of N or P removed by herbivores that is returned in their
+        feces is calculated from the parameters gret_<iel> and fecf_<iel>.
+        Nutrients returned in feces from grazing of one functional type (pft)
+        are partitioned into soil structural and metabolic pools, so they
+        must be weighted by the percent cover of the pft.
+
+        Parameters:
+            shreme (numpy.ndarray): derived, iel in aboveground live biomass
+                removed by grazing
+            sdreme (numpy.ndarray): derived, iel in standing dead biomass
+                removed by grazing
+            gret (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned
+            fecf (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned in feces
+            pft_cover (numpy.ndarray): input, percent cover of this plant
+                functional type
+
+        Returns:
+            weighted_iel_returned_feces, N or P returned in feces
+
+        """
+        valid_mask = (
+            (shreme != _TARGET_NODATA) &
+            (sdreme != _TARGET_NODATA) &
+            (gret != _IC_NODATA) &
+            (fecf != _IC_NODATA) &
+            (~numpy.isclose(pft_cover, pft_nodata)))
+        weighted_iel_returned_feces = numpy.empty(
+            shreme.shape, dtype=numpy.float32)
+        weighted_iel_returned_feces[:] = _TARGET_NODATA
+        weighted_iel_returned_feces[valid_mask] = (
+            fecf[valid_mask] * gret[valid_mask] *
+            (shreme[valid_mask] + sdreme[valid_mask]) * pft_cover[valid_mask])
+        return weighted_iel_returned_feces
+
+    def calc_weighted_iel_returned_urine(
+            shreme, sdreme, gret, fecf, pft_cover):
+        """Calculate N or P returned in urine from grazing of one pft.
+
+        While N and P returned by herbivores in feces is partitioned into
+        soil structural and metabolic pools, N and P returned in urine flows
+        directly to the surface mineral pool. The amount of N and P returned in
+        urine is determined according to the complement of the parameter fecf,
+        the fraction of N and P returned in feces.
+
+        Parameters:
+            shreme (numpy.ndarray): derived, iel in aboveground live biomass
+                removed by grazing
+            sdreme (numpy.ndarray): derived, iel in standing dead biomass
+                removed by grazing
+            gret (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned
+            fecf (numpy.ndarray): parameter, fraction of consumed iel that is
+                returned in feces
+            pft_cover (numpy.ndarray): input, percent cover of this plant
+                functional type
+
+        Returns:
+            weighted_iel_returned_urine, N or P returned in urine
+
+        """
+        valid_mask = (~numpy.isclose(pft_cover, pft_nodata))
+        consumed_mask = (
+            (shreme != _TARGET_NODATA) &
+            (sdreme != _TARGET_NODATA) &
+            (gret != _IC_NODATA) &
+            (fecf != _IC_NODATA) &
+            valid_mask)
+        weighted_iel_returned_urine = numpy.empty(
+            shreme.shape, dtype=numpy.float32)
+        weighted_iel_returned_urine[:] = _TARGET_NODATA
+        weighted_iel_returned_urine[valid_mask] = 0.
+        weighted_iel_returned_urine[consumed_mask] = (
+            (1. - fecf[consumed_mask]) * gret[consumed_mask] *
+            (shreme[consumed_mask] + sdreme[consumed_mask]) *
+            pft_cover[consumed_mask])
+        return weighted_iel_returned_urine
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'd_statv_temp', 'shremc', 'sdremc', 'shreme', 'sdreme',
+            'weighted_iel_urine', 'sum_weighted_C_returned',
+            'sum_weighted_N_returned', 'sum_weighted_P_returned']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for val in [
+            'weighted_C_feces', 'weighted_iel_feces_1',
+            'weighted_iel_feces_2']:
+        for pft_i in pft_id_set:
+            temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+
+    param_val_dict = {}
+    param_val_dict['gret_1'] = os.path.join(temp_dir, 'gret_1.tif')
+    for val in ['gfcret', 'gret_2', 'fecf_1', 'fecf_2', 'feclig']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        animal_to_val = dict(
+            [(animal_code, float(table[val])) for
+                (animal_code, table) in animal_trait_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['animal_index'], 1), animal_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+
+    clay_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['clay'])['nodata'][0]
+    pygeoprocessing.raster_calculator(
+        [(aligned_inputs['clay'], 1)],
+        calc_gret_1, param_val_dict['gret_1'], gdal.GDT_Float32, _IC_NODATA)
+
+    weighted_C_returned_list = []
+    weighted_N_returned_list = []
+    weighted_P_returned_list = []
+    for pft_i in pft_id_set:
+        # calculate C consumed
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                month_reg['flgrem_{}'.format(pft_i)]]],
+            calc_c_removed, temp_val_dict['shremc'], gdal.GDT_Float32,
+            _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['stdedc_{}_path'.format(pft_i)],
+                month_reg['fdgrem_{}'.format(pft_i)]]],
+            calc_c_removed, temp_val_dict['sdremc'], gdal.GDT_Float32,
+            _TARGET_NODATA)
+
+        # calculate C returned in feces
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['shremc'], temp_val_dict['sdremc'],
+                param_val_dict['gfcret'],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
+            calc_weighted_c_returned,
+            temp_val_dict['weighted_C_feces_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        weighted_C_returned_list.append(
+            temp_val_dict['weighted_C_feces_{}'.format(pft_i)])
+
+        # calculate N and P consumed
+        for iel in [1, 2]:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['shremc'],
+                    sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                    sv_reg['aglivc_{}_path'.format(pft_i)]]],
+                calc_iel_removed, temp_val_dict['shreme'], gdal.GDT_Float32,
+                _TARGET_NODATA)
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['sdremc'],
+                    sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                    sv_reg['stdedc_{}_path'.format(pft_i)]]],
+                calc_iel_removed, temp_val_dict['sdreme'], gdal.GDT_Float32,
+                _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['shreme'], _TARGET_NODATA,
+                sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            shutil.copyfile(
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)],
+                temp_val_dict['d_statv_temp'])
+            raster_difference(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['sdreme'], _TARGET_NODATA,
+                sv_reg['stdede_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+
+            # calculate N or P returned in feces
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['shreme'], temp_val_dict['sdreme'],
+                    param_val_dict['gret_{}'.format(iel)],
+                    param_val_dict['fecf_{}'.format(iel)],
+                    aligned_inputs['pft_{}'.format(pft_i)]]],
+                calc_weighted_iel_returned_feces,
+                temp_val_dict['weighted_iel_feces_{}_{}'.format(iel, pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            if iel == 1:
+                weighted_N_returned_list.append(
+                    temp_val_dict['weighted_iel_feces_{}_{}'.format(
+                        iel, pft_i)])
+            else:
+                weighted_P_returned_list.append(
+                    temp_val_dict['weighted_iel_feces_{}_{}'.format(
+                        iel, pft_i)])
+
+            # calculate N or P returned in urine
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    temp_val_dict['shreme'], temp_val_dict['sdreme'],
+                    param_val_dict['gret_{}'.format(iel)],
+                    param_val_dict['fecf_{}'.format(iel)],
+                    aligned_inputs['pft_{}'.format(pft_i)]]],
+                calc_weighted_iel_returned_urine,
+                temp_val_dict['weighted_iel_urine'],
+                gdal.GDT_Float32, _TARGET_NODATA)
+            shutil.copyfile(
+                sv_reg['minerl_1_{}_path'.format(iel)],
+                temp_val_dict['d_statv_temp'])
+            raster_sum(
+                temp_val_dict['d_statv_temp'], _SV_NODATA,
+                temp_val_dict['weighted_iel_urine'], _TARGET_NODATA,
+                sv_reg['minerl_1_{}_path'.format(iel)], _SV_NODATA)
+
+        # remove consumed biomass from C state variables
+        shutil.copyfile(
+            sv_reg['aglivc_{}_path'.format(pft_i)],
+            temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['shremc'], _TARGET_NODATA,
+            sv_reg['aglivc_{}_path'.format(pft_i)], _SV_NODATA)
+        shutil.copyfile(
+            sv_reg['stdedc_{}_path'.format(pft_i)],
+            temp_val_dict['d_statv_temp'])
+        raster_difference(
+            temp_val_dict['d_statv_temp'], _SV_NODATA,
+            temp_val_dict['sdremc'], _TARGET_NODATA,
+            sv_reg['stdedc_{}_path'.format(pft_i)], _SV_NODATA)
+
+    raster_list_sum(
+        weighted_C_returned_list, _TARGET_NODATA,
+        temp_val_dict['sum_weighted_C_returned'], _TARGET_NODATA,
+        nodata_remove=True)
+    raster_list_sum(
+        weighted_N_returned_list, _TARGET_NODATA,
+        temp_val_dict['sum_weighted_N_returned'], _TARGET_NODATA,
+        nodata_remove=True)
+    raster_list_sum(
+        weighted_P_returned_list, _TARGET_NODATA,
+        temp_val_dict['sum_weighted_P_returned'], _TARGET_NODATA,
+        nodata_remove=True)
+    partit(
+        temp_val_dict['sum_weighted_C_returned'],
+        temp_val_dict['sum_weighted_N_returned'],
+        temp_val_dict['sum_weighted_P_returned'],
+        param_val_dict['feclig'], aligned_inputs['site_index'],
+        site_param_table, 1, sv_reg)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
