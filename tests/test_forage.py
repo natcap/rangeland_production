@@ -919,7 +919,8 @@ def nutrient_uptake_point(
 
     Returns:
         dictionary of values indexed by the following keys:
-            aglive_iel: modified iel in aboveground live biomass
+            delta_aglive_iel: change in iel in aboveground live biomass
+            aglive_iel: ending iel in aboveground live biomass
             bglive_iel: modified iel in belowground live biomass
             storage_iel: modified iel in crop storage
             minerl_1_iel: modified iel in soil layer 1
@@ -931,6 +932,7 @@ def nutrient_uptake_point(
             minerl_7_iel: modified iel in soil layer 7
 
     """
+    delta_aglive_iel = 0
     eprodl_iel = eup_above_iel + eup_below_iel
     if eprodl_iel < storage_iel:
         uptake_storage = eprodl_iel
@@ -950,7 +952,7 @@ def nutrient_uptake_point(
         storage_iel = storage_iel - uptake_storage
         uptake_storage_above = uptake_storage * (eup_above_iel / eprodl_iel)
         uptake_storage_below = uptake_storage * (eup_below_iel / eprodl_iel)
-        aglive_iel = aglive_iel + uptake_storage_above
+        delta_aglive_iel = delta_aglive_iel + uptake_storage_above
         bglive_iel = bglive_iel + uptake_storage_below
 
     # uptake from each soil layer in proportion to its contribution to availm
@@ -972,16 +974,17 @@ def nutrient_uptake_point(
                 minerl_uptake_lyr * (eup_above_iel / eprodl_iel))
             uptake_minerl_lyr_below = (
                 minerl_uptake_lyr * (eup_below_iel / eprodl_iel))
-            aglive_iel = aglive_iel + uptake_minerl_lyr_above
+            delta_aglive_iel = delta_aglive_iel + uptake_minerl_lyr_above
             bglive_iel = bglive_iel + uptake_minerl_lyr_below
 
     # uptake from N fixation
     if (iel == 1) & (plantNfix > 0):
         uptake_Nfix_above = uptake_Nfix * (eup_above_iel / eprodl_iel)
         uptake_Nfix_below = uptake_Nfix * (eup_below_iel / eprodl_iel)
-        aglive_iel = aglive_iel + uptake_Nfix_above
+        delta_aglive_iel = delta_aglive_iel + uptake_Nfix_above
         bglive_iel = bglive_iel + uptake_Nfix_below
     result_dict = {
+        'delta_aglive_iel': delta_aglive_iel,
         'aglive_iel': aglive_iel,
         'bglive_iel': bglive_iel,
         'storage_iel': storage_iel,
@@ -8183,8 +8186,7 @@ class foragetests(unittest.TestCase):
             'minerl_6_iel': 22.,
             'minerl_7_iel': 18.,
         }
-
-        aglive_iel_known = 116.963350513545
+        delta_aglive_iel_known = 36.163350513545
         bglive_iel_known = 148.636649486455
         storage_iel_known = 0.
         minerl_1_iel_known = 9.55513725490196
@@ -8202,7 +8204,9 @@ class foragetests(unittest.TestCase):
 
         # test point results against known values calculated by hand
         self.assertAlmostEqual(
-            point_results['aglive_iel'], aglive_iel_known)
+            point_results['delta_aglive_iel'], delta_aglive_iel_known)
+        self.assertAlmostEqual(
+            point_results['aglive_iel'], aglive_iel)
         self.assertAlmostEqual(
             point_results['bglive_iel'], bglive_iel_known)
         self.assertAlmostEqual(
@@ -8232,6 +8236,8 @@ class foragetests(unittest.TestCase):
         eavail_path = os.path.join(self.workspace_dir, 'eavail.tif')
         pslsrb_path = os.path.join(self.workspace_dir, 'pslsrb.tif')
         sorpmx_path = os.path.join(self.workspace_dir, 'sorpmx.tif')
+        delta_aglive_iel_path = os.path.join(
+            self.workspace_dir, 'delta_aglive.tif')
 
         sv_reg = {
             'aglive_{}_{}_path'.format(iel, pft_i): os.path.join(
@@ -8277,7 +8283,11 @@ class foragetests(unittest.TestCase):
         forage.nutrient_uptake(
             iel, nlay, percent_cover_path, eup_above_iel_path,
             eup_below_iel_path, plantNfix_path, availm_path, eavail_path,
-            pft_i, pslsrb_path, sorpmx_path, sv_reg)
+            pft_i, pslsrb_path, sorpmx_path, sv_reg, delta_aglive_iel_path)
+        self.assert_all_values_in_raster_within_range(
+            delta_aglive_iel_path,
+            point_results['delta_aglive_iel'] - tolerance,
+            point_results['delta_aglive_iel'] + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
             point_results['aglive_iel'] - tolerance,
@@ -8414,12 +8424,12 @@ class foragetests(unittest.TestCase):
     def test_c_uptake_aboveground(self):
         """Test `c_uptake_aboveground`.
 
-        Use the function `c_uptake_aboveground` to add new biomass production
-        to C in aboveground live biomass.  Test that the function matches
-        values calcualted by hand.
+        Use the function `c_uptake_aboveground` to calculate the change in C in
+        aboveground live biomass.  Test that the function matches values
+        calculated by hand.
 
         Raises:
-            AssertionError if`c_uptake_aboveground` does not match values
+            AssertionError if `c_uptake_aboveground` does not match values
                 calculated by hand
 
         Returns:
@@ -8431,31 +8441,26 @@ class foragetests(unittest.TestCase):
         tolerance = 0.00001
 
         # known inputs
-        aglivc = 100.3
         cprodl = 20.2
         rtsh = 0.6
-        modified_aglivc = 112.925
+        delta_aglivc = 12.625
 
         # array-based inputs
-        aglivc_ar = numpy.full(array_shape, aglivc)
         cprodl_ar = numpy.full(array_shape, cprodl)
         rtsh_ar = numpy.full(array_shape, rtsh)
 
-        modified_aglivc_ar = forage.c_uptake_aboveground(
-            aglivc_ar, cprodl_ar, rtsh_ar)
+        delta_aglivc_ar = forage.c_uptake_aboveground(cprodl_ar, rtsh_ar)
         self.assert_all_values_in_array_within_range(
-            modified_aglivc_ar, modified_aglivc - tolerance,
-            modified_aglivc + tolerance, _SV_NODATA)
+            delta_aglivc_ar, delta_aglivc - tolerance,
+            delta_aglivc + tolerance, _SV_NODATA)
 
-        insert_nodata_values_into_array(aglivc_ar, _SV_NODATA)
         insert_nodata_values_into_array(cprodl_ar, _TARGET_NODATA)
         insert_nodata_values_into_array(rtsh_ar, _TARGET_NODATA)
 
-        modified_aglivc_ar = forage.c_uptake_aboveground(
-            aglivc_ar, cprodl_ar, rtsh_ar)
+        delta_aglivc_ar = forage.c_uptake_aboveground(cprodl_ar, rtsh_ar)
         self.assert_all_values_in_array_within_range(
-            modified_aglivc_ar, modified_aglivc - tolerance,
-            modified_aglivc + tolerance, _SV_NODATA)
+            delta_aglivc_ar, delta_aglivc - tolerance,
+            delta_aglivc + tolerance, _SV_NODATA)
 
     def test_new_growth(self):
         """Test `_new_growth`.
@@ -8644,11 +8649,20 @@ class foragetests(unittest.TestCase):
         pft_id_set = set([1, 2])
         current_month = 3
 
-        forage._new_growth(
+        delta_agliv_dict = forage._new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
             month_reg, current_month, sv_reg)
 
         # no growth for pft 1
+        self.assert_all_values_in_raster_within_range(
+            delta_agliv_dict['delta_aglivc_1'], 0 - tolerance,
+            0 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            delta_agliv_dict['delta_aglive_1_1'], 0 - tolerance,
+            0 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            delta_agliv_dict['delta_aglive_2_1'], 0 - tolerance,
+            0 + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglivc_1_path'], initial_aglivc - tolerance,
             initial_aglivc + tolerance, _SV_NODATA)
@@ -8670,17 +8684,26 @@ class foragetests(unittest.TestCase):
 
         # growth expected for pft 2
         self.assert_all_values_in_raster_within_range(
-            sv_reg['aglivc_2_path'], initial_aglivc + 10,
-            initial_aglivc + 100, _SV_NODATA)
+            delta_agliv_dict['delta_aglivc_2'], 10 - tolerance,
+            100 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            delta_agliv_dict['delta_aglive_1_2'], 2 - tolerance,
+            20 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            delta_agliv_dict['delta_aglive_2_2'], 2 - tolerance,
+            20 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_2_path'], initial_aglivc - tolerance,
+            initial_aglivc + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             sv_reg['bglivc_2_path'], initial_bglivc + 10,
             initial_bglivc + 100, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
-            sv_reg['aglive_1_2_path'], initial_aglive_1 + 0.5,
-            initial_aglive_1 + 10, _SV_NODATA)
+            sv_reg['aglive_1_2_path'], initial_aglive_1 - tolerance,
+            initial_aglive_1 + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
-            sv_reg['aglive_2_2_path'], initial_aglive_2 + 0.5,
-            initial_aglive_2 + 10, _SV_NODATA)
+            sv_reg['aglive_2_2_path'], initial_aglive_2 - tolerance,
+            initial_aglive_2 + tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
             sv_reg['crpstg_1_2_path'], -tolerance, tolerance, _SV_NODATA)
         self.assert_all_values_in_raster_within_range(
