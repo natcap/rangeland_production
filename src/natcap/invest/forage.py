@@ -717,6 +717,8 @@ def execute(args):
             aligned_inputs, site_param_table, month_reg, animal_trait_table,
             pft_id_set, sv_reg)
 
+        _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg)
+
         _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
 
 
@@ -2078,7 +2080,7 @@ def calc_latitude(template_raster, latitude_raster_path):
 
 
 def _calc_daylength(template_raster, month, daylength_path):
-    """Calculate estimated hours of daylength. Daylen.c
+    """Calculate estimated hours of daylength. Daylen.c.
 
     Parameters:
         template_raster (string): path to a raster in geographic coordinates
@@ -9837,11 +9839,54 @@ def _new_growth(
                 pygeoprocessing.new_raster_from_base(
                     sv_reg['aglivc_{}_path'.format(pft_i)],
                     delta_agliv_dict['{}_{}'.format(val, pft_i)],
-                    gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0])
+                    gdal.GDT_Float32, [_SV_NODATA], fill_value_list=[0])
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
     return delta_agliv_dict
+
+
+def _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg):
+    """Update aboveground live biomass with new growth.
+
+    Use the delta state variable quantities in `delta_agliv_dict` to update
+    state variables in `sv_reg` with new growth.
+
+    Parameters:
+        delta_agliv_dict (dict): map of key, path pairs indicating paths to
+            change in aboveground live state variables for the current month
+        pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+
+    Side effects:
+        modifies the rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+
+    Returns:
+        None
+
+    """
+    with tempfile.NamedTemporaryFile(
+            prefix='statv_temp', delete=False,
+            dir=PROCESSING_DIR) as statv_temp_file:
+        statv_temp_path = statv_temp_file.name
+    for pft_i in pft_id_set:
+        for sv in ['aglivc', 'aglive_1', 'aglive_2']:
+            shutil.copyfile(
+                sv_reg['{}_{}_path'.format(sv, pft_i)], statv_temp_path)
+            raster_sum(
+                delta_agliv_dict['delta_{}_{}'.format(sv, pft_i)], _SV_NODATA,
+                statv_temp_path, _SV_NODATA,
+                sv_reg['{}_{}_path'.format(sv, pft_i)], _SV_NODATA)
+
+    # clean up
+    os.remove(statv_temp_path)
+    delta_agliv_dir = os.path.dirname(
+        delta_agliv_dict[delta_agliv_dict.keys()[0]])
+    shutil.rmtree(delta_agliv_dir)
 
 
 def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):

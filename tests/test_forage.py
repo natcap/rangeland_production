@@ -9325,3 +9325,115 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             sv_reg['strlig_1_path'], strlig_1_after - tolerance,
             strlig_1_after + tolerance, _SV_NODATA)
+
+    def test_apply_new_growth(self):
+        """Test `_apply_new_growth`.
+
+        Use the function `_apply_new_growth` to update aboveground live biomass
+        with new growth. Test that state variables are updated to values that
+        match values calculated by hand.
+
+        Raises:
+            AssertionError if `_apply_new_growth` does not match values
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known values
+        pft_id_set = [1]
+        initial_aglivc = 25.72
+        initial_aglive_1 = 0.41
+        initial_aglive_2 = 0.32
+
+        delta_aglivc = 3.28
+        delta_aglive_1 = 0.002
+        delta_aglive_2 = 0.44
+
+        mod_aglivc = initial_aglivc + delta_aglivc
+        mod_aglive_1 = initial_aglive_1 + delta_aglive_1
+        mod_aglive_2 = initial_aglive_2 + delta_aglive_2
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc_1.tif'),
+            'aglive_1_1_path': os.path.join(
+                self.workspace_dir, 'aglive_1_1.tif'),
+            'aglive_2_1_path': os.path.join(
+                self.workspace_dir, 'aglive_2_1.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], initial_aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], initial_aglive_1)
+        create_constant_raster(sv_reg['aglive_2_1_path'], initial_aglive_2)
+
+        delta_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
+        delta_agliv_dict = {
+            'delta_aglivc_1': os.path.join(
+                delta_sv_dir, 'delta_aglivc.tif'),
+            'delta_aglive_1_1': os.path.join(
+                delta_sv_dir, 'delta_aglive_1.tif'),
+            'delta_aglive_2_1': os.path.join(
+                delta_sv_dir, 'delta_aglive_2.tif'),
+        }
+        create_constant_raster(
+            delta_agliv_dict['delta_aglivc_1'], delta_aglivc)
+        create_constant_raster(
+            delta_agliv_dict['delta_aglive_1_1'], delta_aglive_1)
+        create_constant_raster(
+            delta_agliv_dict['delta_aglive_2_1'], delta_aglive_2)
+
+        forage._apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], mod_aglivc - tolerance,
+            mod_aglivc + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], mod_aglive_1 - tolerance,
+            mod_aglive_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], mod_aglive_2 - tolerance,
+            mod_aglive_2 + tolerance, _SV_NODATA)
+
+        create_constant_raster(sv_reg['aglivc_1_path'], initial_aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], initial_aglive_1)
+        create_constant_raster(sv_reg['aglive_2_1_path'], initial_aglive_2)
+
+        delta_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
+        delta_agliv_dict = {
+            'delta_aglivc_1': os.path.join(
+                delta_sv_dir, 'delta_aglivc.tif'),
+            'delta_aglive_1_1': os.path.join(
+                delta_sv_dir, 'delta_aglive_1.tif'),
+            'delta_aglive_2_1': os.path.join(
+                delta_sv_dir, 'delta_aglive_2.tif'),
+        }
+        create_constant_raster(
+            delta_agliv_dict['delta_aglivc_1'], delta_aglivc)
+        create_constant_raster(
+            delta_agliv_dict['delta_aglive_1_1'], delta_aglive_1)
+        create_constant_raster(
+            delta_agliv_dict['delta_aglive_2_1'], delta_aglive_2)
+
+        insert_nodata_values_into_raster(sv_reg['aglivc_1_path'], _SV_NODATA)
+        insert_nodata_values_into_raster(sv_reg['aglive_1_1_path'], _SV_NODATA)
+        insert_nodata_values_into_raster(sv_reg['aglive_2_1_path'], _SV_NODATA)
+        insert_nodata_values_into_raster(
+            delta_agliv_dict['delta_aglivc_1'], _SV_NODATA)
+        insert_nodata_values_into_raster(
+            delta_agliv_dict['delta_aglive_1_1'], _SV_NODATA)
+        insert_nodata_values_into_raster(
+            delta_agliv_dict['delta_aglive_2_1'], _SV_NODATA)
+
+        forage._apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglivc_1_path'], mod_aglivc - tolerance,
+            mod_aglivc + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_1_1_path'], mod_aglive_1 - tolerance,
+            mod_aglive_1 + tolerance, _SV_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            sv_reg['aglive_2_1_path'], mod_aglive_2 - tolerance,
+            mod_aglive_2 + tolerance, _SV_NODATA)
