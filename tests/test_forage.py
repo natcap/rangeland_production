@@ -200,8 +200,7 @@ def calc_raster_difference_stats(
     raster1_nodata = pygeoprocessing.get_raster_info(raster1_path)['nodata'][0]
     raster2_nodata = pygeoprocessing.get_raster_info(raster2_path)['nodata'][0]
 
-    with tempfile.NamedTemporaryFile(
-            prefix='raster_diff', delete=False) as target_file:
+    with tempfile.NamedTemporaryFile(prefix='raster_diff') as target_file:
         target_path = target_file.name
 
     pygeoprocessing.raster_calculator(
@@ -211,7 +210,6 @@ def calc_raster_difference_stats(
 
     zonal_stats = pygeoprocessing.zonal_statistics(
         (target_path, 1), aggregate_vector_path)
-    os.remove(target_path)
     return zonal_stats
 
 

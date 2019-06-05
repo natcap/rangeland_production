@@ -6055,12 +6055,10 @@ def respiration(
 
     """
     with tempfile.NamedTemporaryFile(
-            prefix='operand_temp', delete=False,
-            dir=PROCESSING_DIR) as operand_temp_file:
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
         operand_temp_path = operand_temp_file.name
     with tempfile.NamedTemporaryFile(
-            prefix='d_statv_temp', delete=False,
-            dir=PROCESSING_DIR) as d_statv_temp_file:
+            prefix='d_statv_temp', dir=PROCESSING_DIR) as d_statv_temp_file:
         d_statv_temp_path = d_statv_temp_file.name
 
     pygeoprocessing.raster_calculator(
@@ -6087,10 +6085,6 @@ def respiration(
                 operand_temp_path]],
             update_gross_mineralization, gromin_1_path,
             gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up
-    os.remove(operand_temp_path)
-    os.remove(d_statv_temp_path)
 
 
 def nutrient_flow(
@@ -6134,12 +6128,10 @@ def nutrient_flow(
 
     """
     with tempfile.NamedTemporaryFile(
-            prefix='operand_temp', delete=False,
-            dir=PROCESSING_DIR) as operand_temp_file:
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
         operand_temp_path = operand_temp_file.name
     with tempfile.NamedTemporaryFile(
-            prefix='d_statv_temp', delete=False,
-            dir=PROCESSING_DIR) as d_statv_temp_file:
+            prefix='d_statv_temp', dir=PROCESSING_DIR) as d_statv_temp_file:
         d_statv_temp_path = d_statv_temp_file.name
 
     pygeoprocessing.raster_calculator(
@@ -6181,10 +6173,6 @@ def nutrient_flow(
                 d_statv_temp_path, operand_temp_path]],
             update_gross_mineralization, gromin_path,
             gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up
-    os.remove(operand_temp_path)
-    os.remove(d_statv_temp_path)
 
 
 def calc_c_leach(amov_2, tcflow, omlech_3, orglch):
@@ -6279,12 +6267,10 @@ def remove_leached_iel(
         return orgflow
 
     with tempfile.NamedTemporaryFile(
-            prefix='operand_temp', delete=False,
-            dir=PROCESSING_DIR) as operand_temp_file:
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
         operand_temp_path = operand_temp_file.name
     with tempfile.NamedTemporaryFile(
-            prefix='d_statv_temp', delete=False,
-            dir=PROCESSING_DIR) as d_statv_temp_file:
+            prefix='d_statv_temp', dir=PROCESSING_DIR) as d_statv_temp_file:
         d_statv_temp_path = d_statv_temp_file.name
 
     if iel == 1:
@@ -6306,10 +6292,6 @@ def remove_leached_iel(
         d_statv_temp_path, _IC_NODATA,
         operand_temp_path, _IC_NODATA,
         d_som1e_2_iel_path, _IC_NODATA)
-
-    # clean up
-    os.remove(operand_temp_path)
-    os.remove(d_statv_temp_path)
 
 
 def calc_pflow(pstatv, rate_param, defac):
@@ -6439,8 +6421,7 @@ def update_aminrl(
         return aminrl_2
 
     with tempfile.NamedTemporaryFile(
-            prefix='aminrl_prev', delete=False,
-            dir=PROCESSING_DIR) as aminrl_prev_file:
+            prefix='aminrl_prev', dir=PROCESSING_DIR) as aminrl_prev_file:
         aminrl_prev_path = aminrl_prev_file.name
 
     shutil.copyfile(aminrl_1_path, aminrl_prev_path)
@@ -6453,9 +6434,6 @@ def update_aminrl(
         [(path, 1) for path in [
             aminrl_prev_path, minerl_1_2_path, fsol_path]],
         update_aminrl_2, aminrl_2_path, gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up
-    os.remove(aminrl_prev_path)
 
 
 def sum_biomass(
@@ -9870,8 +9848,7 @@ def _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg):
 
     """
     with tempfile.NamedTemporaryFile(
-            prefix='statv_temp', delete=False,
-            dir=PROCESSING_DIR) as statv_temp_file:
+            prefix='statv_temp', dir=PROCESSING_DIR) as statv_temp_file:
         statv_temp_path = statv_temp_file.name
     for pft_i in pft_id_set:
         for sv in ['aglivc', 'aglive_1', 'aglive_2']:
@@ -9883,7 +9860,6 @@ def _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg):
                 sv_reg['{}_{}_path'.format(sv, pft_i)], _SV_NODATA)
 
     # clean up
-    os.remove(statv_temp_path)
     delta_agliv_dir = os.path.dirname(
         delta_agliv_dict[delta_agliv_dict.keys()[0]])
     shutil.rmtree(delta_agliv_dir)
