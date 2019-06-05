@@ -709,15 +709,17 @@ def execute(args):
             pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
             sv_reg)
 
-        _new_growth(
+        delta_agliv_dict = _new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
             month_reg, current_month, sv_reg)
-
-        _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
 
         _grazing(
             aligned_inputs, site_param_table, month_reg, animal_trait_table,
             pft_id_set, sv_reg)
+
+        _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg)
+
+        _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
 
 
 def raster_multiplication(
@@ -2078,7 +2080,7 @@ def calc_latitude(template_raster, latitude_raster_path):
 
 
 def _calc_daylength(template_raster, month, daylength_path):
-    """Calculate estimated hours of daylength. Daylen.c
+    """Calculate estimated hours of daylength. Daylen.c.
 
     Parameters:
         template_raster (string): path to a raster in geographic coordinates
@@ -6053,12 +6055,10 @@ def respiration(
 
     """
     with tempfile.NamedTemporaryFile(
-            prefix='operand_temp', delete=False,
-            dir=PROCESSING_DIR) as operand_temp_file:
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
         operand_temp_path = operand_temp_file.name
     with tempfile.NamedTemporaryFile(
-            prefix='d_statv_temp', delete=False,
-            dir=PROCESSING_DIR) as d_statv_temp_file:
+            prefix='d_statv_temp', dir=PROCESSING_DIR) as d_statv_temp_file:
         d_statv_temp_path = d_statv_temp_file.name
 
     pygeoprocessing.raster_calculator(
@@ -6085,10 +6085,6 @@ def respiration(
                 operand_temp_path]],
             update_gross_mineralization, gromin_1_path,
             gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up
-    os.remove(operand_temp_path)
-    os.remove(d_statv_temp_path)
 
 
 def nutrient_flow(
@@ -6132,12 +6128,10 @@ def nutrient_flow(
 
     """
     with tempfile.NamedTemporaryFile(
-            prefix='operand_temp', delete=False,
-            dir=PROCESSING_DIR) as operand_temp_file:
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
         operand_temp_path = operand_temp_file.name
     with tempfile.NamedTemporaryFile(
-            prefix='d_statv_temp', delete=False,
-            dir=PROCESSING_DIR) as d_statv_temp_file:
+            prefix='d_statv_temp', dir=PROCESSING_DIR) as d_statv_temp_file:
         d_statv_temp_path = d_statv_temp_file.name
 
     pygeoprocessing.raster_calculator(
@@ -6179,10 +6173,6 @@ def nutrient_flow(
                 d_statv_temp_path, operand_temp_path]],
             update_gross_mineralization, gromin_path,
             gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up
-    os.remove(operand_temp_path)
-    os.remove(d_statv_temp_path)
 
 
 def calc_c_leach(amov_2, tcflow, omlech_3, orglch):
@@ -6277,12 +6267,10 @@ def remove_leached_iel(
         return orgflow
 
     with tempfile.NamedTemporaryFile(
-            prefix='operand_temp', delete=False,
-            dir=PROCESSING_DIR) as operand_temp_file:
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
         operand_temp_path = operand_temp_file.name
     with tempfile.NamedTemporaryFile(
-            prefix='d_statv_temp', delete=False,
-            dir=PROCESSING_DIR) as d_statv_temp_file:
+            prefix='d_statv_temp', dir=PROCESSING_DIR) as d_statv_temp_file:
         d_statv_temp_path = d_statv_temp_file.name
 
     if iel == 1:
@@ -6304,10 +6292,6 @@ def remove_leached_iel(
         d_statv_temp_path, _IC_NODATA,
         operand_temp_path, _IC_NODATA,
         d_som1e_2_iel_path, _IC_NODATA)
-
-    # clean up
-    os.remove(operand_temp_path)
-    os.remove(d_statv_temp_path)
 
 
 def calc_pflow(pstatv, rate_param, defac):
@@ -6437,8 +6421,7 @@ def update_aminrl(
         return aminrl_2
 
     with tempfile.NamedTemporaryFile(
-            prefix='aminrl_prev', delete=False,
-            dir=PROCESSING_DIR) as aminrl_prev_file:
+            prefix='aminrl_prev', dir=PROCESSING_DIR) as aminrl_prev_file:
         aminrl_prev_path = aminrl_prev_file.name
 
     shutil.copyfile(aminrl_1_path, aminrl_prev_path)
@@ -6451,9 +6434,6 @@ def update_aminrl(
         [(path, 1) for path in [
             aminrl_prev_path, minerl_1_2_path, fsol_path]],
         update_aminrl_2, aminrl_2_path, gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up
-    os.remove(aminrl_prev_path)
 
 
 def sum_biomass(
@@ -8871,39 +8851,31 @@ def restrict_potential_growth(potenc, availm_1, availm_2, snfxmx_1):
     return potenc_lim_minerl
 
 
-def c_uptake_aboveground(aglivc, cprodl, rtsh):
-    """Do uptake of C from atmosphere to aboveground live biomass.
+def c_uptake_aboveground(cprodl, rtsh):
+    """Calculate uptake of C from atmosphere to aboveground live biomass.
 
     Given total C predicted to flow into new growth and the root:shoot ratio
-    of new growth, perform the flow of C from the atmosphere into aboveground
+    of new growth, calculate the flow of C from the atmosphere into aboveground
     live biomass. Lines 137-146 Growth.f
 
     Parameters:
-        aglivc (numpy.ndarray): state variable, existing C in aboveground live
-            biomass
         cprodl (numpy.ndarray): derived, c production limited by nutrient
             availability
         rtsh (numpy.ndarray): derived, root/shoot ratio of new production
 
     Returns:
-        modified_aglivc, modified C in aboveground live biomass
+        delta_aglivc, change in C in aboveground live biomass
 
     """
     valid_mask = (
-        (~numpy.isclose(aglivc, _SV_NODATA)) &
         (cprodl != _TARGET_NODATA) &
         (rtsh != _TARGET_NODATA))
 
-    c_prod_aboveground = numpy.empty(aglivc.shape, dtype=numpy.float32)
-    c_prod_aboveground[:] = _TARGET_NODATA
-    c_prod_aboveground[valid_mask] = (
+    delta_aglivc = numpy.empty(cprodl.shape, dtype=numpy.float32)
+    delta_aglivc[:] = _TARGET_NODATA
+    delta_aglivc[valid_mask] = (
         cprodl[valid_mask] * (1. - rtsh[valid_mask] / (rtsh[valid_mask] + 1.)))
-
-    modified_aglivc = numpy.empty(aglivc.shape, dtype=numpy.float32)
-    modified_aglivc[:] = _SV_NODATA
-    modified_aglivc[valid_mask] = (
-        aglivc[valid_mask] + c_prod_aboveground[valid_mask])
-    return modified_aglivc
+    return delta_aglivc
 
 
 def c_uptake_belowground(bglivc, cprodl, rtsh):
@@ -9118,14 +9090,16 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
 def nutrient_uptake(
         iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
         plantNfix_path, availm_path, eavail_path, pft_i, pslsrb_path,
-        sorpmx_path, sv_reg):
-    """Do uptake of N or P from soil and crop storage to aglive and bglive.
+        sorpmx_path, sv_reg, delta_aglive_iel_path):
+    """Calculate uptake of N or P from soil and crop storage to new growth.
 
-    Perform the flows of iel from crop storage pool, soil mineral pools, and
-    symbiotic N fixation into new above- and belowground biomass. N and P taken
-    up from the soil by one plant functional type are weighted by the percent
-    cover of that functional type. Lines 124-156, Restrp.f, lines 186-226,
-    Growth.f
+    Calculate flows of iel from crop storage pool, soil mineral pools, and
+    symbiotic N fixation into new above- and belowground biomass. Perform the
+    flow into belowground live, and track the change in aboveground live but
+    store the change in delta_aglivc_dict and do not perform the flow.
+    N and P taken up from the soil by one plant functional type are weighted by
+    the percent cover of that functional type. Lines 124-156, Restrp.f, lines
+    186-226, Growth.f
 
     Parameters:
         iel (int): index identifying N (iel=1) or P (iel=2)
@@ -9150,17 +9124,19 @@ def nutrient_uptake(
             sorption potential
         sv_reg (dict): map of key, path pairs giving paths to state variables
             for the current month
+        delta_aglive_iel_path (string): path to change in iel in aboveground
+            live state variable for the current pft
 
     Side effects:
         modifies the rasters indicated by
-            sv_reg['aglive_<iel>_<pft>_path'], iel in aboveground live biomass,
-                for the given iel and current pft
             sv_reg['bglive_<iel>_<pft>_path'], iel in belowground live biomass,
                 for the given iel and current pft
             sv_reg['crpstg_<iel>_<pft>_path'], iel in crop storage, for the
                 given iel and current pft
             sv_reg['minerl_<layer>_<iel>_path'], iel in the soil mineral pool,
                 for each soil layer accessible by the current pft ([1:nlay])
+            delta_aglive_iel_path, change in aboveground live iel for the
+                given iel and current pft
 
     Returns:
         None
@@ -9203,7 +9179,7 @@ def nutrient_uptake(
             calc_uptake_source('uptake_Nfix'), temp_val_dict['uptake_Nfix'],
             gdal.GDT_Float32, _TARGET_NODATA)
 
-    # do uptake from crop storage into aboveground and belowground live
+    # calculate uptake from crop storage into aboveground and belowground live
     shutil.copyfile(
         sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)],
         temp_val_dict['statv_temp'])
@@ -9215,15 +9191,8 @@ def nutrient_uptake(
         [(path, 1) for path in [
             temp_val_dict['uptake_storage'], eup_above_iel_path,
             eup_below_iel_path]],
-        calc_aboveground_uptake, temp_val_dict['uptake_above'],
+        calc_aboveground_uptake, delta_aglive_iel_path,
         gdal.GDT_Float32, _TARGET_NODATA)
-    shutil.copyfile(
-        sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
-        temp_val_dict['statv_temp'])
-    raster_sum(
-        temp_val_dict['statv_temp'], _SV_NODATA,
-        temp_val_dict['uptake_above'], _TARGET_NODATA,
-        sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
@@ -9281,13 +9250,11 @@ def nutrient_uptake(
                 eup_below_iel_path]],
             calc_aboveground_uptake, temp_val_dict['uptake_above'],
             gdal.GDT_Float32, _TARGET_NODATA)
-        shutil.copyfile(
-            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
-            temp_val_dict['statv_temp'])
+        shutil.copyfile(delta_aglive_iel_path, temp_val_dict['statv_temp'])
         raster_sum(
             temp_val_dict['statv_temp'], _SV_NODATA,
             temp_val_dict['uptake_above'], _TARGET_NODATA,
-            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            delta_aglive_iel_path, _SV_NODATA)
 
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
@@ -9311,13 +9278,11 @@ def nutrient_uptake(
                 eup_below_iel_path]],
             calc_aboveground_uptake, temp_val_dict['uptake_above'],
             gdal.GDT_Float32, _TARGET_NODATA)
-        shutil.copyfile(
-            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)],
-            temp_val_dict['statv_temp'])
+        shutil.copyfile(delta_aglive_iel_path, temp_val_dict['statv_temp'])
         raster_sum(
             temp_val_dict['statv_temp'], _SV_NODATA,
             temp_val_dict['uptake_above'], _TARGET_NODATA,
-            sv_reg['aglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
+            delta_aglive_iel_path, _SV_NODATA)
 
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
@@ -9571,11 +9536,14 @@ def _new_growth(
         month_reg, current_month, sv_reg):
     """Growth of new aboveground and belowground biomass.
 
-    Add new growth to aboveground and belowground live biomass. C is taken up
-    from the atmosphere, while N and P are taken up from the crop storage pool,
-    soil mineral N and P content, and symbiotic N fixation. N and P taken up
-    from the soil are weighted by the percent cover of the plant functional
-    type.
+    Calculate new growth of aboveground and belowground live biomass. New
+    growth is added to belowground live biomass, but is not added to
+    aboveground live biomass because grazing offtake must be calculated
+    relative to biomass before new growth is applied.
+    C is taken up from the atmosphere, while N and P are taken up from the crop
+    storage pool, soil mineral N and P content, and symbiotic N fixation. N and
+    P taken up from the soil are weighted by the percent cover of the plant
+    functional type.
 
     Parameters:
         pft_id_set (set): set of integers identifying plant functional types
@@ -9595,9 +9563,6 @@ def _new_growth(
 
     Side effects:
         modifies the rasters indicated by
-            sv_reg['aglivc_<pft>_path'] for each pft
-            sv_reg['aglive_1_<pft>_path'] for each pft
-            sv_reg['aglive_2_<pft>_path'] for each pft
             sv_reg['bglivc_<pft>_path'] for each pft
             sv_reg['bglive_1_<pft>_path'] for each pft
             sv_reg['bglive_2_<pft>_path'] for each pft
@@ -9607,7 +9572,11 @@ def _new_growth(
             sv_reg['minerl_{layer}_2_path'] for each soil layer
 
     Returns:
-        None
+        dictionary of key, path pairs indicating paths to rasters containing
+        change in aboveground live state variables, with the following keys:
+         - 'delta_aglivc_<pft>': change in aboveground live C for each pft
+         - 'delta_aglive_1_<pft>': change in aboveground live N for each pft
+         - 'delta_aglive_2_<pft>': change in aboveground live P for each pft
 
     """
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -9624,6 +9593,15 @@ def _new_growth(
             target_path = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
             temp_val_dict['{}_{}'.format(val, pft_i)] = target_path
+
+    # track change in aboveground live state variables for each pft
+    delta_sv_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    delta_agliv_dict = {}
+    for val in ['delta_aglivc', 'delta_aglive_1', 'delta_aglive_2']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                delta_sv_dir, '{}_{}.tif'.format(val, pft_i))
+            delta_agliv_dict['{}_{}'.format(val, pft_i)] = target_path
 
     param_val_dict = {}
     # site-level parameters
@@ -9798,19 +9776,16 @@ def _new_growth(
                 temp_val_dict['plantNfix_{}'.format(pft_i)],
                 gdal.GDT_Float32, _TARGET_NODATA)
 
-            # uptake of C into new aboveground production
-            shutil.copyfile(
-                sv_reg['aglivc_{}_path'.format(pft_i)],
-                temp_val_dict['statv_temp'])
+            # calculate uptake of C into new aboveground production
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
-                    temp_val_dict['statv_temp'],
                     temp_val_dict['cprodl_{}'.format(pft_i)],
                     month_reg['rtsh_{}'.format(pft_i)]]],
-                c_uptake_aboveground, sv_reg['aglivc_{}_path'.format(pft_i)],
+                c_uptake_aboveground,
+                delta_agliv_dict['delta_aglivc_{}'.format(pft_i)],
                 gdal.GDT_Float32, _SV_NODATA)
 
-            # uptake of C into new belowground production
+            # do uptake of C into new belowground production
             shutil.copyfile(
                 sv_reg['bglivc_{}_path'.format(pft_i)],
                 temp_val_dict['statv_temp'])
@@ -9822,7 +9797,8 @@ def _new_growth(
                 c_uptake_belowground, sv_reg['bglivc_{}_path'.format(pft_i)],
                 gdal.GDT_Float32, _SV_NODATA)
 
-            # uptake of N and P into new above- and belowground production
+            # calculate uptake of N and P into new aboveground production,
+            # do uptake of N and P into new belowground production
             for iel in [1, 2]:
                 nutrient_uptake(
                     iel, int(veg_trait_table[pft_i]['nlaypg']),
@@ -9833,10 +9809,60 @@ def _new_growth(
                     temp_val_dict['availm_{}_{}'.format(iel, pft_i)],
                     temp_val_dict['eavail_{}_{}'.format(iel, pft_i)],
                     pft_i, param_val_dict['pslsrb'],
-                    param_val_dict['sorpmx'], sv_reg)
+                    param_val_dict['sorpmx'], sv_reg,
+                    delta_agliv_dict['delta_aglive_{}_{}'.format(iel, pft_i)])
+        else:
+            # no growth scheduled this month
+            for val in ['delta_aglivc', 'delta_aglive_1', 'delta_aglive_2']:
+                pygeoprocessing.new_raster_from_base(
+                    sv_reg['aglivc_{}_path'.format(pft_i)],
+                    delta_agliv_dict['{}_{}'.format(val, pft_i)],
+                    gdal.GDT_Float32, [_SV_NODATA], fill_value_list=[0])
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
+    return delta_agliv_dict
+
+
+def _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg):
+    """Update aboveground live biomass with new growth.
+
+    Use the delta state variable quantities in `delta_agliv_dict` to update
+    state variables in `sv_reg` with new growth.
+
+    Parameters:
+        delta_agliv_dict (dict): map of key, path pairs indicating paths to
+            change in aboveground live state variables for the current month
+        pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month
+
+    Side effects:
+        modifies the rasters indicated by
+            sv_reg['aglivc_<pft>_path'] for each pft
+            sv_reg['aglive_1_<pft>_path'] for each pft
+            sv_reg['aglive_2_<pft>_path'] for each pft
+
+    Returns:
+        None
+
+    """
+    with tempfile.NamedTemporaryFile(
+            prefix='statv_temp', dir=PROCESSING_DIR) as statv_temp_file:
+        statv_temp_path = statv_temp_file.name
+    for pft_i in pft_id_set:
+        for sv in ['aglivc', 'aglive_1', 'aglive_2']:
+            shutil.copyfile(
+                sv_reg['{}_{}_path'.format(sv, pft_i)], statv_temp_path)
+            raster_sum(
+                delta_agliv_dict['delta_{}_{}'.format(sv, pft_i)], _SV_NODATA,
+                statv_temp_path, _SV_NODATA,
+                sv_reg['{}_{}_path'.format(sv, pft_i)], _SV_NODATA)
+
+    # clean up
+    delta_agliv_dir = os.path.dirname(
+        delta_agliv_dict[delta_agliv_dict.keys()[0]])
+    shutil.rmtree(delta_agliv_dir)
 
 
 def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
