@@ -13,6 +13,7 @@ from osgeo import gdal
 import re
 import numpy
 import pandas
+import math
 
 import pygeoprocessing
 from natcap.invest import utils
@@ -1115,6 +1116,12 @@ def execute(args):
     animal_trait_table = calc_derived_animal_traits(
         input_animal_trait_table, freer_parameter_df)
 
+    # calculate maximum potential intake of each animal type
+    for animal_id in animal_trait_table.keys():
+        revised_animal_trait_dict = calc_max_intake(
+            animal_trait_table[animal_id])
+        animal_trait_table[animal_id] = revised_animal_trait_dict
+
     # calculate field capacity and wilting point
     LOGGER.info("Calculating field capacity and wilting point")
     _afiel_awilt(
@@ -1183,6 +1190,15 @@ def execute(args):
         LOGGER.info(
             "Main simulation loop: month %d of %d" % (
                 month_index, n_months))
+
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_trait_dict = update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_trait_dict
+            revised_animal_trait_dict = calc_max_intake(
+                animal_trait_table[animal_id])
+            animal_trait_table[animal_id] = revised_animal_trait_dict
 
         _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg)
 
@@ -11017,6 +11033,8 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
         animal traits, including inputs, Freer parameters, and the following
         derived animal traits:
             - SRW_modified, standard reference weight modified by animal sex
+            - W_total, total body weight (equal to input weight for all animal
+              types except breeding females)
             - BC, relative body condition
             - Z, relative size
             - ZF, size factor reflecting mouth size of young animals
@@ -11026,6 +11044,7 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
         input_animal_trait_table, orient='index')
     animal_df = pandas.merge(
         input_df, freer_parameter_df, how='left', on='type')
+    animal_df['W_total'] = animal_df['weight']
     animal_df['SRW_modified'] = numpy.select(
         [animal_df['sex'] == 'entire_m', animal_df['sex'] == 'castrate',
             animal_df['sex'] == 'NA'],
@@ -11045,3 +11064,113 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
     animal_df['BC'] = animal_df['weight'] / N  # relative condition
     animal_trait_table = animal_df.to_dict(orient='index')
     return animal_trait_table
+
+
+def update_breeding_female_status(inner_animal_trait_dict, month_index):
+    """Update derived traits of a single animal type that is breeding females.
+
+    Because breeding females undergo cycles of conception, pregnancy, and
+    lactation, some derived traits must be updated at each model time step.
+    These traits do not vary spatially.
+
+    Parameters:
+        inner_animal_trait_dict (dict): dictionary of key, value pairs
+            representing input and derived traits for this animal type.
+        month_index (int): month of the simulation, such that month_index=13
+            indicates month 13 of the simulation
+
+    Returns:
+        updated_trait_table, a dictionary of key, value pairs where values
+        indicate input and derived traits for this animal type, including the
+        following updated animal traits:
+            - reproductive_status (open, pregnant, lactating)
+            - W_total, total weight including weight of conceptus if pregnant
+            - A_foet, age of the foetus if pregnant
+            - A_y, age of the suckling young if lactating
+
+    """
+    updated_trait_table = inner_animal_trait_dict.copy()
+    months_of_pregnancy = 9
+    cycle_month_index = (
+        (month_index - updated_trait_table['conception_step']) %
+        updated_trait_table['calving_interval'])
+    if cycle_month_index < months_of_pregnancy:
+        updated_trait_table['reproductive_status'] = 'pregnant'
+        updated_trait_table['A_foet'] = cycle_month_index * 30 + 1
+        RA = updated_trait_table['A_foet'] / updated_trait_table['CP1']
+        BW = (
+            (1 - updated_trait_table['CP4'] +
+                updated_trait_table['CP4'] *
+                updated_trait_table['Z']) *
+            updated_trait_table['CP15'] *
+            updated_trait_table['SRW_modified'])
+        W_c_1 = updated_trait_table['CP5'] * BW
+        W_c_2 = math.exp(
+            updated_trait_table['CP6'] *
+            (1 - math.exp(updated_trait_table['CP7'] * (1 - RA))))
+        W_c = W_c_1 * W_c_2  # equation 62, weight of conceptus
+        updated_trait_table['W_total'] = (
+            updated_trait_table['weight'] + W_c)
+    elif (cycle_month_index <
+            (months_of_pregnancy +
+                updated_trait_table['lactation_duration'])):
+        updated_trait_table['reproductive_status'] = 'lactating'
+        updated_trait_table['W_total'] = updated_trait_table['weight']
+        updated_trait_table['A_y'] = (
+            (cycle_month_index - months_of_pregnancy) * 30 + 1)
+    else:  # not pregnant or lactating
+        updated_trait_table['reproductive_status'] = None
+        updated_trait_table['W_total'] = updated_trait_table['weight']
+        updated_trait_table['A_foet'] = 0
+        updated_trait_table['A_y'] = 0
+    return updated_trait_table
+
+
+def calc_max_intake(inner_animal_trait_dict):
+    """Calculate maximum daily forage intake for a single animal type.
+
+    An animal's maximum intake is the maximum potential daily intake of dry
+    matter (kg) and depends on the size, condition, and reproductive stage of
+    the animal.  This trait is "non-spatial", i.e. it does not vary according
+    to the context of the animal but is dictated solely by inherent animal
+    traits.
+
+    Parameters:
+        inner_animal_trait_dict (dict): dictionary of key, value pairs
+            representing input and derived traits for this animal type.
+
+    Returns:
+        updated_trait_table, a dictionary of key, value pairs where values
+        indicate input and derived traits for this animal type, including the
+        following updated animal trait:
+            - max_intake
+
+    """
+    updated_trait_table = inner_animal_trait_dict.copy()
+    if updated_trait_table['BC'] > 1.:
+        CF = (
+            updated_trait_table['BC'] *
+            (updated_trait_table['CI20'] - updated_trait_table['BC']) /
+            (updated_trait_table['CI20'] - 1.))
+    else:
+        CF = 1.
+    YF = 1.  # eq 4 gives a different value for unweaned animals
+    TF = 1.  # ignore effect of temperature on intake
+    LF = 1.  # assume any lactating animals are suckling young (eq 8)
+    if 'reproductive_status' in updated_trait_table.keys():
+        if updated_trait_table['reproductive_status'] == 'lactating':
+            BCpart = updated_trait_table['BC']  # body condition at parturition
+            Mi = updated_trait_table['A_y'] / updated_trait_table['CI8']
+            LA = (
+                1. - updated_trait_table['CI15'] +
+                updated_trait_table['CI15'] * BCpart)
+            LF = (
+                1. + updated_trait_table['CI19'] * Mi **
+                updated_trait_table['CI9'] * math.exp(
+                    updated_trait_table['CI9'] * (1 - Mi)) * LA)
+    updated_trait_table['max_intake'] = (
+        updated_trait_table['CI1'] * updated_trait_table['SRW_modified'] *
+        updated_trait_table['Z'] * (
+            updated_trait_table['CI2'] - updated_trait_table['Z']) *
+        CF * YF * TF * LF)  # eq 2
+    return updated_trait_table

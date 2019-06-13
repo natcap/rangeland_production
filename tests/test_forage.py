@@ -9437,18 +9437,24 @@ class foragetests(unittest.TestCase):
             sv_reg['aglive_2_1_path'], mod_aglive_2 - tolerance,
             mod_aglive_2 + tolerance, _SV_NODATA)
 
-    def test_calc_derived_animal_traits(self):
-        """Test `calc_derived_animal_traits`.
+    def test_nonspatial_derived_animal_traits(self):
+        """Test calculation of nonspatial derived animal traits.
 
         Use the function `calc_derived_animal_traits` to populate the animal
         trait table with fixed parameters from Freer et al. (2012) and derived
         animal traits. Test the derived animal traits against values calculated
-        by hand.
+        by hand. Use the function `update_breeding_female_status` to update the
+        reproductive status of breeding females. Use the function
+        `calc_max_intake` to calculate maximum potential intake.
 
         Raises:
             AssertionError if derived animal traits calculated by
             `calc_derived_animal_traits` do not match values calculated by
             hand.
+            AssertionError if the reproductive status of breeding females is
+            not correctly updated according to model step.
+            AssertionError if `calc_max_intake` does not match values
+            calculated by hand.
 
         Returns:
             None
@@ -10002,3 +10008,68 @@ class foragetests(unittest.TestCase):
             animal_trait_table[4]['BC'], heifer_BC, places=6)
         self.assertAlmostEqual(
             animal_trait_table[0]['BC'], sheep_BC, places=6)
+
+        # Test updating reproductive status of breeding females.
+        # model step indicates pregnancy
+        month_index = 2
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_dict = forage.update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_dict
+        # assert that reproductive status of breeding females is correct
+        self.assertItemsEqual(
+            animal_trait_table[2]['reproductive_status'], 'pregnant')
+        # assert that reproductive status of all other animal types is None
+        for animal_id in [0, 1, 3, 4]:
+            self.assertFalse(
+                'reproductive_status' in animal_trait_table[animal_id].keys())
+
+        # model step indicates lactating
+        month_index = 6
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_dict = forage.update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_dict
+        # assert that reproductive status of breeding females is correct
+        self.assertItemsEqual(
+            animal_trait_table[2]['reproductive_status'], 'lactating')
+        # assert that reproductive status of all other animal types is None
+        for animal_id in [0, 1, 3, 4]:
+            self.assertFalse(
+                'reproductive_status' in animal_trait_table[animal_id].keys())
+
+        # model step indicates open
+        month_index = 8
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_dict = forage.update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_dict
+        self.assertIs(
+            animal_trait_table[2]['reproductive_status'], None)
+        # assert that reproductive status of all other animal types is None
+        for animal_id in [0, 1, 3, 4]:
+            self.assertFalse(
+                'reproductive_status' in animal_trait_table[animal_id].keys())
+
+        # Test calculating maximum intake.
+        # known values calculated by hand
+        entire_m_max_intake = 12.3674657
+        castrate_max_intake = 9.3135440
+        heifer_max_intake = 8.1275358
+        sheep_max_intake = 0.8120074
+
+        for animal_id in animal_trait_table.keys():
+            revised_animal_trait_dict = forage.calc_max_intake(
+                animal_trait_table[animal_id])
+            animal_trait_table[animal_id] = revised_animal_trait_dict
+        self.assertAlmostEqual(
+            animal_trait_table[1]['max_intake'], entire_m_max_intake)
+        self.assertAlmostEqual(
+            animal_trait_table[3]['max_intake'], castrate_max_intake)
+        self.assertAlmostEqual(
+            animal_trait_table[4]['max_intake'], heifer_max_intake)
+        self.assertAlmostEqual(
+            animal_trait_table[0]['max_intake'], sheep_max_intake)
