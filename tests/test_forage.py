@@ -1022,6 +1022,8 @@ class foragetests(unittest.TestCase):
             'n_months': 1,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'aoi_small.shp'),
+            'proportion_legume_path': os.path.join(
+                SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
                 SAMPLE_DATA, 'soil', 'bulkd.tif'),
             'ph_path': os.path.join(
@@ -10073,3 +10075,70 @@ class foragetests(unittest.TestCase):
             animal_trait_table[4]['max_intake'], heifer_max_intake)
         self.assertAlmostEqual(
             animal_trait_table[0]['max_intake'], sheep_max_intake)
+
+    def test_calc_pasture_height(self):
+        """Test `calc_pasture_height`.
+
+        Use the function `calc_pasture_height` to estimate the height of each
+        feed type from its biomass. Test that the function matches values
+        calculated by hand.
+
+        Raises:
+            AssertionError if `calc_pasture_height` does not match values
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc_4 = 80
+        stdedc_4 = 45
+        cover_4 = 0.5
+        aglivc_5 = 99
+        stdedc_5 = 36
+        cover_5 = 0.3
+
+        height_live_4 = 10.2503075704191
+        height_dead_4 = 5.76579800836076
+        height_live_5 = 7.61085337103621
+        height_dead_5 = 2.76758304401317
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_4_path': os.path.join(self.workspace_dir, 'aglivc_4.tif'),
+            'stdedc_4_path': os.path.join(self.workspace_dir, 'stdedc_4.tif'),
+            'aglivc_5_path': os.path.join(self.workspace_dir, 'aglivc_5.tif'),
+            'stdedc_5_path': os.path.join(self.workspace_dir, 'stdedc_5.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_4_path'], aglivc_4)
+        create_constant_raster(sv_reg['stdedc_4_path'], stdedc_4)
+        create_constant_raster(sv_reg['aglivc_5_path'], aglivc_5)
+        create_constant_raster(sv_reg['stdedc_5_path'], stdedc_5)
+        aligned_inputs = {
+            'pft_4': os.path.join(self.workspace_dir, 'cover_4.tif'),
+            'pft_5': os.path.join(self.workspace_dir, 'cover_5.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_4'], cover_4)
+        create_constant_raster(aligned_inputs['pft_5'], cover_5)
+        pft_id_set = [4, 5]
+        processing_dir = self.workspace_dir
+
+        pasture_height_dict = forage.calc_pasture_height(
+            sv_reg, aligned_inputs, pft_id_set, processing_dir)
+
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['live_height_4'], height_live_4 - tolerance,
+            height_live_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['stdead_height_4'], height_dead_4 - tolerance,
+            height_dead_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['live_height_5'], height_live_5 - tolerance,
+            height_live_5 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['stdead_height_5'], height_dead_5 - tolerance,
+            height_dead_5 + tolerance, _TARGET_NODATA)

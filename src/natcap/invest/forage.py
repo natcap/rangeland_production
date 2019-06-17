@@ -712,6 +712,8 @@ def execute(args):
             desired spatial extent of the model. This has the effect of
             clipping the computational area of the input datasets to be the
             area intersected by this polygon.
+        args['proportion_legume_path'] (string): path to raster containing
+            fraction of pasture that is legume, by weight
         args['bulk_density_path'] (string): path to bulk density raster.
         args['ph_path'] (string): path to soil pH raster.
         args['clay_proportion_path'] (string): path to raster representing
@@ -971,6 +973,9 @@ def execute(args):
         pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
         raise ValueError("frtcindx parameter contains invalid values")
+
+    base_align_raster_path_id_map['proportion_legume_path'] = args[
+        'proportion_legume_path']
 
     # track separate state variable files for each PFT
     pft_sv_dict = {}
@@ -1516,16 +1521,16 @@ def weighted_state_variable_sum(
     """Calculate weighted sum of state variable across plant functional types.
 
     To sum a state variable across PFTs within a grid cell, the state variable
-    must be weighted by the percent cover of each PFT inside the grid cell.
-    First multiply the state variable by its percent cover, and then add up the
-    weighted products.
+    must be weighted by the fractional cover of each PFT inside the grid cell.
+    First multiply the state variable by its fractional cover, and then add up
+    the weighted products.
 
     Parameters:
         sv (string): state variable to be summed across plant functional types
         sv_reg (dict): map of key, path pairs giving paths to state variables,
             including sv, the state variable to be summed
         aligned_inputs (dict): map of key, path pairs indicating paths
-            to aligned model inputs, including percent cover of each plant
+            to aligned model inputs, including fractional cover of each plant
             functional type
         pft_id_set (set): set of integers identifying plant functional types
         weighted_sum_path (string): path to raster that should contain the
@@ -9609,7 +9614,7 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
 
 
 def nutrient_uptake(
-        iel, nlay, percent_cover_path, eup_above_iel_path, eup_below_iel_path,
+        iel, nlay, fract_cover_path, eup_above_iel_path, eup_below_iel_path,
         plantNfix_path, availm_path, eavail_path, pft_i, pslsrb_path,
         sorpmx_path, sv_reg, delta_aglive_iel_path):
     """Calculate uptake of N or P from soil and crop storage to new growth.
@@ -9619,15 +9624,15 @@ def nutrient_uptake(
     flow into belowground live, and track the change in aboveground live but
     store the change in delta_aglivc_dict and do not perform the flow.
     N and P taken up from the soil by one plant functional type are weighted by
-    the percent cover of that functional type. Lines 124-156, Restrp.f, lines
-    186-226, Growth.f
+    the fractional cover of that functional type. Lines 124-156, Restrp.f,
+    lines 186-226, Growth.f
 
     Parameters:
         iel (int): index identifying N (iel=1) or P (iel=2)
         nlay (int): number of soil layers accessible by this plant functional
             type
-        percent_cover_path (string): path to raster containing percent cover of
-            this plant functional type
+        fract_cover_path (string): path to raster containing fractional cover
+            of this plant functional type
         eup_above_iel_path (string): path to raster containing iel in new
             aboveground production
         eup_below_iel_path (string): path to raster containing iel in new
@@ -9673,7 +9678,7 @@ def nutrient_uptake(
 
     # calculate uptake from crop storage
     pft_nodata = pygeoprocessing.get_raster_info(
-        percent_cover_path)['nodata'][0]
+        fract_cover_path)['nodata'][0]
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             eavail_path, eup_above_iel_path, eup_below_iel_path,
@@ -9753,7 +9758,7 @@ def nutrient_uptake(
 
         # uptake removed from soil is weighted by pft % cover
         raster_multiplication(
-            percent_cover_path, pft_nodata,
+            fract_cover_path, pft_nodata,
             temp_val_dict['minerl_uptake_lyr'], _TARGET_NODATA,
             temp_val_dict['uptake_weighted'], _TARGET_NODATA)
         shutil.copyfile(
@@ -10063,13 +10068,13 @@ def _new_growth(
     relative to biomass before new growth is applied.
     C is taken up from the atmosphere, while N and P are taken up from the crop
     storage pool, soil mineral N and P content, and symbiotic N fixation. N and
-    P taken up from the soil are weighted by the percent cover of the plant
+    P taken up from the soil are weighted by the fractional cover of the plant
     functional type.
 
     Parameters:
         pft_id_set (set): set of integers identifying plant functional types
         aligned_inputs (dict): map of key, path pairs indicating paths
-            to aligned model inputs, including percent cover of each plant
+            to aligned model inputs, including fractional cover of each plant
             functional type
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters
@@ -10726,7 +10731,7 @@ def _grazing(
         feces is given by the parameter gfcret. Because carbon returned in
         feces is partitioned into soil structural and metabolic pools, carbon
         returned from grazing of one plant functional type (pft) must be
-        weighted by the percent cover of the pft.
+        weighted by the fractional cover of the pft.
 
         Parameters:
             shremc (numpy.ndarray): derived, C in aboveground live biomass
@@ -10735,7 +10740,7 @@ def _grazing(
                 by grazing
             gfcret (numpy.ndarray): parameter, fraction of consumed C that is
                 returned in feces
-            pft_cover (numpy.ndarray): input, percent cover of this plant
+            pft_cover (numpy.ndarray): input, fractional cover of this plant
                 functional type
 
         Returns:
@@ -10763,7 +10768,7 @@ def _grazing(
         feces is calculated from the parameters gret_<iel> and fecf_<iel>.
         Nutrients returned in feces from grazing of one functional type (pft)
         are partitioned into soil structural and metabolic pools, so they
-        must be weighted by the percent cover of the pft.
+        must be weighted by the fractional cover of the pft.
 
         Parameters:
             shreme (numpy.ndarray): derived, iel in aboveground live biomass
@@ -10774,7 +10779,7 @@ def _grazing(
                 returned
             fecf (numpy.ndarray): parameter, fraction of consumed iel that is
                 returned in feces
-            pft_cover (numpy.ndarray): input, percent cover of this plant
+            pft_cover (numpy.ndarray): input, fractional cover of this plant
                 functional type
 
         Returns:
@@ -10814,7 +10819,7 @@ def _grazing(
                 returned
             fecf (numpy.ndarray): parameter, fraction of consumed iel that is
                 returned in feces
-            pft_cover (numpy.ndarray): input, percent cover of this plant
+            pft_cover (numpy.ndarray): input, fractional cover of this plant
                 functional type
 
         Returns:
@@ -11174,3 +11179,140 @@ def calc_max_intake(inner_animal_trait_dict):
             updated_trait_table['CI2'] - updated_trait_table['Z']) *
         CF * YF * TF * LF)  # eq 2
     return updated_trait_table
+
+
+def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
+    """Calculate estimated height in cm for each forage feed type.
+
+    Follow GRAZPLAN by calculating estimated height of each forage feed type
+    from its biomass, assuming that 1 tonne of dry matter per ha has a height
+    of 3 cm. C state variables tracked by the model are first converted from gC
+    per square m to kg biomass per ha, then the height of each feed type is
+    estimated following equation 134 from Freer et al. (2012).
+
+    Parameters:
+        sv_reg (dict): map of key, path pairs giving paths to state variables,
+            including C in aboveground live and standing dead biomass
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each pft
+        pft_id_set (set): set of integers identifying plant functional types
+        processing_dir (string): path to temporary processing directory where
+            rasters of pasture height should be stored
+
+    Returns:
+        pasture_height_dict, a dictionary of key, path pairs giving estimated
+            height in cm of each feed type
+
+    """
+    def calc_weighted_biomass_kgha(c_statv, pft_cover):
+        """Calculate biomass in kg/ha weighted by fractional cover of the pft.
+
+        Convert a state variable representing grams of carbon per square meter
+        into kg of biomass per ha, accounting for fractional cover of the
+        plant functional type.
+
+        Parameters:
+            c_statv (numpy.ndarray): state variable, C state variable belonging
+                to the plant functional type
+            pft_cover (numpy.ndarray): input, fractional cover of the plant
+                functional type
+
+        Returns:
+            biomass_kgha, absolute biomass of this state variable and this
+                plant functional type in kg per ha
+
+        """
+        valid_mask = (
+            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (pft_cover != pft_nodata))
+        biomass_kgha = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        biomass_kgha[:] = _TARGET_NODATA
+        biomass_kgha[valid_mask] = (
+            c_statv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        return biomass_kgha
+
+    def calc_scale_term(*biomass_array_list):
+        """Calculate the scaling term to estimate pasture height from biomass.
+
+        The height of each feed type is estimated from its biomass by
+        multiplying its biomass by a scale term, which is the square of the sum
+        of biomass across feed types divided by the sum of squares of biomass
+        across feed types, multiplied by 3e-3.  Treat nodata values in each
+        biomass array as zero.  Equation 134, Freer et al. (2012).
+
+        Parameters:
+            biomass_array_list (list): list of numpy.ndarrays containing
+                biomass in kg per ha
+
+        Returns:
+            scale_term, the scaling term to estimate pasture height from
+                biomass
+
+        """
+        square_list = []
+        for r in biomass_array_list:
+            numpy.place(r, numpy.isclose(r, _TARGET_NODATA), [0])
+            square_list.append(r ** 2)
+        numerator = (numpy.sum(biomass_array_list, axis=0)) ** 2
+        denominator = numpy.sum(square_list, axis=0)
+        scale_term = (numerator / denominator) * 0.003
+        return scale_term
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    temp_val_dict['scale_term'] = os.path.join(temp_dir, 'scale_term.tif')
+    biomass_raster_list = []
+    for pft_i in pft_id_set:
+        for val in ['live_kgha', 'stdead_kgha']:
+            temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+
+        # calculate weighted aboveground live biomass in kg/ha
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
+            calc_weighted_biomass_kgha,
+            temp_val_dict['live_kgha_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        # calculate weighted standing dead biomass in kg/ha
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['stdedc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)]]],
+            calc_weighted_biomass_kgha,
+            temp_val_dict['stdead_kgha_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        biomass_raster_list.append(temp_val_dict['live_kgha_{}'.format(pft_i)])
+        biomass_raster_list.append(
+            temp_val_dict['stdead_kgha_{}'.format(pft_i)])
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in biomass_raster_list], calc_scale_term,
+        temp_val_dict['scale_term'], gdal.GDT_Float32,
+        _TARGET_NODATA)
+
+    pasture_height_dict = {}
+    for pft_i in pft_id_set:
+        pasture_height_dict['live_height_{}'.format(pft_i)] = os.path.join(
+            processing_dir, 'live_height_{}.tif'.format(pft_i))
+        raster_multiplication(
+            temp_val_dict['live_kgha_{}'.format(pft_i)], _TARGET_NODATA,
+            temp_val_dict['scale_term'], _TARGET_NODATA,
+            pasture_height_dict['live_height_{}'.format(pft_i)],
+            _TARGET_NODATA)
+        pasture_height_dict['stdead_height_{}'.format(pft_i)] = os.path.join(
+            processing_dir, 'stdead_height_{}.tif'.format(pft_i))
+        raster_multiplication(
+            temp_val_dict['stdead_kgha_{}'.format(pft_i)], _TARGET_NODATA,
+            temp_val_dict['scale_term'], _TARGET_NODATA,
+            pasture_height_dict['stdead_height_{}'.format(pft_i)],
+            _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+    return pasture_height_dict
