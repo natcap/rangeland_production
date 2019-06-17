@@ -10142,3 +10142,72 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             pasture_height_dict['stdead_height_5'], height_dead_5 - tolerance,
             height_dead_5 + tolerance, _TARGET_NODATA)
+
+    def test_calc_fraction_biomass(self):
+        """Test `calc_fraction_biomass`.
+
+        Use the function `calc_fraction_biomass` to calculate the relative
+        proportion of biomass represented by each feed type. Test that the
+        results match values calculated by hand.
+
+        Raises:
+            AssertionError if `calc_fraction_biomass` does not match values
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc_4 = 80
+        stdedc_4 = 45
+        cover_4 = 0.5
+        aglivc_5 = 99
+        stdedc_5 = 36
+        cover_5 = 0.3
+
+        live_frac_bio_4 = 0.38835
+        stdead_frac_bio_4 = 0.21845
+        live_frac_bio_5 = 0.28835
+        stdead_frac_bio_5 = 0.10485
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_4_path': os.path.join(self.workspace_dir, 'aglivc_4.tif'),
+            'stdedc_4_path': os.path.join(self.workspace_dir, 'stdedc_4.tif'),
+            'aglivc_5_path': os.path.join(self.workspace_dir, 'aglivc_5.tif'),
+            'stdedc_5_path': os.path.join(self.workspace_dir, 'stdedc_5.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_4_path'], aglivc_4)
+        create_constant_raster(sv_reg['stdedc_4_path'], stdedc_4)
+        create_constant_raster(sv_reg['aglivc_5_path'], aglivc_5)
+        create_constant_raster(sv_reg['stdedc_5_path'], stdedc_5)
+        aligned_inputs = {
+            'pft_4': os.path.join(self.workspace_dir, 'cover_4.tif'),
+            'pft_5': os.path.join(self.workspace_dir, 'cover_5.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_4'], cover_4)
+        create_constant_raster(aligned_inputs['pft_5'], cover_5)
+        pft_id_set = [4, 5]
+        processing_dir = self.workspace_dir
+
+        frac_biomass_dict = forage.calc_fraction_biomass(
+            sv_reg, aligned_inputs, pft_id_set, processing_dir)
+
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['live_frac_bio_4'], live_frac_bio_4 - tolerance,
+            live_frac_bio_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['stdead_frac_bio_4'],
+            stdead_frac_bio_4 - tolerance, stdead_frac_bio_4 + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['live_frac_bio_5'], live_frac_bio_5 - tolerance,
+            live_frac_bio_5 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['stdead_frac_bio_5'],
+            stdead_frac_bio_5 - tolerance, stdead_frac_bio_5 + tolerance,
+            _TARGET_NODATA)

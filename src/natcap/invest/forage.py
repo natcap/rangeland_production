@@ -11316,3 +11316,102 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
     shutil.rmtree(temp_dir)
 
     return pasture_height_dict
+
+
+def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
+    """Calculate the fraction of total biomass represented by each feed type.
+
+    The fraction of total biomass represented by live and standing dead biomass
+    of each plant functional type must be calculated while accounting for the
+    fractional cover of the pft. This quantity is the member variable
+    "rel_availability" in the beta rangeland production model.
+
+    Parameters:
+        sv_reg (dict): map of key, path pairs giving paths to state variables,
+            including C in aboveground live and standing dead biomass
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each pft
+        pft_id_set (set): set of integers identifying plant functional types
+        processing_dir (string): path to temporary processing directory where
+            rasters of pasture height should be stored
+
+    Returns:
+        frac_biomass_dict, a dictionary of key, path pairs giving fraction of
+            total biomass represented by each feed type
+
+    """
+    def weighted_fraction(c_statv, pft_cover, total_weighted_C):
+        """Calculate fraction of total C accounting for cover of the pft.
+
+        Parameters:
+            c_statv (numpy.ndarray): state variable, C state variable belonging
+                to the plant functional type
+            pft_cover (numpy.ndarray): input, fractional cover of the plant
+                functional type
+            total_weighted_C (numpy.ndarray): derived, total carbon in
+                aboveground live and standing dead biomass across plant
+                functional types
+
+        Returns:
+            weighted_fraction, fraction of total biomass represented by this
+                feed type
+
+        """
+        valid_mask = (
+            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (pft_cover != pft_nodata) &
+            (total_weighted_C != _TARGET_NODATA))
+        weighted_fraction = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        weighted_fraction[:] = _TARGET_NODATA
+        weighted_fraction[valid_mask] = (
+            c_statv[valid_mask] * pft_cover[valid_mask] /
+            total_weighted_C[valid_mask])
+        return weighted_fraction
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'weighted_sum_aglivc', 'weighted_sum_stdedc', 'total_weighted_C']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    # calculate total weighted C in aboveground live and standing dead biomass
+    weighted_state_variable_sum(
+        'aglivc', sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_aglivc'])
+    weighted_state_variable_sum(
+        'stdedc', sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_stdedc'])
+    raster_sum(
+        temp_val_dict['weighted_sum_aglivc'], _TARGET_NODATA,
+        temp_val_dict['weighted_sum_stdedc'], _TARGET_NODATA,
+        temp_val_dict['total_weighted_C'], _TARGET_NODATA)
+
+    # calculate the fraction of total biomass for aglivc and stdedc of each pft
+    frac_biomass_dict = {}
+    for pft_i in pft_id_set:
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+        target_path = os.path.join(
+            processing_dir, 'live_frac_bio_{}'.format(pft_i))
+        frac_biomass_dict['live_frac_bio_{}'.format(pft_i)] = target_path
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
+                temp_val_dict['total_weighted_C']]], weighted_fraction,
+            target_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+        target_path = os.path.join(
+            processing_dir, 'stdead_frac_bio_{}'.format(pft_i))
+        frac_biomass_dict['stdead_frac_bio_{}'.format(pft_i)] = target_path
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['stdedc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
+                temp_val_dict['total_weighted_C']]], weighted_fraction,
+            target_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+    return frac_biomass_dict
