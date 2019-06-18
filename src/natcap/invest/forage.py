@@ -10717,7 +10717,7 @@ def _grazing(
             gret_1, fraction of consumed N that is returned in feces and urine
 
         """
-        valid_mask = (clay != clay_nodata)
+        valid_mask = (~numpy.isclose(clay, clay_nodata))
         gret_1 = numpy.empty(clay.shape, dtype=numpy.float32)
         gret_1[:] = _IC_NODATA
         gret_1[valid_mask] = numpy.clip(
@@ -11224,7 +11224,7 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
         """
         valid_mask = (
             (~numpy.isclose(c_statv, _SV_NODATA)) &
-            (pft_cover != pft_nodata))
+            (~numpy.isclose(pft_cover, pft_nodata)))
         biomass_kgha = numpy.empty(c_statv.shape, dtype=numpy.float32)
         biomass_kgha[:] = _TARGET_NODATA
         biomass_kgha[valid_mask] = (
@@ -11359,7 +11359,7 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
         """
         valid_mask = (
             (~numpy.isclose(c_statv, _SV_NODATA)) &
-            (pft_cover != pft_nodata) &
+            (~numpy.isclose(pft_cover, pft_nodata)) &
             (total_weighted_C != _TARGET_NODATA))
         weighted_fraction = numpy.empty(c_statv.shape, dtype=numpy.float32)
         weighted_fraction[:] = _TARGET_NODATA
