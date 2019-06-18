@@ -10102,9 +10102,9 @@ class foragetests(unittest.TestCase):
         stdedc_5 = 36
         cover_5 = 0.3
 
-        height_live_4 = 10.2503075704191
+        height_agliv_4 = 10.2503075704191
         height_dead_4 = 5.76579800836076
-        height_live_5 = 7.61085337103621
+        height_agliv_5 = 7.61085337103621
         height_dead_5 = 2.76758304401317
 
         # raster-based inputs
@@ -10131,16 +10131,16 @@ class foragetests(unittest.TestCase):
             sv_reg, aligned_inputs, pft_id_set, processing_dir)
 
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['live_height_4'], height_live_4 - tolerance,
-            height_live_4 + tolerance, _TARGET_NODATA)
+            pasture_height_dict['agliv_height_4'], height_agliv_4 - tolerance,
+            height_agliv_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['stdead_height_4'], height_dead_4 - tolerance,
+            pasture_height_dict['stded_height_4'], height_dead_4 - tolerance,
             height_dead_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['live_height_5'], height_live_5 - tolerance,
-            height_live_5 + tolerance, _TARGET_NODATA)
+            pasture_height_dict['agliv_height_5'], height_agliv_5 - tolerance,
+            height_agliv_5 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['stdead_height_5'], height_dead_5 - tolerance,
+            pasture_height_dict['stded_height_5'], height_dead_5 - tolerance,
             height_dead_5 + tolerance, _TARGET_NODATA)
 
     def test_calc_fraction_biomass(self):
@@ -10169,10 +10169,10 @@ class foragetests(unittest.TestCase):
         stdedc_5 = 36
         cover_5 = 0.3
 
-        live_frac_bio_4 = 0.38835
-        stdead_frac_bio_4 = 0.21845
-        live_frac_bio_5 = 0.28835
-        stdead_frac_bio_5 = 0.10485
+        agliv_frac_bio_4 = 0.38835
+        stded_frac_bio_4 = 0.21845
+        agliv_frac_bio_5 = 0.28835
+        stded_frac_bio_5 = 0.10485
 
         # raster-based inputs
         sv_reg = {
@@ -10198,16 +10198,18 @@ class foragetests(unittest.TestCase):
             sv_reg, aligned_inputs, pft_id_set, processing_dir)
 
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['live_frac_bio_4'], live_frac_bio_4 - tolerance,
-            live_frac_bio_4 + tolerance, _TARGET_NODATA)
+            frac_biomass_dict['agliv_frac_bio_4'],
+            agliv_frac_bio_4 - tolerance,
+            agliv_frac_bio_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['stdead_frac_bio_4'],
-            stdead_frac_bio_4 - tolerance, stdead_frac_bio_4 + tolerance,
+            frac_biomass_dict['stded_frac_bio_4'],
+            stded_frac_bio_4 - tolerance, stded_frac_bio_4 + tolerance,
             _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['live_frac_bio_5'], live_frac_bio_5 - tolerance,
-            live_frac_bio_5 + tolerance, _TARGET_NODATA)
+            frac_biomass_dict['agliv_frac_bio_5'],
+            agliv_frac_bio_5 - tolerance,
+            agliv_frac_bio_5 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['stdead_frac_bio_5'],
-            stdead_frac_bio_5 - tolerance, stdead_frac_bio_5 + tolerance,
+            frac_biomass_dict['stded_frac_bio_5'],
+            stded_frac_bio_5 - tolerance, stded_frac_bio_5 + tolerance,
             _TARGET_NODATA)

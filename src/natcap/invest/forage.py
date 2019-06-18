@@ -11263,7 +11263,7 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
     temp_val_dict['scale_term'] = os.path.join(temp_dir, 'scale_term.tif')
     biomass_raster_list = []
     for pft_i in pft_id_set:
-        for val in ['live_kgha', 'stdead_kgha']:
+        for val in ['agliv_kgha', 'stded_kgha']:
             temp_val_dict['{}_{}'.format(val, pft_i)] = os.path.join(
                 temp_dir, '{}_{}.tif'.format(val, pft_i))
         pft_nodata = pygeoprocessing.get_raster_info(
@@ -11275,7 +11275,7 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
                 sv_reg['aglivc_{}_path'.format(pft_i)],
                 aligned_inputs['pft_{}'.format(pft_i)]]],
             calc_weighted_biomass_kgha,
-            temp_val_dict['live_kgha_{}'.format(pft_i)],
+            temp_val_dict['agliv_kgha_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
         # calculate weighted standing dead biomass in kg/ha
         pygeoprocessing.raster_calculator(
@@ -11283,12 +11283,13 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
                 sv_reg['stdedc_{}_path'.format(pft_i)],
                 aligned_inputs['pft_{}'.format(pft_i)]]],
             calc_weighted_biomass_kgha,
-            temp_val_dict['stdead_kgha_{}'.format(pft_i)],
+            temp_val_dict['stded_kgha_{}'.format(pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
-        biomass_raster_list.append(temp_val_dict['live_kgha_{}'.format(pft_i)])
         biomass_raster_list.append(
-            temp_val_dict['stdead_kgha_{}'.format(pft_i)])
+            temp_val_dict['agliv_kgha_{}'.format(pft_i)])
+        biomass_raster_list.append(
+            temp_val_dict['stded_kgha_{}'.format(pft_i)])
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in biomass_raster_list], calc_scale_term,
@@ -11297,19 +11298,19 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
 
     pasture_height_dict = {}
     for pft_i in pft_id_set:
-        pasture_height_dict['live_height_{}'.format(pft_i)] = os.path.join(
-            processing_dir, 'live_height_{}.tif'.format(pft_i))
+        pasture_height_dict['agliv_height_{}'.format(pft_i)] = os.path.join(
+            processing_dir, 'agliv_height_{}.tif'.format(pft_i))
         raster_multiplication(
-            temp_val_dict['live_kgha_{}'.format(pft_i)], _TARGET_NODATA,
+            temp_val_dict['agliv_kgha_{}'.format(pft_i)], _TARGET_NODATA,
             temp_val_dict['scale_term'], _TARGET_NODATA,
-            pasture_height_dict['live_height_{}'.format(pft_i)],
+            pasture_height_dict['agliv_height_{}'.format(pft_i)],
             _TARGET_NODATA)
-        pasture_height_dict['stdead_height_{}'.format(pft_i)] = os.path.join(
-            processing_dir, 'stdead_height_{}.tif'.format(pft_i))
+        pasture_height_dict['stded_height_{}'.format(pft_i)] = os.path.join(
+            processing_dir, 'stded_height_{}.tif'.format(pft_i))
         raster_multiplication(
-            temp_val_dict['stdead_kgha_{}'.format(pft_i)], _TARGET_NODATA,
+            temp_val_dict['stded_kgha_{}'.format(pft_i)], _TARGET_NODATA,
             temp_val_dict['scale_term'], _TARGET_NODATA,
-            pasture_height_dict['stdead_height_{}'.format(pft_i)],
+            pasture_height_dict['stded_height_{}'.format(pft_i)],
             _TARGET_NODATA)
 
     # clean up temporary files
@@ -11392,8 +11393,8 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
         pft_nodata = pygeoprocessing.get_raster_info(
             aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         target_path = os.path.join(
-            processing_dir, 'live_frac_bio_{}'.format(pft_i))
-        frac_biomass_dict['live_frac_bio_{}'.format(pft_i)] = target_path
+            processing_dir, 'agliv_frac_bio_{}'.format(pft_i))
+        frac_biomass_dict['agliv_frac_bio_{}'.format(pft_i)] = target_path
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['aglivc_{}_path'.format(pft_i)],
@@ -11402,8 +11403,8 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
             target_path, gdal.GDT_Float32, _TARGET_NODATA)
 
         target_path = os.path.join(
-            processing_dir, 'stdead_frac_bio_{}'.format(pft_i))
-        frac_biomass_dict['stdead_frac_bio_{}'.format(pft_i)] = target_path
+            processing_dir, 'stded_frac_bio_{}'.format(pft_i))
+        frac_biomass_dict['stded_frac_bio_{}'.format(pft_i)] = target_path
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['stdedc_{}_path'.format(pft_i)],
