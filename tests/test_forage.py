@@ -10213,3 +10213,82 @@ class foragetests(unittest.TestCase):
             frac_biomass_dict['stded_frac_bio_5'],
             stded_frac_bio_5 - tolerance, stded_frac_bio_5 + tolerance,
             _TARGET_NODATA)
+
+    def test_order_by_digestibility(self):
+        """Test `order_by_digestibility`.
+
+        Use the function `order_by_digestibility` to calculate the order of
+        feed types according to their digestibility. Ensure that the order of
+        feed types matches the order calculated by hand.
+
+        Raises:
+            AssertionError if `order_by_digestibility` does not match order
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+
+        # known inputs
+        aglivc_4 = 80
+        aglive_1_4 = 35
+        stdedc_4 = 45
+        stdede_1_4 = 12.3
+        aglivc_5 = 99
+        aglive_1_5 = 8.2
+        stdedc_5 = 36
+        stdede_1_5 = 22.5
+
+        digestibility_order = ['stded_5', 'agliv_4', 'stded_4', 'agliv_5']
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_4_path': os.path.join(self.workspace_dir, 'aglivc_4.tif'),
+            'aglive_1_4_path': os.path.join(
+                self.workspace_dir, 'aglive_1_4.tif'),
+            'stdedc_4_path': os.path.join(self.workspace_dir, 'stdedc_4.tif'),
+            'stdede_1_4_path': os.path.join(
+                self.workspace_dir, 'stdede_1_4.tif'),
+            'aglivc_5_path': os.path.join(self.workspace_dir, 'aglivc_5.tif'),
+            'aglive_1_5_path': os.path.join(
+                self.workspace_dir, 'aglive_1_5.tif'),
+            'stdedc_5_path': os.path.join(self.workspace_dir, 'stdedc_5.tif'),
+            'stdede_1_5_path': os.path.join(
+                self.workspace_dir, 'stdede_1_5.tif'),
+        }
+        args = foragetests.generate_base_args(self.workspace_dir)
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglivc_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglivc_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglive_1_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglive_1_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdedc_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdedc_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdede_1_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdede_1_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglivc_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglivc_5])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglive_1_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglive_1_5])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglivc_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglivc_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdedc_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdedc_5])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdede_1_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdede_1_5])
+        pft_id_set = [4, 5]
+
+        ordered_feed_types = forage.order_by_digestibility(
+            sv_reg, pft_id_set, args['aoi_path'])
+
+        self.assertItemsEqual(ordered_feed_types, digestibility_order)

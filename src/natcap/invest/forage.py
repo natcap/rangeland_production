@@ -11416,3 +11416,80 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
     shutil.rmtree(temp_dir)
 
     return frac_biomass_dict
+
+
+def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
+    """Calculate the order of feed types according to their digestibility.
+
+    During diet selection, animals select among feed types in descending order
+    by feed type digestibility. Because digestibility is linearly related to
+    crude protein content, the order of feed types may be estimated from their
+    nitrogen to carbon ratios. Order feed types by digestibility according to
+    the mean nitrogen to carbon ratio of each feed type across the study area
+    aoi.
+
+    Parameters:
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the previous month, including C and N in aboveground
+            live and standing dead
+        pft_id_set (set): set of integers identifying plant functional types
+        aoi_path (string): path to vector layer giving the spatial extent of
+            the model
+
+    Returns:
+        ordered_feed_types, a list of strings where each string designates a
+            feed type by a combination of pft_i and fraction (aboveground live
+            or standing dead), in descending order of digestibility
+
+    """
+    def calc_nc_ratio(c_statv_path, n_statv_path, aoi_path):
+        """Calculate the mean nitrogen to carbon ratio of a biomass fraction.
+
+        Calculate the mean nitrogen to carbon ratio of a biomass fraction
+        falling inside the study area aoi.  The ratio is calculated from the
+        state variables representing carbon and nitrogen content of that
+        biomass fraction. If the area of interest vector dataset contains more
+        than one polygon feature, the average ratio is calculated across
+        features.
+
+        Parameters:
+            c_statv_path (string): path to raster containing carbon in the
+                biomass fraction
+            n_statv_path (string): path to raster containing nitrogen in the
+                biomass fraction
+            aoi_path (string): path to vector layer defining the study area of
+                interest
+
+        Returns:
+            nc_ratio, the ratio of mean nitrogen to mean carbon for this state
+                variable inside the model area of interest
+
+        """
+        carbon_zonal_stat_df = pandas.DataFrame.from_dict(
+            pygeoprocessing.zonal_statistics((c_statv_path, 1), aoi_path),
+            orient='index')
+        mean_carbon = (
+            carbon_zonal_stat_df['sum'].sum() /
+            carbon_zonal_stat_df['count'].sum())
+        nitrogen_zonal_stat_df = pandas.DataFrame.from_dict(
+            pygeoprocessing.zonal_statistics((n_statv_path, 1), aoi_path),
+            orient='index')
+        mean_nitrogen = (
+            nitrogen_zonal_stat_df['sum'].sum() /
+            nitrogen_zonal_stat_df['count'].sum())
+        return (mean_nitrogen / mean_carbon)
+
+    from nose.tools import set_trace; set_trace()
+    nc_ratio_dict = {}
+    for pft_i in pft_id_set:
+        for statv in ['agliv', 'stded']:
+            c_statv_path = sv_reg['{}c_{}_path'.format(statv, pft_i)]
+            n_statv_path = sv_reg['{}e_1_{}_path'.format(statv, pft_i)]
+            nc_ratio = calc_nc_ratio(c_statv_path, n_statv_path, aoi_path)
+            nc_ratio_dict[nc_ratio] = '{}_{}'.format(statv, pft_i)
+
+    # order the dictionary by descending N/C ratio keys, get list from values
+    ordered_feed_types = [
+        nc_ratio_dict[key] for key in
+        sorted(nc_ratio_dict.keys(), reverse=True)]
+    return ordered_feed_types
