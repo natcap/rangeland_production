@@ -11479,7 +11479,6 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
             nitrogen_zonal_stat_df['count'].sum())
         return (mean_nitrogen / mean_carbon)
 
-    from nose.tools import set_trace; set_trace()
     nc_ratio_dict = {}
     for pft_i in pft_id_set:
         for statv in ['agliv', 'stded']:
