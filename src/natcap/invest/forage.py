@@ -186,7 +186,7 @@ _PFT_INTERMEDIATE_VALUES = [
 # but do not need to be saved as output
 _SITE_INTERMEDIATE_VALUES = [
     'amov_1', 'amov_2', 'amov_3', 'amov_4', 'amov_5', 'amov_6', 'amov_7',
-    'amov_8', 'amov_9', 'amov_10', 'snowmelt', 'bgwfunc']
+    'amov_8', 'amov_9', 'amov_10', 'snowmelt', 'bgwfunc', 'animal_density']
 
 # fixed parameters for each grazing animal type are adapted from the GRAZPLAN
 # model as described by Freer et al. 2012, "The GRAZPLAN animal biology model
@@ -712,6 +712,8 @@ def execute(args):
             desired spatial extent of the model. This has the effect of
             clipping the computational area of the input datasets to be the
             area intersected by this polygon.
+        args['management_threshold'] (float): biomass in kg/ha required to be
+            left standing at each model step after offtake by grazing animals
         args['proportion_legume_path'] (string): path to raster containing
             fraction of pasture that is legume, by weight
         args['bulk_density_path'] (string): path to bulk density raster.
@@ -1205,7 +1207,13 @@ def execute(args):
                 animal_trait_table[animal_id])
             animal_trait_table[animal_id] = revised_animal_trait_dict
 
-        _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg)
+        _estimate_animal_density(
+            aligned_inputs, args['animal_mgmt_layer_path'], month_reg)
+
+        _calc_grazing_offtake(
+            aligned_inputs, args['aoi_path'], args['management_threshold'],
+            prev_sv_reg, pft_id_set, aligned_inputs['animal_index'],
+            animal_trait_table, veg_trait_table, month_reg)
 
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
@@ -2831,45 +2839,6 @@ def _reference_evapotranspiration(
         _calc_pevap, pevap_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
-def _calc_grazing_offtake(prev_sv_reg, pft_id_set, month_reg):
-    """Calculate fraction of live and dead biomass removed by herbivores.
-
-    This is a placeholder indicating where this calculation will take place.
-    Eventually, this function will do the following:
-        - summarize available forage according to aglivc and stdedc rasters
-            indicated by prev_sv_reg['aglivc_<pft>_path'] and
-            prev_sv_reg['stdedc_<pft>_path'] for each plant functional type
-        - perform diet selection according to available forage and density of
-            herbivores on each pixel
-
-    Parameters:
-        prev_sv_reg (dict): map of key, path pairs giving paths to state
-            variables for the previous month
-        pft_id_set (set): set of integers identifying plant functional types
-        month_reg (dict): map of key, path pairs giving paths to intermediate
-            calculated values that are shared between submodels
-
-    Side effects:
-        creates or modifies the raster indicated by
-            month_reg['flgrem_<pft>'] for each plant functional type
-        creates or modifies the raster indicated by
-            month_reg['fdgrem_<pft>'] for each plant functional type
-
-    Returns:
-        None
-
-    """
-    for pft_i in pft_id_set:
-        pygeoprocessing.new_raster_from_base(
-            prev_sv_reg['aglivc_{}_path'.format(pft_i)],
-            month_reg['flgrem_{}'.format(pft_i)],
-            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
-        pygeoprocessing.new_raster_from_base(
-            prev_sv_reg['aglivc_{}_path'.format(pft_i)],
-            month_reg['fdgrem_{}'.format(pft_i)],
-            gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[0.])
-
-
 def _potential_production(
         aligned_inputs, site_param_table, current_month, month_index,
         pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg):
@@ -4135,7 +4104,7 @@ def grazing_effect_on_aboveground_production(tgprod, fracrc, flgrem, grzeff):
     valid_mask = (
         (tgprod != _TARGET_NODATA) &
         (fracrc != _TARGET_NODATA) &
-        (flgrem != _IC_NODATA) &
+        (flgrem != _TARGET_NODATA) &
         (grzeff != _IC_NODATA))
 
     agprod_prior = numpy.empty(tgprod.shape, dtype=numpy.float32)
@@ -11148,7 +11117,7 @@ def calc_max_intake(inner_animal_trait_dict):
         updated_trait_table, a dictionary of key, value pairs where values
         indicate input and derived traits for this animal type, including the
         following updated animal trait:
-            - max_intake
+            - max_intake, maximum daily forage intake in kg dry matter
 
     """
     updated_trait_table = inner_animal_trait_dict.copy()
@@ -11179,6 +11148,41 @@ def calc_max_intake(inner_animal_trait_dict):
             updated_trait_table['CI2'] - updated_trait_table['Z']) *
         CF * YF * TF * LF)  # eq 2
     return updated_trait_table
+
+
+def _estimate_animal_density(
+        aligned_inputs, animal_mgmt_layer_path, month_reg):
+    """Estimate the density of grazing animals on each pixel of the study area.
+
+    This is a placeholder indicating where this function will take place.
+    For now, the function creates a raster indicating uniform density of 0.01
+    animals per ha in areas covered by the features in the vector layer
+    `animal_mgmt_layer_path`.
+    Eventually, this function will:
+      - use the mismatch between modeled biomass in the absence of grazing and
+        observed biomass calculated from NDVI to estimate the distribution of
+        grazing intensity in the study area.
+      - From estimated grazing intensity and the location of animals given by
+        the management polygon, calculate the density of grazing animals on
+        each pixel of the study area.
+
+    Parameters:
+        animal_mgmt_layer_path (string): path to animal vector inputs giving
+            the location of grazing animals
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            the raster of estimated animal density
+
+    Side effects:
+        creates or modifies the raster indicated by month_reg['animal_density']
+
+    """
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], month_reg['animal_density'],
+        gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
+    pygeoprocessing.rasterize(
+        animal_mgmt_layer_path, month_reg['animal_density'],
+        burn_values=[0.01])
 
 
 def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
@@ -11298,19 +11302,19 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
 
     pasture_height_dict = {}
     for pft_i in pft_id_set:
-        pasture_height_dict['agliv_height_{}'.format(pft_i)] = os.path.join(
+        pasture_height_dict['agliv_{}'.format(pft_i)] = os.path.join(
             processing_dir, 'agliv_height_{}.tif'.format(pft_i))
         raster_multiplication(
             temp_val_dict['agliv_kgha_{}'.format(pft_i)], _TARGET_NODATA,
             temp_val_dict['scale_term'], _TARGET_NODATA,
-            pasture_height_dict['agliv_height_{}'.format(pft_i)],
+            pasture_height_dict['agliv_{}'.format(pft_i)],
             _TARGET_NODATA)
-        pasture_height_dict['stded_height_{}'.format(pft_i)] = os.path.join(
+        pasture_height_dict['stded_{}'.format(pft_i)] = os.path.join(
             processing_dir, 'stded_height_{}.tif'.format(pft_i))
         raster_multiplication(
             temp_val_dict['stded_kgha_{}'.format(pft_i)], _TARGET_NODATA,
             temp_val_dict['scale_term'], _TARGET_NODATA,
-            pasture_height_dict['stded_height_{}'.format(pft_i)],
+            pasture_height_dict['stded_{}'.format(pft_i)],
             _TARGET_NODATA)
 
     # clean up temporary files
@@ -11319,7 +11323,9 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
     return pasture_height_dict
 
 
-def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
+def calc_fraction_biomass(
+        sv_reg, aligned_inputs, pft_id_set, processing_dir,
+        total_weighted_C_path):
     """Calculate the fraction of total biomass represented by each feed type.
 
     The fraction of total biomass represented by live and standing dead biomass
@@ -11335,6 +11341,9 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
         pft_id_set (set): set of integers identifying plant functional types
         processing_dir (string): path to temporary processing directory where
             rasters of pasture height should be stored
+        total_weighted_C_path (string): path to raster giving total carbon in
+            aboveground live and standing dead biomass across plant functional
+            types
 
     Returns:
         frac_biomass_dict, a dictionary of key, path pairs giving fraction of
@@ -11369,24 +11378,6 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
             total_weighted_C[valid_mask])
         return weighted_fraction
 
-    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
-    temp_val_dict = {}
-    for val in [
-            'weighted_sum_aglivc', 'weighted_sum_stdedc', 'total_weighted_C']:
-        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
-
-    # calculate total weighted C in aboveground live and standing dead biomass
-    weighted_state_variable_sum(
-        'aglivc', sv_reg, aligned_inputs, pft_id_set,
-        temp_val_dict['weighted_sum_aglivc'])
-    weighted_state_variable_sum(
-        'stdedc', sv_reg, aligned_inputs, pft_id_set,
-        temp_val_dict['weighted_sum_stdedc'])
-    raster_sum(
-        temp_val_dict['weighted_sum_aglivc'], _TARGET_NODATA,
-        temp_val_dict['weighted_sum_stdedc'], _TARGET_NODATA,
-        temp_val_dict['total_weighted_C'], _TARGET_NODATA)
-
     # calculate the fraction of total biomass for aglivc and stdedc of each pft
     frac_biomass_dict = {}
     for pft_i in pft_id_set:
@@ -11394,27 +11385,23 @@ def calc_fraction_biomass(sv_reg, aligned_inputs, pft_id_set, processing_dir):
             aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         target_path = os.path.join(
             processing_dir, 'agliv_frac_bio_{}'.format(pft_i))
-        frac_biomass_dict['agliv_frac_bio_{}'.format(pft_i)] = target_path
+        frac_biomass_dict['agliv_{}'.format(pft_i)] = target_path
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['aglivc_{}_path'.format(pft_i)],
                 aligned_inputs['pft_{}'.format(pft_i)],
-                temp_val_dict['total_weighted_C']]], weighted_fraction,
+                total_weighted_C_path]], weighted_fraction,
             target_path, gdal.GDT_Float32, _TARGET_NODATA)
 
         target_path = os.path.join(
             processing_dir, 'stded_frac_bio_{}'.format(pft_i))
-        frac_biomass_dict['stded_frac_bio_{}'.format(pft_i)] = target_path
+        frac_biomass_dict['stded_{}'.format(pft_i)] = target_path
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['stdedc_{}_path'.format(pft_i)],
                 aligned_inputs['pft_{}'.format(pft_i)],
-                temp_val_dict['total_weighted_C']]], weighted_fraction,
+                total_weighted_C_path]], weighted_fraction,
             target_path, gdal.GDT_Float32, _TARGET_NODATA)
-
-    # clean up temporary files
-    shutil.rmtree(temp_dir)
-
     return frac_biomass_dict
 
 
@@ -11485,10 +11472,522 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
             c_statv_path = sv_reg['{}c_{}_path'.format(statv, pft_i)]
             n_statv_path = sv_reg['{}e_1_{}_path'.format(statv, pft_i)]
             nc_ratio = calc_nc_ratio(c_statv_path, n_statv_path, aoi_path)
-            nc_ratio_dict[nc_ratio] = '{}_{}'.format(statv, pft_i)
+            nc_ratio_dict['{}_{}'.format(statv, pft_i)] = nc_ratio
 
     # order the dictionary by descending N/C ratio keys, get list from values
-    ordered_feed_types = [
-        nc_ratio_dict[key] for key in
-        sorted(nc_ratio_dict.keys(), reverse=True)]
+    sorted_list = sorted(
+        [(ratio, feed_type) for (feed_type, ratio) in
+            nc_ratio_dict.items()], reverse=True)
+    ordered_feed_types = [feed_type for (ratio, feed_type) in sorted_list]
     return ordered_feed_types
+
+
+def calc_relative_availability(avail_biomass, sum_previous_classes):
+    """Calculate relative availability of one forage feed type.
+
+    The relative availability of a feed type is calculated from predicted rate
+    of eating and time spent eating this forage type, and from the unsatisfied
+    capacity that is left unmet by relative availability of other feed types of
+    greater digestibility. Equation 14, Freer et al. (2012).
+
+    Parameters:
+        avail_biomass (numpy.ndarray): derived, estimated rate of eating and
+            time spent eating this feed type
+        sum_previous_classes (numpy.ndarray): derived, the sum of relative
+            availability of other feed types with higher digestibility than the
+            current feed type
+
+    Returns:
+        relative_availability, relative availability of this feed type
+
+    """
+    valid_mask = (
+        (avail_biomass != _TARGET_NODATA) &
+        (sum_previous_classes != _TARGET_NODATA))
+    relative_availability = numpy.empty(
+        avail_biomass.shape, dtype=numpy.float32)
+    relative_availability[:] = _TARGET_NODATA
+    relative_availability[valid_mask] = (
+        numpy.maximum(0., 1. - sum_previous_classes[valid_mask]) *
+        avail_biomass[valid_mask])
+    return relative_availability
+
+
+def calc_max_fraction_removed(total_weighted_C, management_threshold):
+    """Calculate the maximum fraction of biomass that may be removed.
+
+    The fraction of biomass that may be removed by grazing animals is limited
+    by the management threshold, the total residual biomass required to be left
+    remaining after offtake by animals. This fraction applies to each state
+    variable and each plant functional type, so that if this maximum fraction
+    is removed from the state variables describing aboveground carbon for each
+    plant functional type, the total remaining biomass across plant functional
+    types is equal to the management threshold.
+
+    Parameters:
+        total_weighted_C (numpy.ndarray): derived, total carbon in
+            aboveground live and standing dead biomass across plant
+            functional types
+        management_threshold (numpy.ndarray): derived, biomass in kg/ha
+            required to be left standing at each model step after offtake
+            by grazing animals
+
+    Returns:
+        max_fgrem, the maximum fraction of biomass that may be removed by
+            grazing
+
+    """
+    valid_mask = (
+        (total_weighted_C != _TARGET_NODATA) &
+        (management_threshold != _TARGET_NODATA))
+    # convert total weighted C to biomass in kg/ha
+    total_biomass_kgha = total_weighted_C * 2.5 * 10
+    max_fgrem = numpy.empty(total_weighted_C.shape, dtype=numpy.float32)
+    max_fgrem[:] = _TARGET_NODATA
+    max_fgrem[valid_mask] = (
+        (total_biomass_kgha[valid_mask] - management_threshold[valid_mask]) /
+        total_biomass_kgha[valid_mask])
+    return max_fgrem
+
+
+def calc_fraction_removed(
+        c_statv, daily_intake, animal_density, max_fgrem):
+    """Calculate the fraction of carbon in one feed type removed by grazing.
+
+    Monthly demand for carbon offtake by grazing animals is calculated from the
+    predicted daily intake of an individual animal and the estimated density of
+    animals, assuming that there are 30.4 days in one model timestep. The
+    carbon actually removed by grazing is restricted to be less than or equal
+    to the maximum fraction of biomass that may be removed, according to the
+    management threshold supplied as an input by the user.
+
+    Parameters:
+        c_statv (numpy.ndarray): state variable, C in biomass
+        daily_intake (numpy.ndarray): derived, daily intake of this state
+            variable by an individual animal, estimated by diet selection
+        animal_density (numpy.ndarray): derived, density of animals per ha
+            estimated by the animal spatial distribution submodel
+        max_fgrem (numpy.ndarray): derived, the maximum fraction of carbon that
+            may be removed by grazing according to the management threshold
+
+    Returns:
+        fgrem, fraction of carbon in this state variable removed by grazing
+
+    """
+    valid_mask = (
+        (~numpy.isclose(c_statv, _SV_NODATA)) &
+        (daily_intake != _TARGET_NODATA) &
+        (animal_density != _TARGET_NODATA) &
+        (max_fgrem != _TARGET_NODATA))
+    demand = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+    demand[valid_mask] = (
+        (daily_intake[valid_mask] * animal_density[valid_mask] * 30.4) /
+        (c_statv[valid_mask] * 2.5 * 10))
+    # restrict fraction of biomass removed according to management threshold
+    fgrem = numpy.empty(c_statv.shape, dtype=numpy.float32)
+    fgrem[:] = _TARGET_NODATA
+    fgrem[valid_mask] = numpy.minimum(
+        demand[valid_mask], max_fgrem[valid_mask])
+    return fgrem
+
+
+def _calc_grazing_offtake(
+        aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
+        animal_index_path, animal_trait_table, veg_trait_table,
+        month_reg):
+    """Calculate fraction of live and dead biomass removed by herbivores.
+
+    Perform diet selection by animals grazing available forage as
+    described by state variables characterizing aboveground live and standing
+    dead vegetation of each plant functional type.  Diet selection adapted from
+    GRAZPLAN as described by Freer et al. (2012), "The GRAZPLAN animal biology
+    model for sheep and cattle and the GrazFeed decision support tool".
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each plant
+            functional type and proportion of the pasture that is legume
+        aoi_path (string): path to vector layer defining the study area of
+            interest
+        management_threshold (float): biomass required to be left
+            standing at each model step after offtake by grazing animals
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables, including C and N in aboveground live and standing dead
+        pft_id_set (set): set of integers identifying plant functional types
+        animal_index_path (string): path to raster that indexes the location of
+            grazing animal types to their parameters and traits
+        animal_trait_table (dict): map of animal id to dictionaries containing
+            animal parameters and traits
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            the density of grazing animals per ha and the fraction of biomass
+            removed from each pft
+
+    Side effects:
+        creates or modifies the raster indicated by
+            month_reg['flgrem_<pft>'] for each plant functional type
+        creates or modifies the raster indicated by
+            month_reg['fdgrem_<pft>'] for each plant functional type
+
+    Returns:
+        None
+
+    """
+    def calc_avail_biomass(
+            c_statv, pft_cover, frac_biomass, height, ZF, CR4, CR5, CR6,
+            CR12, CR13):
+        """Calculate rate and time spent eating one forage feed type.
+
+        Relative availability of a feed type is calculated from the predicted
+        rate of eating and the relative time spent eating.  These are related
+        to the biomass of the forage type and the estimated mouth size of the
+        animal. Equations 16-17, Freer et al. 2012.
+
+        Parameters:
+            c_statv (numpy.ndarray): state variable, C in biomass
+            pft_cover (numpy.ndarray): input, fractional cover of this plant
+                functional type
+            frac_biomass (numpy.ndarray): derived, fraction of total pasture
+                biomass represented by this feed type
+            height (numpy.ndarray): derived, estimated height of this feed type
+            ZF (numpy.ndarray): derived, estimated animal mouth size
+            CR4 (numpy.ndarray): parameter, kg of feed biomass at which maximum
+                grazing rate is achieved
+            CR5 (numpy.ndarray): parameter, scaling factor for relative rate of
+                eating
+            CR6 (numpy.ndarray): parameter, kg of feed biomass at which maximum
+                grazing time is achieved
+            CR12 (numpy.ndarray): parameter, effect of pasture height on
+                relative rate of eating
+            CR13 (numpy.ndarray): parameter, effect of proportion of forage in
+                this feed type on rate of eating
+
+        Returns:
+            avail_biomass, rate * time spent eating this forage feed type
+
+        """
+        valid_mask = (
+            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (~numpy.isclose(pft_cover, pft_nodata)) &
+            (frac_biomass != _TARGET_NODATA) &
+            (height != _TARGET_NODATA) &
+            (ZF != _TARGET_NODATA) &
+            (CR4 != _IC_NODATA) &
+            (CR5 != _IC_NODATA) &
+            (CR6 != _IC_NODATA) &
+            (CR12 != _IC_NODATA) &
+            (CR13 != _IC_NODATA))
+
+        # calculate weighted biomass in kg/ha from C state variable in g/m2
+        biomass = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+        biomass[valid_mask] = (
+            c_statv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        relative_time = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        relative_time[:] = _TARGET_NODATA
+        relative_time[valid_mask] = (
+            1. + CR5[valid_mask] * numpy.exp(
+                -(1. + CR13[valid_mask] * frac_biomass[valid_mask]) *
+                (CR6[valid_mask] * (
+                    1. - CR12[valid_mask] + CR12[valid_mask] *
+                    height[valid_mask]) * ZF[valid_mask] *
+                    biomass[valid_mask]) ** 2))
+        relative_rate = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        relative_rate[:] = _TARGET_NODATA
+        relative_rate[valid_mask] = (
+            1. - numpy.exp(
+                -(1. + CR13[valid_mask] * frac_biomass[valid_mask]) *
+                CR4[valid_mask] * (
+                    1. - CR12[valid_mask] + CR12[valid_mask] *
+                    height[valid_mask]) * ZF[valid_mask] *
+                biomass[valid_mask]))
+
+        avail_biomass = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        avail_biomass[:] = _TARGET_NODATA
+        avail_biomass[valid_mask] = (
+            relative_rate[valid_mask] * relative_time[valid_mask])
+        return avail_biomass
+
+    def calc_relative_ingestibility(
+            c_statv, n_statv, prop_legume, CR1, CR3, species_factor,
+            digestibility_slope, digestibility_intercept):
+        """Calculate relative ingestibility of one forage feed type.
+
+        The relative ingestibility of a feed type depends mainly on its
+        digestibility, which is calculated from its nitrogen concentration. C4
+        grasses are more ingestible than C3 grasses of the same digestibility.
+        Equations 20-21, Freer et al. (2012).
+
+        Parameters:
+            c_statv (numpy.ndarray): state variable, carbon in the feed type
+            n_statv (numpy.ndarray): state variable, nitrogen in the feed type
+            prop_legume (numpy.ndarray): input, proportion of total available
+                forage which is legume by weight
+            CR1 (numpy.ndarray): parameter, maximum potential digestibility
+            CR3 (numpy.ndarray): parameter, slope of the relationship between
+                digestibility and ingestibility
+            species_factor (numpy.ndarray): parameter, species factor for this
+                feed type
+            digestibility_slope (numpy.ndarray): parameter, slope of
+                relationship predicting dry matter digestibility from crude
+                protein concentration
+            digestibility_intercept (numpy.ndarray): parameter, intercept of
+                relationship predicting dry matter digestibility from crude
+                protein concentration
+
+        Returns:
+            rel_ingestibility, relative ingestibility of this forage feed type
+
+        """
+        valid_mask = (
+            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (~numpy.isclose(n_statv, _SV_NODATA)) &
+            (~numpy.isclose(prop_legume, legume_nodata)) &
+            (CR1 != _IC_NODATA) &
+            (CR3 != _IC_NODATA) &
+            (species_factor != _IC_NODATA) &
+            (digestibility_slope != _IC_NODATA) &
+            (digestibility_intercept != _IC_NODATA))
+
+        digestibility = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+        digestibility[valid_mask] = (
+            ((n_statv[valid_mask] * 6.25) / (c_statv[valid_mask] * 2.5)) *
+            digestibility_slope[valid_mask] +
+            digestibility_intercept[valid_mask])
+
+        rel_ingestibility = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        rel_ingestibility[:] = _TARGET_NODATA
+        rel_ingestibility[valid_mask] = (
+            1. - CR3[valid_mask] * (
+                CR1[valid_mask] - (1. - prop_legume[valid_mask]) *
+                species_factor[valid_mask] - digestibility[valid_mask]))
+        return rel_ingestibility
+
+    def calc_daily_intake(
+            proportion_legume, maximum_intake, relative_availability,
+            relative_ingestibility, relative_availability_sum, CR2):
+        """Calculate daily intake of this feed type by an individual animal.
+
+        Intake of one feed type by one animal is calculated from the animal's
+        maximum potential intake, the relative availability of the feed type,
+        and the relative ingestibility of the feed type. With greater
+        proportion of legume in the pasture, intake is increased. This
+        calculation follows Freer et al. (2012) and so intake is estimated in
+        units of kg dry matter per day, for an individual animal.
+
+        Parameters:
+            proportion_legume (numpy.ndarray): input, proportion of the pasture
+                that is legume by weight
+            maximum_intake (numpy.ndarray): derived, maximum potential daily
+                intake of forage for this animal type
+            relative_availability (numpy.ndarray): derived, relative
+                availability of this feed type
+            relative_ingestibility (numpy.ndarray): derived, relative
+                ingestibility of this feed type
+            relative_availability_sum (numpy.ndarray): derived, sum of relative
+                availability across all feed types
+            CR2 (numpy.ndarray): parameter, impact of legume on overall pasture
+                digestibility
+
+        Returns:
+            daily_intake, intake of this feed type by an individual animal in
+                kg per day
+
+        """
+        valid_mask = (
+            (~numpy.isclose(proportion_legume, legume_nodata)) &
+            (maximum_intake != _IC_NODATA) &
+            (relative_availability != _TARGET_NODATA) &
+            (relative_ingestibility != _TARGET_NODATA) &
+            (relative_availability_sum != _TARGET_NODATA) &
+            (CR2 != _IC_NODATA))
+        daily_intake = numpy.empty(
+            proportion_legume.shape, dtype=numpy.float32)
+        daily_intake[:] = _TARGET_NODATA
+        daily_intake[valid_mask] = (
+            maximum_intake[valid_mask] * relative_availability[valid_mask] *
+            relative_ingestibility[valid_mask] * (
+                1. + CR2[valid_mask] *
+                relative_availability_sum[valid_mask] ** 2 *
+                proportion_legume[valid_mask]))
+        return daily_intake
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'weighted_sum_aglivc', 'weighted_sum_stdedc', 'total_weighted_C',
+            'management_threshold', 'max_fgrem', 'avail_biomass',
+            'relative_availability_sum']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for val in [
+            'relative_ingestibility', 'relative_availability', 'daily_intake']:
+        for statv in ['agliv', 'stded']:
+            for pft_i in pft_id_set:
+                value_string = '{}_{}_{}'.format(val, statv, pft_i)
+                target_path = os.path.join(
+                    temp_dir, '{}.tif'.format(value_string))
+                temp_val_dict[value_string] = target_path
+    param_val_dict = {}
+    # animal parameters
+    for val in [
+            'max_intake', 'ZF', 'CR1', 'CR2', 'CR3', 'CR4', 'CR5', 'CR6',
+            'CR12', 'CR13']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        animal_to_val = dict(
+            [(animal_code, float(table[val])) for
+                (animal_code, table) in animal_trait_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (animal_index_path, 1), animal_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    # pft parameters
+    for val in [
+            'species_factor', 'digestibility_slope',
+            'digestibility_intercept']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                sv_reg['aglivc_{}_path'.format(pft_i)], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+
+    # calculate total weighted C in aboveground live and standing dead biomass
+    weighted_state_variable_sum(
+        'aglivc', sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_aglivc'])
+    weighted_state_variable_sum(
+        'stdedc', sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_stdedc'])
+    raster_sum(
+        temp_val_dict['weighted_sum_aglivc'], _TARGET_NODATA,
+        temp_val_dict['weighted_sum_stdedc'], _TARGET_NODATA,
+        temp_val_dict['total_weighted_C'], _TARGET_NODATA)
+
+    # calculate maximum fraction of biomass that can be removed
+    pygeoprocessing.new_raster_from_base(
+        temp_val_dict['total_weighted_C'],
+        temp_val_dict['management_threshold'],
+        gdal.GDT_Float32, [_TARGET_NODATA],
+        fill_value_list=[management_threshold])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['total_weighted_C'],
+            temp_val_dict['management_threshold']]],
+        calc_max_fraction_removed, temp_val_dict['max_fgrem'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate weighted fraction of biomass for aglivc and stdedc of each pft
+    frac_biomass_dict = calc_fraction_biomass(
+        sv_reg, aligned_inputs, pft_id_set, temp_dir,
+        temp_val_dict['total_weighted_C'])
+
+    # calculate estimated height for aglivc and stdedc of each pft
+    pasture_height_dict = calc_pasture_height(
+        sv_reg, aligned_inputs, pft_id_set, temp_dir)
+
+    # find the order of feed types on which diet selection should proceed
+    ordered_feed_types = order_by_digestibility(sv_reg, pft_id_set, aoi_path)
+
+    # initialize relative_availability_sum to 0
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'],
+        temp_val_dict['relative_availability_sum'],
+        gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[0.])
+
+    # calculate components of intake of each feed type
+    legume_nodata = pygeoprocessing.get_raster_info(
+        aligned_inputs['proportion_legume_path'])['nodata'][0]
+    relative_availability_list = []
+
+    for feed_type in ordered_feed_types:
+        statv = feed_type.split('_')[0]
+        pft_i = feed_type.split('_')[1]
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+
+        # calculate available biomass of this feed type
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['{}c_{}_path'.format(statv, pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
+                frac_biomass_dict['{}_{}'.format(statv, pft_i)],
+                pasture_height_dict['{}_{}'.format(statv, pft_i)],
+                param_val_dict['ZF'], param_val_dict['CR4'],
+                param_val_dict['CR5'], param_val_dict['CR6'],
+                param_val_dict['CR12'], param_val_dict['CR13']]],
+            calc_avail_biomass, temp_val_dict['avail_biomass'],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # calculate relative ingestibility
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['{}c_{}_path'.format(statv, pft_i)],
+                sv_reg['{}e_1_{}_path'.format(statv, pft_i)],
+                aligned_inputs['proportion_legume_path'],
+                param_val_dict['CR1'], param_val_dict['CR3'],
+                param_val_dict['species_factor_{}'.format(pft_i)],
+                param_val_dict['digestibility_slope_{}'.format(pft_i)],
+                param_val_dict['digestibility_intercept_{}'.format(pft_i)]]],
+            calc_relative_ingestibility,
+            temp_val_dict['relative_ingestibility_{}_{}'.format(statv, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # calculate relative availability including unsatisfied capacity
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['avail_biomass'],
+                temp_val_dict['relative_availability_sum']]],
+            calc_relative_availability,
+            temp_val_dict['relative_availability_{}_{}'.format(statv, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        relative_availability_list.append(
+            temp_val_dict['relative_availability_{}_{}'.format(statv, pft_i)])
+
+        # update running total of relative_availability_sum
+        raster_list_sum(
+            relative_availability_list, _TARGET_NODATA,
+            temp_val_dict['relative_availability_sum'], _TARGET_NODATA)
+
+    # calculate daily intake of each feed type
+
+    for pft_i in pft_id_set:
+        for statv in ['agliv', 'stded']:
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    aligned_inputs['proportion_legume_path'],
+                    param_val_dict['max_intake'],
+                    temp_val_dict['relative_availability_{}_{}'.format(
+                        statv, pft_i)],
+                    temp_val_dict['relative_ingestibility_{}_{}'.format(
+                        statv, pft_i)],
+                    temp_val_dict['relative_availability_sum'],
+                    param_val_dict['CR2']]],
+                calc_daily_intake,
+                temp_val_dict['daily_intake_{}_{}'.format(statv, pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+
+    # TODO check max intake, potentially reduce max intake and recalculate
+    # intake of each feed type
+
+    # calculate fraction removed, restricted by management threshold
+    for pft_i in pft_id_set:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                temp_val_dict['daily_intake_agliv_{}'.format(pft_i)],
+                month_reg['animal_density'], temp_val_dict['max_fgrem']]],
+            calc_fraction_removed, month_reg['flgrem_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['stdedc_{}_path'.format(pft_i)],
+                temp_val_dict['daily_intake_stded_{}'.format(pft_i)],
+                month_reg['animal_density'], temp_val_dict['max_fgrem']]],
+            calc_fraction_removed, month_reg['fdgrem_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
