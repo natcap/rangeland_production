@@ -1022,6 +1022,7 @@ class foragetests(unittest.TestCase):
             'n_months': 1,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'aoi_small.shp'),
+            'management_threshold': 300,
             'proportion_legume_path': os.path.join(
                 SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
@@ -10131,16 +10132,16 @@ class foragetests(unittest.TestCase):
             sv_reg, aligned_inputs, pft_id_set, processing_dir)
 
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['agliv_height_4'], height_agliv_4 - tolerance,
+            pasture_height_dict['agliv_4'], height_agliv_4 - tolerance,
             height_agliv_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['stded_height_4'], height_dead_4 - tolerance,
+            pasture_height_dict['stded_4'], height_dead_4 - tolerance,
             height_dead_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['agliv_height_5'], height_agliv_5 - tolerance,
+            pasture_height_dict['agliv_5'], height_agliv_5 - tolerance,
             height_agliv_5 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            pasture_height_dict['stded_height_5'], height_dead_5 - tolerance,
+            pasture_height_dict['stded_5'], height_dead_5 - tolerance,
             height_dead_5 + tolerance, _TARGET_NODATA)
 
     def test_calc_fraction_biomass(self):
@@ -10168,6 +10169,7 @@ class foragetests(unittest.TestCase):
         aglivc_5 = 99
         stdedc_5 = 36
         cover_5 = 0.3
+        total_weighted_C = 103
 
         agliv_frac_bio_4 = 0.38835
         stded_frac_bio_4 = 0.21845
@@ -10191,28 +10193,28 @@ class foragetests(unittest.TestCase):
         }
         create_constant_raster(aligned_inputs['pft_4'], cover_4)
         create_constant_raster(aligned_inputs['pft_5'], cover_5)
+        total_weighted_C_path = os.path.join(
+            self.workspace_dir, 'total_weighted_C.tif')
+        create_constant_raster(total_weighted_C_path, total_weighted_C)
         pft_id_set = [4, 5]
         processing_dir = self.workspace_dir
 
         frac_biomass_dict = forage.calc_fraction_biomass(
-            sv_reg, aligned_inputs, pft_id_set, processing_dir)
+            sv_reg, aligned_inputs, pft_id_set, processing_dir,
+            total_weighted_C_path)
 
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['agliv_frac_bio_4'],
-            agliv_frac_bio_4 - tolerance,
+            frac_biomass_dict['agliv_4'], agliv_frac_bio_4 - tolerance,
             agliv_frac_bio_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['stded_frac_bio_4'],
-            stded_frac_bio_4 - tolerance, stded_frac_bio_4 + tolerance,
-            _TARGET_NODATA)
+            frac_biomass_dict['stded_4'], stded_frac_bio_4 - tolerance,
+            stded_frac_bio_4 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['agliv_frac_bio_5'],
-            agliv_frac_bio_5 - tolerance,
+            frac_biomass_dict['agliv_5'], agliv_frac_bio_5 - tolerance,
             agliv_frac_bio_5 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
-            frac_biomass_dict['stded_frac_bio_5'],
-            stded_frac_bio_5 - tolerance, stded_frac_bio_5 + tolerance,
-            _TARGET_NODATA)
+            frac_biomass_dict['stded_5'], stded_frac_bio_5 - tolerance,
+            stded_frac_bio_5 + tolerance, _TARGET_NODATA)
 
     def test_order_by_digestibility(self):
         """Test `order_by_digestibility`.
@@ -10292,3 +10294,113 @@ class foragetests(unittest.TestCase):
             sv_reg, pft_id_set, args['aoi_path'])
 
         self.assertItemsEqual(ordered_feed_types, digestibility_order)
+
+    def test_calc_grazing_offtake(self):
+        """Test `_calc_grazing_offtake.`
+
+        Use the function `_calc_grazing_offtake` to perform diet selection from
+        available forage. Ensure that the selected diet matches the results
+        of diet selection performed by the beta rangeland model.
+
+        Raises:
+            AssertionError if `_calc_grazing_offtake` does not match diet
+                selection results of the beta rangeland model
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        base_args = generate_base_args()
+
+        # known inputs
+        aglivc = 0.426
+        aglive_1 = 0.0187
+        stdedc = 11.2257
+        stdede_1 = 0.4238
+        management_threshold = 300.
+        stocking_density = 0.1
+        proportion_legume = 0
+
+        max_intake = 0.8120073
+        ZF = 1.
+        CR1 = 0.8
+        CR2 = 0.17
+        CR3 = 1.7
+        CR4 = 0.00112
+        CR5 = 0.6
+        CR6 = 0.00112
+        CR12 = 0.8
+        CR13 = 0.35
+
+        species_factor = 0
+        digestibility_slope = 1.5349
+        digestibility_intercept = 0.4147
+
+        # spatial inputs
+        aligned_inputs = {
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'proportion_legume_path': os.path.join(
+                self.workspace_dir, 'proportion_legume.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(
+            aligned_inputs['proportion_legume_path'], proportion_legume)
+        aoi_path = base_args['aoi_path']
+        sv_reg = {
+            'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc.tif'),
+            'aglive_1_1_path': os.path.join(self.workspace_dir, 'aglive.tif'),
+            'stdedc_1_path': os.path.join(self.workspace_dir, 'stdedc.tif'),
+            'stdede_1_1_path': os.path.join(self.workspace_dir, 'stdede.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+
+        pft_id_set = [1]
+        animal_index_path = base_args['site_param_spatial_index_path']
+        animal_trait_table = {
+            1: {
+                'max_intake': max_intake,
+                'ZF': ZF,
+                'CR1': CR1,
+                'CR2': CR2,
+                'CR3': CR3,
+                'CR4': CR4,
+                'CR5': CR5,
+                'CR6': CR6,
+                'CR12': CR12,
+                'CR13': CR13,
+            }
+        }
+        veg_trait_table = {
+            1: {
+                'species_factor': species_factor,
+                'digestibility_intercept': digestibility_intercept,
+                'digestibility_slope': digestibility_slope,
+            }
+        }
+        month_reg = {
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
+            'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
+            'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
+        }
+        create_constant_raster(month_reg['animal_density'], stocking_density)
+
+        forage._calc_grazing_offtake(
+            aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
+            animal_index_path, animal_trait_table, veg_trait_table,
+            month_reg)
+
+        # known results
+        flgrem = 0
+        fdgrem = 0
+
+        assert_all_values_in_raster_within_range(month_reg['flgrem_1'], flgrem)
+        assert_all_values_in_raster_within_range(month_reg['fdgrem_1'], fdgrem)
