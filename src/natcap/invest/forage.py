@@ -11544,9 +11544,9 @@ def calc_max_fraction_removed(total_weighted_C, management_threshold):
     total_biomass_kgha = total_weighted_C * 2.5 * 10
     max_fgrem = numpy.empty(total_weighted_C.shape, dtype=numpy.float32)
     max_fgrem[:] = _TARGET_NODATA
-    max_fgrem[valid_mask] = (
+    max_fgrem[valid_mask] = numpy.maximum(
         (total_biomass_kgha[valid_mask] - management_threshold[valid_mask]) /
-        total_biomass_kgha[valid_mask])
+        total_biomass_kgha[valid_mask], 0.)
     return max_fgrem
 
 

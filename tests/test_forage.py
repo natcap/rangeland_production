@@ -17,6 +17,7 @@ import pygeoprocessing
 SAMPLE_DATA = "C:/Users/ginge/Dropbox/sample_inputs"
 REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 PROCESSING_DIR = None
+TEST_AOI = "C:/Users/ginge/Dropbox/sample_inputs/test_aoi.shp"
 
 _TARGET_NODATA = -1.0
 _IC_NODATA = float(numpy.finfo('float32').min)
@@ -10313,7 +10314,7 @@ class foragetests(unittest.TestCase):
         from natcap.invest import forage
         tolerance = 0.00001
 
-        base_args = generate_base_args()
+        base_args = foragetests.generate_base_args(self.workspace_dir)
 
         # known inputs
         aglivc = 0.426
@@ -10350,7 +10351,7 @@ class foragetests(unittest.TestCase):
         create_constant_raster(aligned_inputs['site_index'], 1)
         create_constant_raster(
             aligned_inputs['proportion_legume_path'], proportion_legume)
-        aoi_path = base_args['aoi_path']
+        aoi_path = TEST_AOI
         sv_reg = {
             'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc.tif'),
             'aglive_1_1_path': os.path.join(self.workspace_dir, 'aglive.tif'),
@@ -10363,7 +10364,8 @@ class foragetests(unittest.TestCase):
         create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
 
         pft_id_set = [1]
-        animal_index_path = base_args['site_param_spatial_index_path']
+        animal_index_path = os.path.join(self.workspace_dir, 'animal.tif')
+        create_constant_raster(animal_index_path, 1)
         animal_trait_table = {
             1: {
                 'max_intake': max_intake,
@@ -10402,5 +10404,9 @@ class foragetests(unittest.TestCase):
         flgrem = 0
         fdgrem = 0
 
-        assert_all_values_in_raster_within_range(month_reg['flgrem_1'], flgrem)
-        assert_all_values_in_raster_within_range(month_reg['fdgrem_1'], fdgrem)
+        self.assert_all_values_in_raster_within_range(
+            month_reg['flgrem_1'], flgrem - tolerance, flgrem + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            month_reg['fdgrem_1'], fdgrem - tolerance, fdgrem + tolerance,
+            _TARGET_NODATA)
