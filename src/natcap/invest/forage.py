@@ -11549,6 +11549,73 @@ def calc_relative_availability(avail_biomass, sum_previous_classes):
     return relative_availability
 
 
+def calc_digestibility_intake(
+        diet_path_dict, feed_type_list, diet_digestibility_path):
+    """Calculate the dry matter digestibility of forage in the diet.
+
+    The dry matter digestibility of the diet selected by grazing animals is
+    calculated from the digestibility of each feed type and the intake of that
+    feed type.
+
+    Parameters:
+        diet_path_dict (dict): map of key, path pairs where keys are strings
+            composed of 'intake' or 'digestibility' and a feed type from
+            `feed_type_list`., and paths indicate rasters describing intake or
+            digestibility of a feed type.
+        feed_type_list (list): a list of strings, each indicating one feed type
+        diet_digestibility_path (string): path to location where the result,
+            dry matter digestibility of forage in the diet, should be stored
+
+    Side effects:
+        modifies or creates the raster indicated by `diet_digestibility_path`
+            to indicate the overall dry matter digestibility of forage in the
+            diet
+
+    Returns:
+        none
+
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['intake_sum', 'digestibility_sum']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    intake_path_list = [
+        diet_path_dict['daily_intake_{}'.format(feed_type)] for feed_type in
+        sorted(feed_type_list)]
+    digestibility_path_list = [
+        diet_path_dict['digestibility_{}'.format(feed_type)] for feed_type in
+        sorted(feed_type_list)]
+
+    # sum intake across feed types
+    raster_list_sum(
+        intake_path_list, _TARGET_NODATA, temp_val_dict['intake_sum'],
+        _TARGET_NODATA)
+
+    # sum digestibility of feed types weighted by intake
+    weighted_digestibility_path_list = []
+    for feed_type_index in xrange(len(intake_path_list)):
+        target_path = os.path.join(
+            temp_dir, 'weighted_digestibility_{}.tif'.format(feed_type_index))
+        raster_multiplication(
+            intake_path_list[feed_type_index], _TARGET_NODATA,
+            digestibility_path_list[feed_type_index], _TARGET_NODATA,
+            target_path, _TARGET_NODATA)
+        weighted_digestibility_path_list.append(target_path)
+    raster_list_sum(
+        weighted_digestibility_path_list, _TARGET_NODATA,
+        temp_val_dict['digestibility_sum'], _TARGET_NODATA)
+
+    # average digestibility across feed types
+    raster_division(
+        temp_val_dict['digestibility_sum'], _TARGET_NODATA,
+        temp_val_dict['intake_sum'], _TARGET_NODATA,
+        diet_digestibility_path, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
 def calc_max_fraction_removed(total_weighted_C, management_threshold):
     """Calculate the maximum fraction of biomass that may be removed.
 
@@ -11839,7 +11906,8 @@ def _calc_grazing_offtake(
     for val in [
             'weighted_sum_aglivc', 'weighted_sum_stdedc', 'total_weighted_C',
             'management_threshold', 'max_fgrem', 'avail_biomass',
-            'relative_availability_sum']:
+            'relative_availability_sum', 'total_intake',
+            'total_digestibility']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
             'digestibility', 'relative_ingestibility', 'relative_availability',
@@ -11982,21 +12050,28 @@ def _calc_grazing_offtake(
             temp_val_dict['relative_availability_sum'], _TARGET_NODATA)
 
     # calculate daily intake of each feed type
-    for pft_i in pft_id_set:
-        for statv in ['agliv', 'stded']:
-            pygeoprocessing.raster_calculator(
-                [(path, 1) for path in [
-                    aligned_inputs['proportion_legume_path'],
-                    param_val_dict['max_intake'],
-                    temp_val_dict['relative_availability_{}_{}'.format(
-                        statv, pft_i)],
-                    temp_val_dict['relative_ingestibility_{}_{}'.format(
-                        statv, pft_i)],
-                    temp_val_dict['relative_availability_sum'],
-                    param_val_dict['CR2']]],
-                calc_daily_intake,
-                temp_val_dict['daily_intake_{}_{}'.format(statv, pft_i)],
-                gdal.GDT_Float32, _TARGET_NODATA)
+    for feed_type in ordered_feed_types:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                aligned_inputs['proportion_legume_path'],
+                param_val_dict['max_intake'],
+                temp_val_dict['relative_availability_{}'.format(feed_type)],
+                temp_val_dict['relative_ingestibility_{}'.format(feed_type)],
+                temp_val_dict['relative_availability_sum'],
+                param_val_dict['CR2']]],
+            calc_daily_intake,
+            temp_val_dict['daily_intake_{}'.format(feed_type)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+    intake_list = [
+        temp_val_dict['daily_intake_{}'.format(feed_type)] for feed_type in
+        ordered_feed_types]
+    raster_list_sum(
+        intake_list, _TARGET_NODATA, temp_val_dict['total_intake'],
+        _TARGET_NODATA)
+    calc_digestibility_intake(
+        temp_val_dict, ordered_feed_types,
+        temp_val_dict['total_digestibility'])
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:
