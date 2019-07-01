@@ -11482,6 +11482,42 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
     return ordered_feed_types
 
 
+def calc_digestibility(
+        c_statv, n_statv, digestibility_slope, digestibility_intercept):
+    """Calculate the dry matter digestibility of this feed type.
+
+    Dry matter digestibility, expressed as a fraction between 0 and 1, is
+    calculated via linear regression from crude protein content of the feed
+    type, with regression coefficients that are specific to the plant
+    functional type.
+
+    Parameters:
+        c_statv (numpy.ndarray): state variable, carbon in the feed type
+        n_statv (numpy.ndarray): state variable, nitrogen in the feed type
+        digestibility_slope (numpy.ndarray): parameter, slope of
+            relationship predicting dry matter digestibility from crude
+            protein concentration
+        digestibility_intercept (numpy.ndarray): parameter, intercept of
+            relationship predicting dry matter digestibility from crude
+            protein concentration
+
+    Returns:
+        digestibility, dry matter digestibility of the feed type
+
+    """
+    valid_mask = (
+        (~numpy.isclose(c_statv, _SV_NODATA)) &
+        (~numpy.isclose(n_statv, _SV_NODATA)) &
+        (digestibility_slope != _IC_NODATA) &
+        (digestibility_intercept != _IC_NODATA))
+    digestibility = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+    digestibility[valid_mask] = (
+        ((n_statv[valid_mask] * 6.25) / (c_statv[valid_mask] * 2.5)) *
+        digestibility_slope[valid_mask] +
+        digestibility_intercept[valid_mask])
+    return digestibility
+
+
 def calc_relative_availability(avail_biomass, sum_previous_classes):
     """Calculate relative availability of one forage feed type.
 
@@ -11710,8 +11746,7 @@ def _calc_grazing_offtake(
         return avail_biomass
 
     def calc_relative_ingestibility(
-            c_statv, n_statv, prop_legume, CR1, CR3, species_factor,
-            digestibility_slope, digestibility_intercept):
+            digestibility, prop_legume, CR1, CR3, species_factor):
         """Calculate relative ingestibility of one forage feed type.
 
         The relative ingestibility of a feed type depends mainly on its
@@ -11720,8 +11755,8 @@ def _calc_grazing_offtake(
         Equations 20-21, Freer et al. (2012).
 
         Parameters:
-            c_statv (numpy.ndarray): state variable, carbon in the feed type
-            n_statv (numpy.ndarray): state variable, nitrogen in the feed type
+            digestibility (numpy.ndarray): derived, dry matter digestibility of
+                the feed type
             prop_legume (numpy.ndarray): input, proportion of total available
                 forage which is legume by weight
             CR1 (numpy.ndarray): parameter, maximum potential digestibility
@@ -11729,34 +11764,20 @@ def _calc_grazing_offtake(
                 digestibility and ingestibility
             species_factor (numpy.ndarray): parameter, species factor for this
                 feed type
-            digestibility_slope (numpy.ndarray): parameter, slope of
-                relationship predicting dry matter digestibility from crude
-                protein concentration
-            digestibility_intercept (numpy.ndarray): parameter, intercept of
-                relationship predicting dry matter digestibility from crude
-                protein concentration
 
         Returns:
             rel_ingestibility, relative ingestibility of this forage feed type
 
         """
         valid_mask = (
-            (~numpy.isclose(c_statv, _SV_NODATA)) &
-            (~numpy.isclose(n_statv, _SV_NODATA)) &
+            (digestibility != _TARGET_NODATA) &
             (~numpy.isclose(prop_legume, legume_nodata)) &
             (CR1 != _IC_NODATA) &
             (CR3 != _IC_NODATA) &
-            (species_factor != _IC_NODATA) &
-            (digestibility_slope != _IC_NODATA) &
-            (digestibility_intercept != _IC_NODATA))
+            (species_factor != _IC_NODATA))
 
-        digestibility = numpy.zeros(c_statv.shape, dtype=numpy.float32)
-        digestibility[valid_mask] = (
-            ((n_statv[valid_mask] * 6.25) / (c_statv[valid_mask] * 2.5)) *
-            digestibility_slope[valid_mask] +
-            digestibility_intercept[valid_mask])
-
-        rel_ingestibility = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        rel_ingestibility = numpy.empty(
+            digestibility.shape, dtype=numpy.float32)
         rel_ingestibility[:] = _TARGET_NODATA
         rel_ingestibility[valid_mask] = (
             1. - CR3[valid_mask] * (
@@ -11821,7 +11842,8 @@ def _calc_grazing_offtake(
             'relative_availability_sum']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
-            'relative_ingestibility', 'relative_availability', 'daily_intake']:
+            'digestibility', 'relative_ingestibility', 'relative_availability',
+            'daily_intake']:
         for statv in ['agliv', 'stded']:
             for pft_i in pft_id_set:
                 value_string = '{}_{}_{}'.format(val, statv, pft_i)
@@ -11921,16 +11943,24 @@ def _calc_grazing_offtake(
             calc_avail_biomass, temp_val_dict['avail_biomass'],
             gdal.GDT_Float32, _TARGET_NODATA)
 
-        # calculate relative ingestibility
+        # calculate digestibility of this feed type
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['{}c_{}_path'.format(statv, pft_i)],
                 sv_reg['{}e_1_{}_path'.format(statv, pft_i)],
-                aligned_inputs['proportion_legume_path'],
-                param_val_dict['CR1'], param_val_dict['CR3'],
-                param_val_dict['species_factor_{}'.format(pft_i)],
                 param_val_dict['digestibility_slope_{}'.format(pft_i)],
                 param_val_dict['digestibility_intercept_{}'.format(pft_i)]]],
+            calc_digestibility,
+            temp_val_dict['digestibility_{}_{}'.format(statv, pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+
+        # calculate relative ingestibility
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                temp_val_dict['digestibility_{}_{}'.format(statv, pft_i)],
+                aligned_inputs['proportion_legume_path'],
+                param_val_dict['CR1'], param_val_dict['CR3'],
+                param_val_dict['species_factor_{}'.format(pft_i)]]],
             calc_relative_ingestibility,
             temp_val_dict['relative_ingestibility_{}_{}'.format(statv, pft_i)],
             gdal.GDT_Float32, _TARGET_NODATA)
@@ -11952,7 +11982,6 @@ def _calc_grazing_offtake(
             temp_val_dict['relative_availability_sum'], _TARGET_NODATA)
 
     # calculate daily intake of each feed type
-
     for pft_i in pft_id_set:
         for statv in ['agliv', 'stded']:
             pygeoprocessing.raster_calculator(
@@ -11968,9 +11997,6 @@ def _calc_grazing_offtake(
                 calc_daily_intake,
                 temp_val_dict['daily_intake_{}_{}'.format(statv, pft_i)],
                 gdal.GDT_Float32, _TARGET_NODATA)
-
-    # TODO check max intake, potentially reduce max intake and recalculate
-    # intake of each feed type
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:
