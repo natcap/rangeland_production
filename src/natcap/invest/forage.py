@@ -11560,7 +11560,7 @@ def calc_digestibility_intake(
     Parameters:
         diet_path_dict (dict): map of key, path pairs where keys are strings
             composed of 'intake' or 'digestibility' and a feed type from
-            `feed_type_list`., and paths indicate rasters describing intake or
+            `feed_type_list`, and paths indicate rasters describing intake or
             digestibility of a feed type.
         feed_type_list (list): a list of strings, each indicating one feed type
         diet_digestibility_path (string): path to location where the result,
@@ -11611,6 +11611,82 @@ def calc_digestibility_intake(
         temp_val_dict['digestibility_sum'], _TARGET_NODATA,
         temp_val_dict['intake_sum'], _TARGET_NODATA,
         diet_digestibility_path, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
+def calc_crude_protein_intake(
+        sv_reg, diet_path_dict, feed_type_list, crude_protein_intake_path):
+    """Calculate the intake of crude protein from forage in the diet.
+
+    The total intake of crude protein in the selected diet is calculated from
+    the crude protein content of each feed type and the intake of that feed
+    type.
+
+    Parameters:
+        sv_reg (dict): map of key, path pairs giving paths to state variables,
+            including carbon and nitrogen in each feed type
+        diet_path_dict (dict): map of key, path pairs where keys are strings
+            composed of 'intake' and a feed type from `feed_type_list`, and
+            paths indicate rasters describing intake of a feed type.
+        feed_type_list (list): a list of strings, each indicating one feed type
+        crude_protein_intake_path (string): path to location where the result,
+            crude protein intake in the diet, should be stored
+
+    Side effects:
+        modifies or creates the raster indicated by `crude_protein_intake_path`
+            to indicate the crude protein intake in the diet
+
+    Returns:
+        none
+
+    """
+    def calc_weighted_crude_protein(c_statv, n_statv, intake):
+        """Calculate intake of crude protein from one feed type.
+
+        The intake of crude protein from one feed type is calculated from
+        an adjusted ratio of nitrogen to carbon in the feed type, and the
+        intake of that feed type.
+
+        Parameters:
+            c_statv (numpy.ndarray): state variable, carbon in the feed type
+            n_statv (numpy.ndarray): state variable, nitrogen in the feed type
+            intake (numpy.ndarray): derived, intake of this feed type in the
+                diet
+
+        Returns:
+            weighted_cp, intake of crude protein from one feed type
+
+        """
+        valid_mask = (
+            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (~numpy.isclose(n_statv, _SV_NODATA)) &
+            (intake != _TARGET_NODATA))
+        weighted_cp = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        weighted_cp[:] = _TARGET_NODATA
+        weighted_cp[valid_mask] = (
+            ((n_statv[valid_mask] * 6.25) / (c_statv[valid_mask] * 2.5)) *
+            intake[valid_mask])
+        return weighted_cp
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    weighted_crude_protein_path_list = []
+    for feed_type in feed_type_list:
+        statv = feed_type.split('_')[0]
+        pft_i = feed_type.split('_')[1]
+        target_path = os.path.join(
+            temp_dir, 'weighted_cp_{}.tif'.format(feed_type))
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['{}c_{}_path'.format(statv, pft_i)],
+                sv_reg['{}e_1_{}_path'.format(statv, pft_i)],
+                diet_path_dict['daily_intake_{}'.format(feed_type)]]],
+            calc_weighted_crude_protein, target_path,
+            gdal.GDT_Float32, _TARGET_NODATA)
+        weighted_crude_protein_path_list.append(target_path)
+    raster_list_sum(
+        weighted_crude_protein_path_list, _TARGET_NODATA,
+        crude_protein_intake_path, _TARGET_NODATA)
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
@@ -11907,7 +11983,7 @@ def _calc_grazing_offtake(
             'weighted_sum_aglivc', 'weighted_sum_stdedc', 'total_weighted_C',
             'management_threshold', 'max_fgrem', 'avail_biomass',
             'relative_availability_sum', 'total_intake',
-            'total_digestibility']:
+            'total_digestibility', 'total_crude_protein_intake']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
             'digestibility', 'relative_ingestibility', 'relative_availability',
@@ -12072,6 +12148,9 @@ def _calc_grazing_offtake(
     calc_digestibility_intake(
         temp_val_dict, ordered_feed_types,
         temp_val_dict['total_digestibility'])
+    calc_crude_protein_intake(
+        sv_reg, temp_val_dict, ordered_feed_types,
+        temp_val_dict['total_crude_protein_intake'])
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:
