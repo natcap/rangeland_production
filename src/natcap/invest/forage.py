@@ -801,10 +801,10 @@ def execute(args):
             integers. These integer values correspond to features in the
             animal management layer.
             Other required fields in this table are:
-                type (allowable values: B_indicus, B_taurus,
+                type (allowable values: b_indicus, b_taurus,
                     indicus_x_taurus, sheep, camelid, hindgut_fermenter)
-                sex (allowable values: entire_m, castrate, lac_female,
-                    nonlac_female)
+                sex (allowable values: entire_m, castrate, breeding_female,
+                    NA)
                 age (days)
                 weight (kg)
                 SRW (standard reference weight, kg; the weight of a mature
@@ -11830,6 +11830,35 @@ def calc_energy_maintenance(
     return energy_maintenance
 
 
+def calc_degr_protein_intake(crude_protein_intake, total_digestibility):
+    """Calculate rumen degradable protein intake from the diet.
+
+    Rumen degradable protein intake from the diet is calculated from total
+    crude protein intake. If the diet is low in dry matter digestibility, the
+    degradable protein in the diet is less than the intake of crude protein.
+
+    Parameters:
+        crude_protein_intake (numpy.ndarray): derived, intake of crude protein
+            from forage
+        total_digestibility (numpy.ndarray): derived, dry matter digestibility
+            of forage in the diet
+
+    Returns:
+        degr_protein_intake, rumen degradable protein intake from the diet
+
+    """
+    valid_mask = (
+        (crude_protein_intake != _TARGET_NODATA) &
+        (total_digestibility != _TARGET_NODATA))
+    degr_protein_intake = numpy.empty(
+        crude_protein_intake.shape, dtype=numpy.float32)
+    degr_protein_intake[:] = _TARGET_NODATA
+    degr_protein_intake[valid_mask] = (
+        crude_protein_intake[valid_mask] * numpy.minimum(
+            0.84 * total_digestibility[valid_mask] + 0.33, 1.))
+    return degr_protein_intake
+
+
 def calc_max_fraction_removed(total_weighted_C, management_threshold):
     """Calculate the maximum fraction of biomass that may be removed.
 
@@ -12122,7 +12151,8 @@ def _calc_grazing_offtake(
             'management_threshold', 'max_fgrem', 'avail_biomass',
             'relative_availability_sum', 'total_intake',
             'total_digestibility', 'total_crude_protein_intake',
-            'energy_intake', 'energy_maintenance']:
+            'energy_intake', 'energy_maintenance',
+            'degr_protein_intake']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
             'digestibility', 'relative_ingestibility', 'relative_availability',
@@ -12309,6 +12339,12 @@ def _calc_grazing_offtake(
             param_val_dict['CM6'], param_val_dict['CM7'],
             param_val_dict['CM16']]],
         calc_energy_maintenance, temp_val_dict['energy_maintenance'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['total_crude_protein_intake'],
+            temp_val_dict['total_digestibility']]],
+        calc_degr_protein_intake, temp_val_dict['degr_protein_intake'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate fraction removed, restricted by management threshold
