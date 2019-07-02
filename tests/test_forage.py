@@ -10345,10 +10345,15 @@ class foragetests(unittest.TestCase):
         CM6 = 0.02
         CM7 = 0.9
         CM16 = 0.0026
+        CRD4 = 0.007
+        CRD5 = 0.005
+        CRD6 = 0.35
+        CRD7 = 0.1
 
         species_factor = 0
         digestibility_slope = 1.5349
         digestibility_intercept = 0.4147
+        current_month = 4
 
         # spatial inputs
         aligned_inputs = {
@@ -10400,6 +10405,10 @@ class foragetests(unittest.TestCase):
                 'CM6': CM6,
                 'CM7': CM7,
                 'CM16': CM16,
+                'CRD4': CRD4,
+                'CRD5': CRD5,
+                'CRD6': CRD6,
+                'CRD7': CRD7,
             }
         }
         veg_trait_table = {
@@ -10420,7 +10429,7 @@ class foragetests(unittest.TestCase):
         forage._calc_grazing_offtake(
             aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
             animal_index_path, animal_trait_table, veg_trait_table,
-            month_reg)
+            current_month, month_reg)
 
         # known results
         flgrem = 0

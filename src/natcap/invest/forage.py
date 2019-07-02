@@ -1213,7 +1213,7 @@ def execute(args):
         _calc_grazing_offtake(
             aligned_inputs, args['aoi_path'], args['management_threshold'],
             prev_sv_reg, pft_id_set, aligned_inputs['animal_index'],
-            animal_trait_table, veg_trait_table, month_reg)
+            animal_trait_table, veg_trait_table, current_month, month_reg)
 
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
@@ -11859,6 +11859,104 @@ def calc_degr_protein_intake(crude_protein_intake, total_digestibility):
     return degr_protein_intake
 
 
+def calc_protein_req(
+        energy_intake_path, energy_maintenance_path, CRD4_path, CRD5_path,
+        CRD6_path, CRD7_path, current_month, protein_req_path):
+    """Calculate rumen degradable protein required.
+
+    The requirement for rumen degradable protein depends on the ratio of energy
+    intake to maintenance energy requirements, and estimated seasonal impacts
+    on microbial protein synthesis.
+
+    Parameters:
+        energy_intake_path (string): path to raster containing total energy
+            intake from the diet
+        energy_maintenance_path (string): path to raster containing energy
+            requirements of maintenance
+        CRD4_path (string): path to raster containing the parameter CRD4
+        CRD5_path (string): path to raster containing the parameter CRD5
+        CRD6_path (string): path to raster containing the parameter CRD6
+        CRD7_path (string): path to raster containing the parameter CRD7
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        protein_req_path (string): path to raster that should contain the
+            result, rumen degradable protein required
+
+    Side effects:
+        modifies or creates the raster indicated by `protein_req_path`
+
+    Returns:
+        None
+
+    """
+    def protein_req_op(current_month):
+        def _protein_req_op(
+                latitude, energy_intake, energy_maintenance, CRD4, CRD5, CRD6,
+                CRD7):
+            """Calculate rumen degradable protein required.
+
+            Parameters:
+                latitude (numpy.ndarray): derived, site latitude in degrees
+                energy_intake (numpy.ndarray): derived, total intake of
+                    metabolizable energy from the diet
+                energy_maintenance (numpy.ndarray): derived, energy
+                    requirements of maintenance
+                CRD4 (numpy.ndarray): parameter, basal rumen degradable protein
+                    requirement
+                CRD5 (numpy.ndarray): parameter, multiplier for total impact of
+                    energy intake and seasonal effects on rumen degradable
+                    protein requirement
+                CRD6 (numpy.ndarray): parameter, multiplier for impact of
+                    energy intake on rumen degradable protein requirement
+                CRD7 (numpy.ndarray): parameter, multiplier for seasonal impact
+                    on rumen degradable protein requirement
+
+            Returns:
+                protein_req, rumen degradable protein required
+
+            """
+            valid_mask = (
+                (energy_maintenance != _TARGET_NODATA) &
+                (energy_intake != _TARGET_NODATA) &
+                (CRD4 != _IC_NODATA) &
+                (CRD5 != _IC_NODATA) &
+                (CRD6 != _IC_NODATA) &
+                (CRD7 != _IC_NODATA))
+            # estimated day of the year in the middle of current current_month
+            day_of_year = 15.2 + 30.4 * (current_month - 1)
+
+            radiation_factor = numpy.empty(latitude.shape, dtype=numpy.float32)
+            radiation_factor[valid_mask] = (
+                1. + CRD7[valid_mask] * (latitude[valid_mask] / 40.) *
+                numpy.sin((2. * numpy.pi * day_of_year) / 365.))
+
+            protein_req = numpy.empty(latitude.shape, dtype=numpy.float32)
+            protein_req[:] = _TARGET_NODATA
+            protein_req[valid_mask] = (
+                (CRD4[valid_mask] + CRD5[valid_mask] * (1. - numpy.exp(
+                    -CRD6[valid_mask] * (
+                        energy_intake[valid_mask] /
+                        energy_maintenance[valid_mask])))) *
+                (radiation_factor[valid_mask] * energy_intake[valid_mask]))
+            return protein_req
+        return _protein_req_op
+
+    # calculate an intermediate input, latitude at each pixel center
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    latitude_raster_path = os.path.join(temp_dir, 'latitude.tif')
+    calc_latitude(energy_intake_path, latitude_raster_path)
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            latitude_raster_path, energy_intake_path, energy_maintenance_path,
+            CRD4_path, CRD5_path, CRD6_path, CRD7_path]],
+        protein_req_op(current_month), protein_req_path,
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)
+
+
 def calc_max_fraction_removed(total_weighted_C, management_threshold):
     """Calculate the maximum fraction of biomass that may be removed.
 
@@ -11939,7 +12037,7 @@ def calc_fraction_removed(
 
 def _calc_grazing_offtake(
         aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
-        animal_index_path, animal_trait_table, veg_trait_table,
+        animal_index_path, animal_trait_table, veg_trait_table, current_month,
         month_reg):
     """Calculate fraction of live and dead biomass removed by herbivores.
 
@@ -11966,6 +12064,8 @@ def _calc_grazing_offtake(
             animal parameters and traits
         veg_trait_table (dict): map of pft id to dictionaries containing
             plant functional type parameters
+        current_month (int): month of the year, such that current_month=1
+            indicates January
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             the density of grazing animals per ha and the fraction of biomass
@@ -12152,7 +12252,7 @@ def _calc_grazing_offtake(
             'relative_availability_sum', 'total_intake',
             'total_digestibility', 'total_crude_protein_intake',
             'energy_intake', 'energy_maintenance',
-            'degr_protein_intake']:
+            'degr_protein_intake', 'protein_req']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
             'digestibility', 'relative_ingestibility', 'relative_availability',
@@ -12168,7 +12268,8 @@ def _calc_grazing_offtake(
     for val in [
             'age', 'sex_int', 'W_total', 'max_intake', 'ZF', 'CR1', 'CR2',
             'CR3', 'CR4', 'CR5', 'CR6', 'CR12', 'CR13', 'CK1', 'CK2', 'CM1',
-            'CM2', 'CM3', 'CM4', 'CM6', 'CM7', 'CM16']:
+            'CM2', 'CM3', 'CM4', 'CM6', 'CM7', 'CM16', 'CRD4', 'CRD5', 'CRD6',
+            'CRD7']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         animal_to_val = dict(
@@ -12346,6 +12447,10 @@ def _calc_grazing_offtake(
             temp_val_dict['total_digestibility']]],
         calc_degr_protein_intake, temp_val_dict['degr_protein_intake'],
         gdal.GDT_Float32, _TARGET_NODATA)
+    calc_protein_req(
+        temp_val_dict['energy_intake'], temp_val_dict['energy_maintenance'],
+        param_val_dict['CRD4'], param_val_dict['CRD5'], param_val_dict['CRD6'],
+        param_val_dict['CRD7'], current_month, temp_val_dict['protein_req'])
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:
