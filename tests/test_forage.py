@@ -10314,8 +10314,6 @@ class foragetests(unittest.TestCase):
         from natcap.invest import forage
         tolerance = 0.00001
 
-        base_args = foragetests.generate_base_args(self.workspace_dir)
-
         # known inputs
         aglivc = 0.426
         aglive_1 = 0.0187
@@ -10325,6 +10323,9 @@ class foragetests(unittest.TestCase):
         stocking_density = 0.1
         proportion_legume = 0
 
+        age = 116
+        sex_int = 4
+        W_total = 18.6
         max_intake = 0.8120073
         ZF = 1.
         CR1 = 0.8
@@ -10335,6 +10336,15 @@ class foragetests(unittest.TestCase):
         CR6 = 0.00112
         CR12 = 0.8
         CR13 = 0.35
+        CK1 = 0.5
+        CK2 = 0.02
+        CM1 = 0.09
+        CM2 = 0.26
+        CM3 = 0.00008
+        CM4 = 0.84
+        CM6 = 0.02
+        CM7 = 0.9
+        CM16 = 0.0026
 
         species_factor = 0
         digestibility_slope = 1.5349
@@ -10368,6 +10378,9 @@ class foragetests(unittest.TestCase):
         create_constant_raster(animal_index_path, 1)
         animal_trait_table = {
             1: {
+                'age': age,
+                'sex_int': sex_int,
+                'W_total': W_total,
                 'max_intake': max_intake,
                 'ZF': ZF,
                 'CR1': CR1,
@@ -10378,6 +10391,15 @@ class foragetests(unittest.TestCase):
                 'CR6': CR6,
                 'CR12': CR12,
                 'CR13': CR13,
+                'CK1': CK1,
+                'CK2': CK2,
+                'CM1': CM1,
+                'CM2': CM2,
+                'CM3': CM3,
+                'CM4': CM4,
+                'CM6': CM6,
+                'CM7': CM7,
+                'CM16': CM16,
             }
         }
         veg_trait_table = {

@@ -11012,6 +11012,18 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
             - BC, relative body condition
             - Z, relative size
             - ZF, size factor reflecting mouth size of young animals
+            - sex_int, integer indicating animal sex:
+                1: entire male
+                2: castrate male
+                3: breeding female
+                4: non-breeding female, default
+            - type_int, integer indicating animal type or breed:
+                1: Bos indicus, default
+                2: Bos taurus
+                3: Bos indicus * taurus cross
+                4: sheep or goat
+                5: camelid
+                6: hindgut fermenter
 
     """
     input_df = pandas.DataFrame.from_dict(
@@ -11036,6 +11048,16 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
         animal_df['Z'] < animal_df['CR7'], 1. +
         (animal_df['CR7'] - animal_df['Z']), 1.)
     animal_df['BC'] = animal_df['weight'] / N  # relative condition
+    animal_df['sex_int'] = 4
+    animal_df.loc[animal_df.sex == 'entire_m', 'sex_int'] = 1
+    animal_df.loc[animal_df.sex == 'castrate', 'sex_int'] = 2
+    animal_df.loc[animal_df.sex == 'breeding_female', 'sex_int'] = 3
+    animal_df['type_int'] = 1
+    animal_df.loc[animal_df.type == 'b_taurus', 'type_int'] = 2
+    animal_df.loc[animal_df.type == 'indicus_x_taurus', 'type_int'] = 3
+    animal_df.loc[animal_df.type == 'sheep', 'type_int'] = 4
+    animal_df.loc[animal_df.type == 'camelid', 'type_int'] = 5
+    animal_df.loc[animal_df.type == 'hindgut_fermenter', 'type_int'] = 6
     animal_trait_table = animal_df.to_dict(orient='index')
     return animal_trait_table
 
@@ -11692,6 +11714,122 @@ def calc_crude_protein_intake(
     shutil.rmtree(temp_dir)
 
 
+def calc_energy_intake(total_intake, total_digestibility):
+    """Calculate the total intake of metabolizable energy.
+
+    The intake of metabolizable energy in the selected diet is estimated from
+    the dry matter digestibility of the diet, expressed as a fraction between
+    0 and 1.  Equation 31 in Freer et al. (2012).
+
+    Parameters:
+        total_intake (numpy.ndarray): derived, intake of forage in the diet in
+            kg per ha per day
+        total_digestibility (numpy.ndarray): derived, dry matter digestibility
+            of forage in the selected diet
+
+    Returns:
+        energy_intake, total intake of metabolizable energy from the diet
+
+    """
+    valid_mask = (
+        (total_intake != _TARGET_NODATA) &
+        (total_digestibility != _TARGET_NODATA))
+    energy_intake = numpy.empty(total_intake.shape, dtype=numpy.float32)
+    energy_intake[:] = _TARGET_NODATA
+    energy_intake[valid_mask] = (
+        (17. * total_digestibility[valid_mask] - 2.) *
+        total_intake[valid_mask])
+    return energy_intake
+
+
+def calc_energy_maintenance(
+        age, sex, weight, energy_intake, total_intake, total_digestibility,
+        CK1, CK2, CM1, CM2, CM3, CM4, CM6, CM7, CM16):
+    """Calculate energy requirements of maintenance.
+
+    Energy requirements of maintenance include basal metabolic energy
+    requirements according to the animal's size, and energy requirements of
+    walking and grazing.  Equations 41-44, Freer et al. (2012).
+
+    Parameters:
+        age (numpy.ndarray): input, animal age in days
+        sex (numpy.ndarray): derived, integer indication of animal sex:
+            1: entire male
+            2: castrate male
+            3: breeding female
+            4: non-breeding female
+        weight (numpy.ndarray): derived, animal weight in kg including weight
+            of the fetus for pregnant females
+        energy_intake (numpy.ndarray): derived, total intake of metabolizable
+            energy from the diet
+        total_intake (numpy.ndarray): derived, intake of forage in the diet
+        total_digestibility (numpy.ndarray): derived, dry matter digestibility
+            of forage in the diet
+        CK1 (numpy.ndarray): parameter, basal efficiency of energy use for
+            maintenance
+        CK2 (numpy.ndarray): parameter, impact of energy density of diet on
+            efficiency of energy use for maintenance
+        CM1 (numpy.ndarray): parameter, basal rate of energy use for
+            maintenance
+        CM2 (numpy.ndarray): parameter, weight scalar for basal metabolic rate
+        CM3 (numpy.ndarray): parameter, effect of age on basal metabolic rate
+        CM4 (numpy.ndarray): parameter, minimum effect of age on basal
+            metabolic rate
+        CM6 (numpy.ndarray): parameter, multiplier for energetic cost of
+            chewing
+        CM7 (numpy.ndarray): parameter, effect of digestibility on energetic
+            cost of chewing
+        CM16 (numpy.ndarray): parameter, basal energy cost of walking
+
+    Returns:
+        energy_maintenance, energy requirements of maintenance
+
+    """
+    valid_mask = (
+        (age != _TARGET_NODATA) &
+        (sex != _TARGET_NODATA) &
+        (weight != _TARGET_NODATA) &
+        (energy_intake != _TARGET_NODATA) &
+        (total_intake != _TARGET_NODATA) &
+        (total_digestibility != _TARGET_NODATA) &
+        (CK1 != _IC_NODATA) &
+        (CK2 != _IC_NODATA) &
+        (CM1 != _IC_NODATA) &
+        (CM2 != _IC_NODATA) &
+        (CM3 != _IC_NODATA) &
+        (CM4 != _IC_NODATA) &
+        (CM6 != _IC_NODATA) &
+        (CM7 != _IC_NODATA) &
+        (CM16 != _IC_NODATA))
+    km = numpy.empty(age.shape, dtype=numpy.float32)
+    km[valid_mask] = (
+        CK1[valid_mask] + CK2[valid_mask] * (
+            energy_intake[valid_mask] / total_intake[valid_mask]))
+    Egraze = numpy.empty(age.shape, dtype=numpy.float32)
+    Egraze[valid_mask] = (
+        CM6[valid_mask] * weight[valid_mask] * total_intake[valid_mask] *
+        (CM7[valid_mask] - total_digestibility[valid_mask]) +
+        (CM16[valid_mask] * 4. * weight[valid_mask]))
+    Emetab = numpy.empty(age.shape, dtype=numpy.float32)
+    Emetab[valid_mask] = (
+        CM2[valid_mask] * weight[valid_mask] ** 0.75 *
+        numpy.maximum(
+            numpy.exp(-CM3[valid_mask] * age[valid_mask]), CM4[valid_mask]))
+
+    energy_maintenance_female = numpy.empty(age.shape, dtype=numpy.float32)
+    energy_maintenance_female[:] = _TARGET_NODATA
+    energy_maintenance_female[valid_mask] = (
+        (Emetab[valid_mask] + Egraze[valid_mask]) / km[valid_mask] +
+        CM1[valid_mask] * energy_intake[valid_mask])
+
+    energy_maintenance = energy_maintenance_female
+    male_mask = (
+        (sex < 3) &
+        (valid_mask))
+    energy_maintenance[male_mask] = energy_maintenance_female[male_mask] * 1.15
+    return energy_maintenance
+
+
 def calc_max_fraction_removed(total_weighted_C, management_threshold):
     """Calculate the maximum fraction of biomass that may be removed.
 
@@ -11983,7 +12121,8 @@ def _calc_grazing_offtake(
             'weighted_sum_aglivc', 'weighted_sum_stdedc', 'total_weighted_C',
             'management_threshold', 'max_fgrem', 'avail_biomass',
             'relative_availability_sum', 'total_intake',
-            'total_digestibility', 'total_crude_protein_intake']:
+            'total_digestibility', 'total_crude_protein_intake',
+            'energy_intake', 'energy_maintenance']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
             'digestibility', 'relative_ingestibility', 'relative_availability',
@@ -11997,8 +12136,9 @@ def _calc_grazing_offtake(
     param_val_dict = {}
     # animal parameters
     for val in [
-            'max_intake', 'ZF', 'CR1', 'CR2', 'CR3', 'CR4', 'CR5', 'CR6',
-            'CR12', 'CR13']:
+            'age', 'sex_int', 'W_total', 'max_intake', 'ZF', 'CR1', 'CR2',
+            'CR3', 'CR4', 'CR5', 'CR6', 'CR12', 'CR13', 'CK1', 'CK2', 'CM1',
+            'CM2', 'CM3', 'CM4', 'CM6', 'CM7', 'CM16']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         animal_to_val = dict(
@@ -12151,6 +12291,25 @@ def _calc_grazing_offtake(
     calc_crude_protein_intake(
         sv_reg, temp_val_dict, ordered_feed_types,
         temp_val_dict['total_crude_protein_intake'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['total_intake'],
+            temp_val_dict['total_digestibility']]],
+        calc_energy_intake, temp_val_dict['energy_intake'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['age'], param_val_dict['sex_int'],
+            param_val_dict['W_total'], temp_val_dict['energy_intake'],
+            temp_val_dict['total_intake'],
+            temp_val_dict['total_digestibility'],
+            param_val_dict['CK1'], param_val_dict['CK2'],
+            param_val_dict['CM1'], param_val_dict['CM2'],
+            param_val_dict['CM3'], param_val_dict['CM4'],
+            param_val_dict['CM6'], param_val_dict['CM7'],
+            param_val_dict['CM16']]],
+        calc_energy_maintenance, temp_val_dict['energy_maintenance'],
+        gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:
