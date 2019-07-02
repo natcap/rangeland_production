@@ -11957,6 +11957,97 @@ def calc_protein_req(
     shutil.rmtree(temp_dir)
 
 
+def revise_max_intake(
+        max_intake, total_digestibility, energy_intake, energy_maintenance,
+        degr_protein_intake, protein_req, animal_type, CRD1, CRD2):
+    """Calculate revised maximum intake from protein content of the diet.
+
+    When animals are unable to obtain enough protein from the diet to maintain
+    microbial activity in the rumen, the passage rate of feed slows and the
+    animal is able to eat less forage overall. Here that dynamic is reflected
+    by reducing maximum potential intake if protein content of the initially
+    selected diet is low.
+
+    Parameters:
+        max_intake (numpy.ndarray): derived, initial maximum potential daily
+            intake of forage
+        total_digestibility (numpy.ndarray): derived, average dry matter
+            digestibility of forage in the diet
+        energy_intake (numpy.ndarray): derived, total metabolizable energy
+            intake from the diet
+        energy_maintenance (numpy.ndarray): derived, energy requirements of
+            maintenance
+        degr_protein_intake (numpy.ndarray): derived, total rumen degradable
+            protein intake from the diet
+        protein_req (numpy.ndarray): derived, rumen degradable protein required
+            to maintain microbial activity
+        animal_type (numpy.ndarray): parameter, integer indication of animal
+            type or breed:
+            1: Bos indicus, default
+            2: Bos taurus
+            3: Bos indicus * taurus cross
+            4: sheep or goat
+            5: camelid
+            6: hindgut fermenter
+        CRD1 (numpy.ndarray): parameter, intercept of regression predicting
+            degradability of protein from digestibility of the diet
+        CRD2 (numpy.ndarray): parameter, slope of relationship predicting
+            degradability of protein from digestibility of the diet
+
+    Returns:
+        max_intake_revised, revised maximum potential daily intake of forage
+
+    """
+    valid_mask = (
+        (max_intake != _TARGET_NODATA) &
+        (total_digestibility != _TARGET_NODATA) &
+        (energy_intake != _TARGET_NODATA) &
+        (energy_maintenance != _TARGET_NODATA) &
+        (degr_protein_intake != _TARGET_NODATA) &
+        (protein_req != _TARGET_NODATA) &
+        (animal_type != _IC_NODATA) &
+        (CRD1 != _IC_NODATA) &
+        (CRD2 != _IC_NODATA))
+
+    corrected_protein_intake = degr_protein_intake
+    high_intake_mask = (
+        (((energy_intake / energy_maintenance) - 1) > 0) &
+        valid_mask)
+    corrected_protein_intake[high_intake_mask] = (
+        degr_protein_intake[high_intake_mask] *
+        (1. - (
+            CRD1[high_intake_mask] - CRD2[high_intake_mask] *
+            total_digestibility[high_intake_mask]) *
+            (energy_intake[high_intake_mask] /
+                energy_maintenance[high_intake_mask]) - 1.))
+
+    reduction_factor = numpy.empty(max_intake.shape, dtype=numpy.float32)
+    reduction_factor[valid_mask] = 1.
+
+    # maximum intake is reduced by the ratio of protein intake to requirement
+    insuff_mask = ((protein_req > corrected_protein_intake) & valid_mask)
+    reduction_factor[insuff_mask] = (
+        corrected_protein_intake[insuff_mask] / protein_req[insuff_mask])
+    # for Bos indicus cattle, intake is reduced by only half of this factor
+    insuff_indicus_mask = ((animal_type == 1) & insuff_mask)
+    reduction_factor[insuff_indicus_mask] = (
+        1. - ((1. - (
+            corrected_protein_intake[insuff_indicus_mask] /
+            protein_req[insuff_indicus_mask])) * 0.5))
+    # for cattle of crossed indicus * taurus breed, intake is reduced by 75%
+    # of this factor
+    insuff_cross_mask = ((animal_type == 3) & insuff_mask)
+    reduction_factor[insuff_cross_mask] = (
+        1. - ((1. - (
+            corrected_protein_intake[insuff_cross_mask] /
+            protein_req[insuff_cross_mask])) * 0.75))
+    # apply the reduction factor
+    max_intake_revised = max_intake
+    max_intake_revised[valid_mask] = (
+        max_intake[valid_mask] * reduction_factor[valid_mask])
+    return max_intake_revised
+
+
 def calc_max_fraction_removed(total_weighted_C, management_threshold):
     """Calculate the maximum fraction of biomass that may be removed.
 
@@ -12252,7 +12343,7 @@ def _calc_grazing_offtake(
             'relative_availability_sum', 'total_intake',
             'total_digestibility', 'total_crude_protein_intake',
             'energy_intake', 'energy_maintenance',
-            'degr_protein_intake', 'protein_req']:
+            'degr_protein_intake', 'protein_req', 'max_intake_revised']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     for val in [
             'digestibility', 'relative_ingestibility', 'relative_availability',
@@ -12266,10 +12357,10 @@ def _calc_grazing_offtake(
     param_val_dict = {}
     # animal parameters
     for val in [
-            'age', 'sex_int', 'W_total', 'max_intake', 'ZF', 'CR1', 'CR2',
-            'CR3', 'CR4', 'CR5', 'CR6', 'CR12', 'CR13', 'CK1', 'CK2', 'CM1',
-            'CM2', 'CM3', 'CM4', 'CM6', 'CM7', 'CM16', 'CRD4', 'CRD5', 'CRD6',
-            'CRD7']:
+            'age', 'sex_int', 'type_int', 'W_total', 'max_intake', 'ZF', 'CR1',
+            'CR2', 'CR3', 'CR4', 'CR5', 'CR6', 'CR12', 'CR13', 'CK1', 'CK2',
+            'CM1', 'CM2', 'CM3', 'CM4', 'CM6', 'CM7', 'CM16', 'CRD1', 'CRD2',
+            'CRD4', 'CRD5', 'CRD6', 'CRD7']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         animal_to_val = dict(
@@ -12410,6 +12501,7 @@ def _calc_grazing_offtake(
             temp_val_dict['daily_intake_{}'.format(feed_type)],
             gdal.GDT_Float32, _TARGET_NODATA)
 
+    # recalculate maximum potential intake according to protein in the diet
     intake_list = [
         temp_val_dict['daily_intake_{}'.format(feed_type)] for feed_type in
         ordered_feed_types]
@@ -12451,6 +12543,29 @@ def _calc_grazing_offtake(
         temp_val_dict['energy_intake'], temp_val_dict['energy_maintenance'],
         param_val_dict['CRD4'], param_val_dict['CRD5'], param_val_dict['CRD6'],
         param_val_dict['CRD7'], current_month, temp_val_dict['protein_req'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['max_intake'], temp_val_dict['total_digestibility'],
+            temp_val_dict['energy_intake'],
+            temp_val_dict['energy_maintenance'],
+            temp_val_dict['degr_protein_intake'], temp_val_dict['protein_req'],
+            param_val_dict['type_int'], param_val_dict['CRD1'],
+            param_val_dict['CRD2']]],
+        revise_max_intake, temp_val_dict['max_intake_revised'],
+        gdal.GDT_Float32, _IC_NODATA)
+    # recalculate intake of each feed type according to reduced maximum intake
+    for feed_type in ordered_feed_types:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                aligned_inputs['proportion_legume_path'],
+                temp_val_dict['max_intake_revised'],
+                temp_val_dict['relative_availability_{}'.format(feed_type)],
+                temp_val_dict['relative_ingestibility_{}'.format(feed_type)],
+                temp_val_dict['relative_availability_sum'],
+                param_val_dict['CR2']]],
+            calc_daily_intake,
+            temp_val_dict['daily_intake_{}'.format(feed_type)],
+            gdal.GDT_Float32, _TARGET_NODATA)
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:

@@ -10325,6 +10325,7 @@ class foragetests(unittest.TestCase):
 
         age = 116
         sex_int = 4
+        type_int = 4
         W_total = 18.6
         max_intake = 0.8120073
         ZF = 1.
@@ -10345,6 +10346,8 @@ class foragetests(unittest.TestCase):
         CM6 = 0.02
         CM7 = 0.9
         CM16 = 0.0026
+        CRD1 = 0.3
+        CRD2 = 0.25
         CRD4 = 0.007
         CRD5 = 0.005
         CRD6 = 0.35
@@ -10385,6 +10388,7 @@ class foragetests(unittest.TestCase):
             1: {
                 'age': age,
                 'sex_int': sex_int,
+                'type_int': type_int,
                 'W_total': W_total,
                 'max_intake': max_intake,
                 'ZF': ZF,
@@ -10405,6 +10409,8 @@ class foragetests(unittest.TestCase):
                 'CM6': CM6,
                 'CM7': CM7,
                 'CM16': CM16,
+                'CRD1': CRD1,
+                'CRD2': CRD2,
                 'CRD4': CRD4,
                 'CRD5': CRD5,
                 'CRD6': CRD6,
