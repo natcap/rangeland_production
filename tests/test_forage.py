@@ -10319,7 +10319,6 @@ class foragetests(unittest.TestCase):
         aglive_1 = 0.0187
         stdedc = 11.2257
         stdede_1 = 0.4238
-        management_threshold = 300.
         stocking_density = 0.1
         proportion_legume = 0
 
@@ -10432,12 +10431,28 @@ class foragetests(unittest.TestCase):
         }
         create_constant_raster(month_reg['animal_density'], stocking_density)
 
+        # management threshold does not restrict offtake
+        management_threshold = 0.1
         forage._calc_grazing_offtake(
             aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
             animal_index_path, animal_trait_table, veg_trait_table,
             current_month, month_reg)
+        flgrem = 0.000643
+        fdgrem = 0.002561
 
-        # known results
+        self.assert_all_values_in_raster_within_range(
+            month_reg['flgrem_1'], flgrem - tolerance, flgrem + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            month_reg['fdgrem_1'], fdgrem - tolerance, fdgrem + tolerance,
+            _TARGET_NODATA)
+
+        # management threshold restricts offtake
+        management_threshold = 300
+        forage._calc_grazing_offtake(
+            aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
+            animal_index_path, animal_trait_table, veg_trait_table,
+            current_month, month_reg)
         flgrem = 0
         fdgrem = 0
 
