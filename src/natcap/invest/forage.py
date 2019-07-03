@@ -11058,6 +11058,9 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
     animal_df.loc[animal_df.type == 'sheep', 'type_int'] = 4
     animal_df.loc[animal_df.type == 'camelid', 'type_int'] = 5
     animal_df.loc[animal_df.type == 'hindgut_fermenter', 'type_int'] = 6
+    animal_df['reproductive_status_int'] = 0
+    animal_df['A_foet'] = 0
+    animal_df['A_y'] = 0
     animal_trait_table = animal_df.to_dict(orient='index')
     return animal_trait_table
 
@@ -11079,7 +11082,11 @@ def update_breeding_female_status(inner_animal_trait_dict, month_index):
         updated_trait_table, a dictionary of key, value pairs where values
         indicate input and derived traits for this animal type, including the
         following updated animal traits:
-            - reproductive_status (open, pregnant, lactating)
+            - reproductive_status_int, integer indicating animal reproductive
+                status:
+                0: not pregnant or lactating (default)
+                1: pregnant
+                2: lactating
             - W_total, total weight including weight of conceptus if pregnant
             - A_foet, age of the foetus if pregnant
             - A_y, age of the suckling young if lactating
@@ -11091,7 +11098,8 @@ def update_breeding_female_status(inner_animal_trait_dict, month_index):
         (month_index - updated_trait_table['conception_step']) %
         updated_trait_table['calving_interval'])
     if cycle_month_index < months_of_pregnancy:
-        updated_trait_table['reproductive_status'] = 'pregnant'
+        # animal is pregnant
+        updated_trait_table['reproductive_status_int'] = 1
         updated_trait_table['A_foet'] = cycle_month_index * 30 + 1
         RA = updated_trait_table['A_foet'] / updated_trait_table['CP1']
         BW = (
@@ -11110,12 +11118,14 @@ def update_breeding_female_status(inner_animal_trait_dict, month_index):
     elif (cycle_month_index <
             (months_of_pregnancy +
                 updated_trait_table['lactation_duration'])):
-        updated_trait_table['reproductive_status'] = 'lactating'
+        # animal is lactating
+        updated_trait_table['reproductive_status_int'] = 2
         updated_trait_table['W_total'] = updated_trait_table['weight']
         updated_trait_table['A_y'] = (
             (cycle_month_index - months_of_pregnancy) * 30 + 1)
-    else:  # not pregnant or lactating
-        updated_trait_table['reproductive_status'] = None
+    else:
+        # animal is not pregnant or lactating
+        updated_trait_table['reproductive_status_int'] = 0
         updated_trait_table['W_total'] = updated_trait_table['weight']
         updated_trait_table['A_foet'] = 0
         updated_trait_table['A_y'] = 0
@@ -12586,3 +12596,192 @@ def _calc_grazing_offtake(
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+
+def calc_diet_sufficiency(
+        total_intake, energy_intake, energy_maintenance,
+        total_crude_protein_intake, degr_protein_intake, protein_req,
+        animal_type, reproductive_status, SRW, SFW, age, Z, BC,
+        A_foet, A_y, CK5, CK6, CK8, CP1, CP4, CP5, CP8, CP9, CP10, CP15, CL0,
+        CL1, CL2, CL3, CL5, CL6, CL15, CA1, CA2, CA3, CA4, CA6, CA7, CW1, CW2,
+        CW3, CW5, CW6, CW7, CW8, CW9, CW12):
+    """Calculate the ratio of energy intake to energy requirements.
+
+    Diet sufficiency describes the extent to which the diet selected by a
+    grazing animal meets the animal's nutritional needs and is calculated as
+    the ratio of energy intake to energy requirements. Here energy requirements
+    include energy for maintenance, energy for pregnancy (for breeding females
+    that are currently pregnant), energy for lactation (for breeding females
+    that are currently lactating), and energy for wool production (for sheep
+    and goats).
+
+    Parameters:
+        total_intake (numpy.ndarray): derived, intake of forage in the diet in
+            kg per ha per day
+        energy_intake (numpy.ndarray): derived, total metabolizable energy
+            intake from the diet
+        energy_maintenance (numpy.ndarray): derived, energy requirements of
+            maintenance
+        total_crude_protein_intake (numpy.ndarray): derived, total crude
+            protein intake from the diet
+        degr_protein_intake (numpy.ndarray): derived, total rumen degradable
+            protein intake from the diet
+        protein_req (numpy.ndarray): derived, rumen degradable protein required
+            to maintain microbial activity
+        animal_type (numpy.ndarray): parameter, integer indication of animal
+            type or breed:
+            1: Bos indicus, default
+            2: Bos taurus
+            3: Bos indicus * taurus cross
+            4: sheep or goat
+            5: camelid
+            6: hindgut fermenter
+        reproductive_status (numpy.ndarray): derived, integer indicating animal
+            reproductive status:
+            0: not pregnant or lactating (default)
+            1: pregnant
+            2: lactating
+        SRW (numpy.ndarray): derived, standard reference weight
+        SFW (numpy.ndarray): derived, standard fleece weight
+        age (numpy.ndarray): input, animal age in days
+        Z (numpy.ndarray): derived, relative size
+        BC (numpy.ndarray): derived, relative body condition
+        A_foet (numpy.ndarray): derived, age of the foetus for pregnant females
+        A_y (numpy.ndarray): derived, age of suckling young for lactating
+            females
+        CK5 (numpy.ndarray): parameter, efficiency of energy use
+        CK6 (numpy.ndarray): parameter, efficiency of energy use
+        CK8 (numpy.ndarray): parameter, efficiency of energy use
+        CP1 (numpy.ndarray): parameter, gestation length
+        CP4 (numpy.ndarray): parameter, effect of relative size on birth weight
+        CP5 (numpy.ndarray): parameter, final foetus weight
+        CP8 (numpy.ndarray): parameter, final conceptus energy content
+        CP9 (numpy.ndarray): parameter, conceptus energy
+        CP10 (numpy.ndarray): parameter, conceptus energy
+        CP15 (numpy.ndarray): parameter, ratio of normal birth weight to SRW
+            when pregnant with one young
+        CL0 (numpy.ndarray): parameter, peak milk yield scalar with suckling
+            young
+        CL1 (numpy.ndarray): parameter, lactation curve offset
+        CL2 (numpy.ndarray): parameter, lactation curve peak time
+        CL3 (numpy.ndarray): parameter, lactation curve shape with young
+        CL5 (numpy.ndarray): parameter, milk metabolizability
+        CL6 (numpy.ndarray): parameter, milk energy content
+        CL15 (numpy.ndarray): parameter, protein content of milk
+        CA1 (numpy.ndarray): parameter, undegraded protein digestibility
+        CA2 (numpy.ndarray): parameter, undegraded protein digestibility
+        CA3 (numpy.ndarray): parameter, undegraded protein digestibility
+        CA4 (numpy.ndarray): parameter, undegraded protein digestibility
+        CA6 (numpy.ndarray): parameter, digestible protein leaving the stomach
+            in microbial crude protein
+        CA7 (numpy.ndarray): parameter, digestible protein leaving the stomach
+            in microbial crude protein
+        CW1 (numpy.ndarray): parameter, energy content of clean wool
+        CW2 (numpy.ndarray): parameter, basal clean wool growth
+        CW3 (numpy.ndarray): parameter, clean:greasy ratio of wool
+        CW5 (numpy.ndarray): parameter, wool growth proportion at birth
+        CW6 (numpy.ndarray): parameter, wool growth photoperiod
+        CW7 (numpy.ndarray): parameter, wool growth limitation by digestible
+            protein leaving the stomach
+        CW8 (numpy.ndarray): parameter, wool growth limitation by metabolizable
+            energy intake
+        CW9 (numpy.ndarray): parameter, adjustment for pregnancy and lactation
+        CW12 (numpy.ndarray): parameter, age factor exponent
+
+    Returns:
+        diet_sufficiency, the ratio of energy intake to energy required for
+            maintenance, pregnancy, lactation, and wool production
+
+    """
+    valid_mask = (
+        (total_intake != _TARGET_NODATA) &
+        (energy_intake != _TARGET_NODATA) &
+        (energy_maintenance != _TARGET_NODATA) &
+        (degr_protein_intake != _TARGET_NODATA) &
+        (protein_req != _TARGET_NODATA) &
+        (SRW != _IC_NODATA))
+    # energy requirements of pregnancy
+    energy_pregnancy = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
+    pregnant_mask = ((reproductive_status == 1) & valid_mask)
+    MEc_num1 = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    MEc_num1[valid_mask] = (
+        CP8[valid_mask] * CP5[valid_mask] * (
+            (1. - CP4[valid_mask] + CP4[valid_mask] * Z[valid_mask]) *
+            CP15[valid_mask] * SRW[valid_mask]) *
+        (CP9[valid_mask] * CP10[valid_mask]) / CP1[valid_mask])
+    MEc_num2 = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    MEc_num2[valid_mask] = numpy.exp(
+        CP10[valid_mask] * (1. - (A_foet[valid_mask] / CP1[valid_mask])) +
+        CP9[valid_mask] * (1. - numpy.exp(CP10[valid_mask] * (
+            1. - (A_foet[valid_mask] / CP1[valid_mask])))))
+    energy_pregnancy[pregnant_mask] = (
+        (MEc_num1[pregnant_mask] * MEc_num2[pregnant_mask]) /
+        CK8[pregnant_mask])
+
+    # energy and protein requirements of lactation
+    energy_lactation = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
+    protein_lactation = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
+    lactating_mask = ((reproductive_status == 2) & valid_mask)
+    kl = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    kl[valid_mask] = (
+        CK5[valid_mask] + CK6[valid_mask] * (
+            energy_intake[valid_mask] / total_intake[valid_mask]))
+    Mm = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    Mm[valid_mask] = (A_y[valid_mask] + CL1[valid_mask]) / CL2[valid_mask]
+    MPmax = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    MPmax[valid_mask] = (
+        CL0[valid_mask] * SRW[valid_mask] ** 0.75 * Z[valid_mask] *
+        BC[valid_mask] * Mm[valid_mask] ** CL3[valid_mask] *
+        numpy.exp(CL3[valid_mask] * (1. - Mm[valid_mask])))
+    energy_lactation[lactating_mask] = (
+         MPmax[lactating_mask] / CL5[lactating_mask] * kl[lactating_mask])
+    protein_lactation[lactating_mask] = (
+        CL15[lactating_mask] * (MPmax[lactating_mask] / CL6[lactating_mask]))
+
+    # digestible protein leaving the stomach
+    Dudp = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    Dudp[valid_mask] = numpy.maximum(
+        CA1[valid_mask], numpy.minimum(
+            CA3[valid_mask] * total_crude_protein_intake[valid_mask] -
+            CA4[valid_mask], CA2[valid_mask]))
+    DPLS = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    DPLS[valid_mask] = (
+        Dudp[valid_mask] * (
+            total_crude_protein_intake[valid_mask] -
+            degr_protein_intake[valid_mask]) +
+        CA6[valid_mask] * CA7[valid_mask] * protein_req[valid_mask])
+
+    # energy requirements of wool production
+    energy_wool = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
+    wool_mask = (
+        ((animal_type == 4) | (animal_type == 5)) &
+        valid_mask)
+    AF = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    AF[valid_mask] = (
+        CW5[valid_mask] + (1. - CW5[valid_mask]) * (
+            1. - numpy.exp(-CW12[valid_mask] * age[valid_mask])))
+    DPLSw = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    DPLSw[valid_mask] = numpy.maximum(
+        0., DPLS[valid_mask] - CW9[valid_mask] * protein_lactation[valid_mask])
+    MEw = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    MEw[valid_mask] = numpy.maximum(
+        0., energy_intake[valid_mask] - (
+            energy_lactation[valid_mask] + energy_pregnancy[valid_mask]))
+    protein_wool = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    protein_wool[valid_mask] = numpy.minimum(
+        CW7[valid_mask] * (SFW[valid_mask] / SRW[valid_mask]) *
+        AF[valid_mask] * (1 + CW6[valid_mask]) * DPLSw[valid_mask],
+        CW8[valid_mask] * (SFW[valid_mask] / SRW[valid_mask]) *
+        AF[valid_mask] * (1 + CW6[valid_mask]) * MEw[valid_mask])
+    energy_wool[wool_mask] = (
+        CW1[wool_mask] * (
+            protein_wool[wool_mask] - CW2[wool_mask] * Z[wool_mask]) /
+        CW3[wool_mask])
+
+    diet_sufficiency = numpy.empty(energy_intake.shape, dtype=numpy.float32)
+    diet_sufficiency[:] = _TARGET_NODATA
+    diet_sufficiency = (
+        energy_intake[valid_mask] / (
+            energy_maintenance[valid_mask] + energy_pregnancy[valid_mask] +
+            energy_lactation[valid_mask] + energy_wool[valid_mask]))
+    return diet_sufficiency

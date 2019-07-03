@@ -10022,12 +10022,12 @@ class foragetests(unittest.TestCase):
                     animal_trait_table[animal_id], month_index)
                 animal_trait_table[animal_id] = revised_animal_dict
         # assert that reproductive status of breeding females is correct
-        self.assertItemsEqual(
-            animal_trait_table[2]['reproductive_status'], 'pregnant')
-        # assert that reproductive status of all other animal types is None
+        self.assertEqual(
+            animal_trait_table[2]['reproductive_status_int'], 1)
+        # assert that reproductive status of all other animal types is 0
         for animal_id in [0, 1, 3, 4]:
-            self.assertFalse(
-                'reproductive_status' in animal_trait_table[animal_id].keys())
+            self.assertEqual(
+                animal_trait_table[animal_id]['reproductive_status_int'], 0)
 
         # model step indicates lactating
         month_index = 6
@@ -10037,12 +10037,12 @@ class foragetests(unittest.TestCase):
                     animal_trait_table[animal_id], month_index)
                 animal_trait_table[animal_id] = revised_animal_dict
         # assert that reproductive status of breeding females is correct
-        self.assertItemsEqual(
-            animal_trait_table[2]['reproductive_status'], 'lactating')
-        # assert that reproductive status of all other animal types is None
+        self.assertEqual(
+            animal_trait_table[2]['reproductive_status_int'], 2)
+        # assert that reproductive status of all other animal types is 0
         for animal_id in [0, 1, 3, 4]:
-            self.assertFalse(
-                'reproductive_status' in animal_trait_table[animal_id].keys())
+            self.assertEqual(
+                animal_trait_table[animal_id]['reproductive_status_int'], 0)
 
         # model step indicates open
         month_index = 8
@@ -10051,12 +10051,12 @@ class foragetests(unittest.TestCase):
                 revised_animal_dict = forage.update_breeding_female_status(
                     animal_trait_table[animal_id], month_index)
                 animal_trait_table[animal_id] = revised_animal_dict
-        self.assertIs(
-            animal_trait_table[2]['reproductive_status'], None)
-        # assert that reproductive status of all other animal types is None
+        self.assertEqual(
+            animal_trait_table[2]['reproductive_status_int'], 0)
+        # assert that reproductive status of all other animal types is 0
         for animal_id in [0, 1, 3, 4]:
-            self.assertFalse(
-                'reproductive_status' in animal_trait_table[animal_id].keys())
+            self.assertEqual(
+                animal_trait_table[animal_id]['reproductive_status_int'], 0)
 
         # Test calculating maximum intake.
         # known values calculated by hand
@@ -10462,3 +10462,139 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             month_reg['fdgrem_1'], fdgrem - tolerance, fdgrem + tolerance,
             _TARGET_NODATA)
+
+    def test_calc_diet_sufficiency(self):
+        """Test `calc_diet_sufficiency`.
+
+        Use the function `calc_diet_sufficiency` to calculate the ratio of
+        energy intake supplied by the diet to energy requirements of
+        maintenance, pregnancy, lactation, and wool production.  Ensure that
+        the estimated ratio matches the results of the beta rangeland model.
+
+        Raises:
+            AssertionError if `calc_diet_sufficiency` does not match results of
+                the beta rangeland model
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        array_shape = (2, 2)
+        tolerance = 0.000001
+
+        # known inputs
+        total_intake = 0.23866
+        energy_intake = 1.79385
+        energy_maintenance = 4.053027
+        total_crude_protein_intake = 0.0225595
+        degr_protein_intake = 0.018053
+        protein_req = 0.015349
+        animal_type = 4
+        reproductive_status = 0
+        SRW = 32.4
+        SFW = 2.28
+        age = 116
+        Z = 0.562727
+        BC = 1.020165
+        A_foet = 0
+        A_y = 0
+        CK5 = 0.4
+        CK6 = 0.02
+        CK8 = 0.133
+        CP1 = 150
+        CP4 = 0.33
+        CP5 = 1.43
+        CP8 = 4.33
+        CP9 = 4.37
+        CP10 = 0.965
+        CP15 = 0.1
+        CL0 = 0.486
+        CL1 = 2
+        CL2 = 22
+        CL3 = 1
+        CL5 = 0.94
+        CL6 = 4.7
+        CL15 = 0.045
+        CA1 = 0.05
+        CA2 = 0.85
+        CA3 = 5.5
+        CA4 = 0.178
+        CA6 = 1
+        CA7 = 0.6
+        CW1 = 24
+        CW2 = 0.004
+        CW3 = 0.7
+        CW5 = 0.25
+        CW6 = 0.072
+        CW7 = 1.35
+        CW8 = 0.016
+        CW9 = 1
+        CW12 = 0.025
+
+        # non-breeding goat
+        diet_sufficiency = 0.44763
+
+        # array-based inputs
+        total_intake_ar = numpy.full(array_shape, total_intake)
+        energy_intake_ar = numpy.full(array_shape, energy_intake)
+        energy_maintenance_ar = numpy.full(array_shape, energy_maintenance)
+        total_crude_protein_intake_ar = numpy.full(
+            array_shape, total_crude_protein_intake)
+        degr_protein_intake_ar = numpy.full(array_shape, degr_protein_intake)
+        protein_req_ar = numpy.full(array_shape, protein_req)
+        animal_type_ar = numpy.full(array_shape, animal_type)
+        reproductive_status_ar = numpy.full(array_shape, reproductive_status)
+        SRW_ar = numpy.full(array_shape, SRW)
+        SFW_ar = numpy.full(array_shape, SFW)
+        age_ar = numpy.full(array_shape, age)
+        Z_ar = numpy.full(array_shape, Z)
+        BC_ar = numpy.full(array_shape, BC)
+        A_foet_ar = numpy.full(array_shape, A_foet)
+        A_y_ar = numpy.full(array_shape, A_y)
+        CK5_ar = numpy.full(array_shape, CK5)
+        CK6_ar = numpy.full(array_shape, CK6)
+        CK8_ar = numpy.full(array_shape, CK8)
+        CP1_ar = numpy.full(array_shape, CP1)
+        CP4_ar = numpy.full(array_shape, CP4)
+        CP5_ar = numpy.full(array_shape, CP5)
+        CP8_ar = numpy.full(array_shape, CP8)
+        CP9_ar = numpy.full(array_shape, CP9)
+        CP10_ar = numpy.full(array_shape, CP10)
+        CP15_ar = numpy.full(array_shape, CP15)
+        CL0_ar = numpy.full(array_shape, CL0)
+        CL1_ar = numpy.full(array_shape, CL1)
+        CL2_ar = numpy.full(array_shape, CL2)
+        CL3_ar = numpy.full(array_shape, CL3)
+        CL5_ar = numpy.full(array_shape, CL5)
+        CL6_ar = numpy.full(array_shape, CL6)
+        CL15_ar = numpy.full(array_shape, CL15)
+        CA1_ar = numpy.full(array_shape, CA1)
+        CA2_ar = numpy.full(array_shape, CA2)
+        CA3_ar = numpy.full(array_shape, CA3)
+        CA4_ar = numpy.full(array_shape, CA4)
+        CA6_ar = numpy.full(array_shape, CA6)
+        CA7_ar = numpy.full(array_shape, CA7)
+        CW1_ar = numpy.full(array_shape, CW1)
+        CW2_ar = numpy.full(array_shape, CW2)
+        CW3_ar = numpy.full(array_shape, CW3)
+        CW5_ar = numpy.full(array_shape, CW5)
+        CW6_ar = numpy.full(array_shape, CW6)
+        CW7_ar = numpy.full(array_shape, CW7)
+        CW8_ar = numpy.full(array_shape, CW8)
+        CW9_ar = numpy.full(array_shape, CW9)
+        CW12_ar = numpy.full(array_shape, CW12)
+
+        diet_sufficiency_ar = forage.calc_diet_sufficiency(
+            total_intake_ar, energy_intake_ar, energy_maintenance_ar,
+            total_crude_protein_intake_ar, degr_protein_intake_ar,
+            protein_req_ar, animal_type_ar, reproductive_status_ar, SRW_ar,
+            SFW_ar, age_ar, Z_ar, BC_ar, A_foet_ar, A_y_ar,
+            CK5_ar, CK6_ar, CK8_ar, CP1_ar, CP4_ar, CP5_ar,
+            CP8_ar, CP9_ar, CP10_ar, CP15_ar, CL0_ar, CL1_ar, CL2_ar, CL3_ar,
+            CL5_ar, CL6_ar, CL15_ar, CA1_ar, CA2_ar, CA3_ar, CA4_ar, CA6_ar,
+            CA7_ar, CW1_ar, CW2_ar, CW3_ar, CW5_ar, CW6_ar, CW7_ar, CW8_ar,
+            CW9_ar, CW12_ar)
+        self.assert_all_values_in_array_within_range(
+            diet_sufficiency_ar, diet_sufficiency - tolerance,
+            diet_sufficiency + tolerance, _TARGET_NODATA)
