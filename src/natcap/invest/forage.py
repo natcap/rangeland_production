@@ -11240,7 +11240,7 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
             height in cm of each feed type
 
     """
-    def calc_weighted_biomass_kgha(c_statv, pft_cover):
+    def calc_weighted_biomass_kgha(cstatv, pft_cover):
         """Calculate biomass in kg/ha weighted by fractional cover of the pft.
 
         Convert a state variable representing grams of carbon per square meter
@@ -11248,7 +11248,7 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
         plant functional type.
 
         Parameters:
-            c_statv (numpy.ndarray): state variable, C state variable belonging
+            cstatv (numpy.ndarray): state variable, C state variable belonging
                 to the plant functional type
             pft_cover (numpy.ndarray): input, fractional cover of the plant
                 functional type
@@ -11259,12 +11259,12 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
 
         """
         valid_mask = (
-            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (~numpy.isclose(cstatv, _SV_NODATA)) &
             (~numpy.isclose(pft_cover, pft_nodata)))
-        biomass_kgha = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        biomass_kgha = numpy.empty(cstatv.shape, dtype=numpy.float32)
         biomass_kgha[:] = _TARGET_NODATA
         biomass_kgha[valid_mask] = (
-            c_statv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
         return biomass_kgha
 
     def calc_scale_term(*biomass_array_list):
@@ -11382,11 +11382,11 @@ def calc_fraction_biomass(
             total biomass represented by each feed type
 
     """
-    def weighted_fraction(c_statv, pft_cover, total_weighted_C):
+    def weighted_fraction(cstatv, pft_cover, total_weighted_C):
         """Calculate fraction of total C accounting for cover of the pft.
 
         Parameters:
-            c_statv (numpy.ndarray): state variable, C state variable belonging
+            cstatv (numpy.ndarray): state variable, C state variable belonging
                 to the plant functional type
             pft_cover (numpy.ndarray): input, fractional cover of the plant
                 functional type
@@ -11400,13 +11400,13 @@ def calc_fraction_biomass(
 
         """
         valid_mask = (
-            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (~numpy.isclose(cstatv, _SV_NODATA)) &
             (~numpy.isclose(pft_cover, pft_nodata)) &
             (total_weighted_C != _TARGET_NODATA))
-        weighted_fraction = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        weighted_fraction = numpy.empty(cstatv.shape, dtype=numpy.float32)
         weighted_fraction[:] = _TARGET_NODATA
         weighted_fraction[valid_mask] = (
-            c_statv[valid_mask] * pft_cover[valid_mask] /
+            cstatv[valid_mask] * pft_cover[valid_mask] /
             total_weighted_C[valid_mask])
         return weighted_fraction
 
@@ -11461,7 +11461,7 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
             or standing dead), in descending order of digestibility
 
     """
-    def calc_nc_ratio(c_statv_path, n_statv_path, aoi_path):
+    def calc_nc_ratio(cstatv_path, nstatv_path, aoi_path):
         """Calculate the mean nitrogen to carbon ratio of a biomass fraction.
 
         Calculate the mean nitrogen to carbon ratio of a biomass fraction
@@ -11472,9 +11472,9 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
         features.
 
         Parameters:
-            c_statv_path (string): path to raster containing carbon in the
+            cstatv_path (string): path to raster containing carbon in the
                 biomass fraction
-            n_statv_path (string): path to raster containing nitrogen in the
+            nstatv_path (string): path to raster containing nitrogen in the
                 biomass fraction
             aoi_path (string): path to vector layer defining the study area of
                 interest
@@ -11485,13 +11485,13 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
 
         """
         carbon_zonal_stat_df = pandas.DataFrame.from_dict(
-            pygeoprocessing.zonal_statistics((c_statv_path, 1), aoi_path),
+            pygeoprocessing.zonal_statistics((cstatv_path, 1), aoi_path),
             orient='index')
         mean_carbon = (
             carbon_zonal_stat_df['sum'].sum() /
             carbon_zonal_stat_df['count'].sum())
         nitrogen_zonal_stat_df = pandas.DataFrame.from_dict(
-            pygeoprocessing.zonal_statistics((n_statv_path, 1), aoi_path),
+            pygeoprocessing.zonal_statistics((nstatv_path, 1), aoi_path),
             orient='index')
         mean_nitrogen = (
             nitrogen_zonal_stat_df['sum'].sum() /
@@ -11501,9 +11501,9 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
     nc_ratio_dict = {}
     for pft_i in pft_id_set:
         for statv in ['agliv', 'stded']:
-            c_statv_path = sv_reg['{}c_{}_path'.format(statv, pft_i)]
-            n_statv_path = sv_reg['{}e_1_{}_path'.format(statv, pft_i)]
-            nc_ratio = calc_nc_ratio(c_statv_path, n_statv_path, aoi_path)
+            cstatv_path = sv_reg['{}c_{}_path'.format(statv, pft_i)]
+            nstatv_path = sv_reg['{}e_1_{}_path'.format(statv, pft_i)]
+            nc_ratio = calc_nc_ratio(cstatv_path, nstatv_path, aoi_path)
             nc_ratio_dict['{}_{}'.format(statv, pft_i)] = nc_ratio
 
     # order the dictionary by descending N/C ratio keys, get list from values
@@ -11515,7 +11515,7 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
 
 
 def calc_digestibility(
-        c_statv, n_statv, digestibility_slope, digestibility_intercept):
+        cstatv, nstatv, digestibility_slope, digestibility_intercept):
     """Calculate the dry matter digestibility of this feed type.
 
     Dry matter digestibility, expressed as a fraction between 0 and 1, is
@@ -11524,8 +11524,8 @@ def calc_digestibility(
     functional type.
 
     Parameters:
-        c_statv (numpy.ndarray): state variable, carbon in the feed type
-        n_statv (numpy.ndarray): state variable, nitrogen in the feed type
+        cstatv (numpy.ndarray): state variable, carbon in the feed type
+        nstatv (numpy.ndarray): state variable, nitrogen in the feed type
         digestibility_slope (numpy.ndarray): parameter, slope of
             relationship predicting dry matter digestibility from crude
             protein concentration
@@ -11538,13 +11538,13 @@ def calc_digestibility(
 
     """
     valid_mask = (
-        (~numpy.isclose(c_statv, _SV_NODATA)) &
-        (~numpy.isclose(n_statv, _SV_NODATA)) &
+        (~numpy.isclose(cstatv, _SV_NODATA)) &
+        (~numpy.isclose(nstatv, _SV_NODATA)) &
         (digestibility_slope != _IC_NODATA) &
         (digestibility_intercept != _IC_NODATA))
-    digestibility = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+    digestibility = numpy.zeros(cstatv.shape, dtype=numpy.float32)
     digestibility[valid_mask] = (
-        ((n_statv[valid_mask] * 6.25) / (c_statv[valid_mask] * 2.5)) *
+        ((nstatv[valid_mask] * 6.25) / (cstatv[valid_mask] * 2.5)) *
         digestibility_slope[valid_mask] +
         digestibility_intercept[valid_mask])
     return digestibility
@@ -11674,7 +11674,7 @@ def calc_crude_protein_intake(
         none
 
     """
-    def calc_weighted_crude_protein(c_statv, n_statv, intake):
+    def calc_weighted_crude_protein(cstatv, nstatv, intake):
         """Calculate intake of crude protein from one feed type.
 
         The intake of crude protein from one feed type is calculated from
@@ -11682,8 +11682,8 @@ def calc_crude_protein_intake(
         intake of that feed type.
 
         Parameters:
-            c_statv (numpy.ndarray): state variable, carbon in the feed type
-            n_statv (numpy.ndarray): state variable, nitrogen in the feed type
+            cstatv (numpy.ndarray): state variable, carbon in the feed type
+            nstatv (numpy.ndarray): state variable, nitrogen in the feed type
             intake (numpy.ndarray): derived, intake of this feed type in the
                 diet
 
@@ -11692,13 +11692,13 @@ def calc_crude_protein_intake(
 
         """
         valid_mask = (
-            (~numpy.isclose(c_statv, _SV_NODATA)) &
-            (~numpy.isclose(n_statv, _SV_NODATA)) &
+            (~numpy.isclose(cstatv, _SV_NODATA)) &
+            (~numpy.isclose(nstatv, _SV_NODATA)) &
             (intake != _TARGET_NODATA))
-        weighted_cp = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        weighted_cp = numpy.empty(cstatv.shape, dtype=numpy.float32)
         weighted_cp[:] = _TARGET_NODATA
         weighted_cp[valid_mask] = (
-            ((n_statv[valid_mask] * 6.25) / (c_statv[valid_mask] * 2.5)) *
+            ((nstatv[valid_mask] * 6.25) / (cstatv[valid_mask] * 2.5)) *
             intake[valid_mask])
         return weighted_cp
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -12096,7 +12096,7 @@ def calc_max_fraction_removed(total_weighted_C, management_threshold):
 
 
 def calc_fraction_removed(
-        c_statv, daily_intake, animal_density, max_fgrem):
+        cstatv, daily_intake, animal_density, max_fgrem):
     """Calculate the fraction of carbon in one feed type removed by grazing.
 
     Monthly demand for carbon offtake by grazing animals is calculated from the
@@ -12107,7 +12107,7 @@ def calc_fraction_removed(
     management threshold supplied as an input by the user.
 
     Parameters:
-        c_statv (numpy.ndarray): state variable, C in biomass
+        cstatv (numpy.ndarray): state variable, C in biomass
         daily_intake (numpy.ndarray): derived, daily intake of this state
             variable by an individual animal, estimated by diet selection
         animal_density (numpy.ndarray): derived, density of animals per ha
@@ -12120,16 +12120,16 @@ def calc_fraction_removed(
 
     """
     valid_mask = (
-        (~numpy.isclose(c_statv, _SV_NODATA)) &
+        (~numpy.isclose(cstatv, _SV_NODATA)) &
         (daily_intake != _TARGET_NODATA) &
         (animal_density != _TARGET_NODATA) &
         (max_fgrem != _TARGET_NODATA))
-    demand = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+    demand = numpy.zeros(cstatv.shape, dtype=numpy.float32)
     demand[valid_mask] = (
         (daily_intake[valid_mask] * animal_density[valid_mask] * 30.4) /
-        (c_statv[valid_mask] * 2.5 * 10))
+        (cstatv[valid_mask] * 2.5 * 10))
     # restrict fraction of biomass removed according to management threshold
-    fgrem = numpy.empty(c_statv.shape, dtype=numpy.float32)
+    fgrem = numpy.empty(cstatv.shape, dtype=numpy.float32)
     fgrem[:] = _TARGET_NODATA
     fgrem[valid_mask] = numpy.minimum(
         demand[valid_mask], max_fgrem[valid_mask])
@@ -12183,7 +12183,7 @@ def _calc_grazing_offtake(
 
     """
     def calc_avail_biomass(
-            c_statv, pft_cover, frac_biomass, height, ZF, CR4, CR5, CR6,
+            cstatv, pft_cover, frac_biomass, height, ZF, CR4, CR5, CR6,
             CR12, CR13):
         """Calculate rate and time spent eating one forage feed type.
 
@@ -12193,7 +12193,7 @@ def _calc_grazing_offtake(
         animal. Equations 16-17, Freer et al. 2012.
 
         Parameters:
-            c_statv (numpy.ndarray): state variable, C in biomass
+            cstatv (numpy.ndarray): state variable, C in biomass
             pft_cover (numpy.ndarray): input, fractional cover of this plant
                 functional type
             frac_biomass (numpy.ndarray): derived, fraction of total pasture
@@ -12216,7 +12216,7 @@ def _calc_grazing_offtake(
 
         """
         valid_mask = (
-            (~numpy.isclose(c_statv, _SV_NODATA)) &
+            (~numpy.isclose(cstatv, _SV_NODATA)) &
             (~numpy.isclose(pft_cover, pft_nodata)) &
             (frac_biomass != _TARGET_NODATA) &
             (height != _TARGET_NODATA) &
@@ -12228,10 +12228,10 @@ def _calc_grazing_offtake(
             (CR13 != _IC_NODATA))
 
         # calculate weighted biomass in kg/ha from C state variable in g/m2
-        biomass = numpy.zeros(c_statv.shape, dtype=numpy.float32)
+        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
         biomass[valid_mask] = (
-            c_statv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
-        relative_time = numpy.empty(c_statv.shape, dtype=numpy.float32)
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        relative_time = numpy.empty(cstatv.shape, dtype=numpy.float32)
         relative_time[:] = _TARGET_NODATA
         relative_time[valid_mask] = (
             1. + CR5[valid_mask] * numpy.exp(
@@ -12240,7 +12240,7 @@ def _calc_grazing_offtake(
                     1. - CR12[valid_mask] + CR12[valid_mask] *
                     height[valid_mask]) * ZF[valid_mask] *
                     biomass[valid_mask]) ** 2))
-        relative_rate = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        relative_rate = numpy.empty(cstatv.shape, dtype=numpy.float32)
         relative_rate[:] = _TARGET_NODATA
         relative_rate[valid_mask] = (
             1. - numpy.exp(
@@ -12250,7 +12250,7 @@ def _calc_grazing_offtake(
                     height[valid_mask]) * ZF[valid_mask] *
                 biomass[valid_mask]))
 
-        avail_biomass = numpy.empty(c_statv.shape, dtype=numpy.float32)
+        avail_biomass = numpy.empty(cstatv.shape, dtype=numpy.float32)
         avail_biomass[:] = _TARGET_NODATA
         avail_biomass[valid_mask] = (
             relative_rate[valid_mask] * relative_time[valid_mask])
