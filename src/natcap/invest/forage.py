@@ -186,7 +186,8 @@ _PFT_INTERMEDIATE_VALUES = [
 # but do not need to be saved as output
 _SITE_INTERMEDIATE_VALUES = [
     'amov_1', 'amov_2', 'amov_3', 'amov_4', 'amov_5', 'amov_6', 'amov_7',
-    'amov_8', 'amov_9', 'amov_10', 'snowmelt', 'bgwfunc', 'animal_density']
+    'amov_8', 'amov_9', 'amov_10', 'snowmelt', 'bgwfunc', 'animal_density',
+    'diet_sufficiency']
 
 # fixed parameters for each grazing animal type are adapted from the GRAZPLAN
 # model as described by Freer et al. 2012, "The GRAZPLAN animal biology model
@@ -1246,6 +1247,10 @@ def execute(args):
         delta_agliv_dict = _new_growth(
             pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
             month_reg, current_month, sv_reg)
+
+        _animal_diet_sufficiency(
+            sv_reg, pft_id_set, aligned_inputs['animal_index'],
+            animal_trait_table, veg_trait_table, current_month, month_reg)
 
         _grazing(
             aligned_inputs, site_param_table, month_reg, animal_trait_table,
@@ -12107,9 +12112,9 @@ def calc_fraction_removed(
     management threshold supplied as an input by the user.
 
     Parameters:
-        cstatv (numpy.ndarray): state variable, C in biomass
-        daily_intake (numpy.ndarray): derived, daily intake of this state
-            variable by an individual animal, estimated by diet selection
+        cstatv (numpy.ndarray): state variable, C in biomass of this feed type
+        daily_intake (numpy.ndarray): derived, daily intake of this feed type
+            by an individual animal, estimated by diet selection
         animal_density (numpy.ndarray): derived, density of animals per ha
             estimated by the animal spatial distribution submodel
         max_fgrem (numpy.ndarray): derived, the maximum fraction of carbon that
@@ -12134,6 +12139,38 @@ def calc_fraction_removed(
     fgrem[valid_mask] = numpy.minimum(
         demand[valid_mask], max_fgrem[valid_mask])
     return fgrem
+
+
+def daily_intake_from_fraction_removed(c_statv, animal_density, fgrem):
+    """Calculate daily intake by an individual animal from fraction C removed.
+
+    Convert the total fraction of C in one feed type removed by grazing to
+    daily intake of that feed type by an individual animal, accounting for
+    standing biomass of the feed type and estimated animal density. Assume that
+    there are 30.4 days in one model timestep.
+
+    Parameters:
+        c_statv (numpy.ndarray): state variable, C in biomass (g per square m)
+        animal_density (numpy.ndarray): derived, density of animals estimated
+            by the animal spatial distribution submodel (animals per ha)
+        fgrem (numpy.ndarray): derived, fraction of C in this state variable
+            removed by grazing
+
+    Returns:
+        daily_intake, intake of this feed type by an individual animal in
+            kg per day
+
+    """
+    valid_mask = (
+        (~numpy.isclose(c_statv, _SV_NODATA)) &
+        (animal_density != _TARGET_NODATA) &
+        (fgrem != _TARGET_NODATA))
+    daily_intake = numpy.empty(c_statv.shape, dtype=numpy.float32)
+    daily_intake[:] = _TARGET_NODATA
+    daily_intake[valid_mask] = (
+        (fgrem[valid_mask] * c_statv[valid_mask] * 2.5 * 10) /
+        (animal_density[valid_mask] * 30.4))
+    return daily_intake
 
 
 def _calc_grazing_offtake(
@@ -12780,8 +12817,205 @@ def calc_diet_sufficiency(
 
     diet_sufficiency = numpy.empty(energy_intake.shape, dtype=numpy.float32)
     diet_sufficiency[:] = _TARGET_NODATA
-    diet_sufficiency = (
+    diet_sufficiency[valid_mask] = (
         energy_intake[valid_mask] / (
             energy_maintenance[valid_mask] + energy_pregnancy[valid_mask] +
             energy_lactation[valid_mask] + energy_wool[valid_mask]))
     return diet_sufficiency
+
+
+def _animal_diet_sufficiency(
+        sv_reg, pft_id_set, animal_index_path, animal_trait_table,
+        veg_trait_table, current_month, month_reg):
+    """Calculate energy content of forage offtake and compare to energy needs.
+
+    Convert forage selected for the diet of grazing animals from the fraction
+    of each state variable removed to the daily intake of an individual animal,
+    accounting for estimated animal density on each pixel. Calculate the energy
+    content of this diet and compare it to maintenance energy requirements of
+    grazing animals, including energetic requirements of pregnancy and
+    lactation for breeding females. Calculate the metric of diet sufficiency,
+    which describes the extent to which energy intake from the diet satisfies
+    energetic requirements.
+
+    Parameters:
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables, including C and N in aboveground live and standing dead
+        pft_id_set (set): set of integers identifying plant functional types
+        animal_index_path (string): path to raster that indexes the location of
+            grazing animal types to their parameters and traits
+        animal_trait_table (dict): map of animal id to dictionaries containing
+            animal parameters and traits
+        veg_trait_table (dict): map of pft id to dictionaries containing
+            plant functional type parameters
+        current_month (int): month of the year, such that current_month=1
+            indicates January
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            the density of grazing animals per ha, the fraction of biomass
+            removed from each pft, and diet sufficiency
+        diet_sufficiency_path (string): path to raster that should contain
+            the result, sufficiency of the selected diet to meet maintenance
+            requirements of grazing animals
+
+    Side effects:
+        creates or modifies the raster indicated by
+            month_reg['diet_sufficiency']
+
+    Returns:
+        None
+
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in [
+            'total_intake', 'total_digestibility',
+            'total_crude_protein_intake', 'energy_intake',
+            'energy_maintenance', 'degr_protein_intake',
+            'protein_req']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    for val in ['c_removed', 'digestibility', 'daily_intake']:
+        for statv in ['agliv', 'stded']:
+            for pft_i in pft_id_set:
+                value_string = '{}_{}_{}'.format(val, statv, pft_i)
+                target_path = os.path.join(
+                    temp_dir, '{}.tif'.format(value_string))
+                temp_val_dict[value_string] = target_path
+    param_val_dict = {}
+    # animal parameters
+    for val in [
+            'animal_type', 'reproductive_status', 'SRW', 'SFW', 'age',
+            'sex_int', 'W_total', 'Z', 'BC', 'A_foet', 'A_y', 'CK1', 'CK2',
+            'CK5', 'CK6', 'CK8', 'CM1', 'CM2', 'CM3', 'CM4', 'CM6', 'CM7',
+            'CM16', 'CP1', 'CP4', 'CP5', 'CRD4', 'CRD5', 'CRD6', 'CRD7',
+            'CP8', 'CP9', 'CP10', 'CP15', 'CL0', 'CL1', 'CL2', 'CL3', 'CL5',
+            'CL6', 'CL15', 'CA1', 'CA2', 'CA3', 'CA4', 'CA6', 'CA7', 'CW1',
+            'CW2', 'CW3', 'CW5', 'CW6', 'CW7', 'CW8', 'CW9', 'CW12']:
+        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
+        param_val_dict[val] = target_path
+        animal_to_val = dict(
+            [(animal_code, float(table[val])) for
+                (animal_code, table) in animal_trait_table.items()])
+        pygeoprocessing.reclassify_raster(
+            (animal_index_path, 1), animal_to_val, target_path,
+            gdal.GDT_Float32, _IC_NODATA)
+    # pft parameters
+    for val in ['digestibility_slope', 'digestibility_intercept']:
+        for pft_i in pft_id_set:
+            target_path = os.path.join(
+                temp_dir, '{}_{}.tif'.format(val, pft_i))
+            param_val_dict['{}_{}'.format(val, pft_i)] = target_path
+            fill_val = veg_trait_table[pft_i][val]
+            pygeoprocessing.new_raster_from_base(
+                sv_reg['aglivc_{}_path'.format(pft_i)], target_path,
+                gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
+
+    # calculate daily intake of each feed type
+    for pft_i in pft_id_set:
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['aglivc_{}_path'.format(pft_i)],
+                month_reg['animal_density'],
+                month_reg['flgrem_{}'.format(pft_i)]]],
+            daily_intake_from_fraction_removed,
+            temp_val_dict['daily_intake_agliv_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        pygeoprocessing.raster_calculator(
+            [(path, 1) for path in [
+                sv_reg['stdedc_{}_path'.format(pft_i)],
+                month_reg['animal_density'],
+                month_reg['fdgrem_{}'.format(pft_i)]]],
+            daily_intake_from_fraction_removed,
+            temp_val_dict['daily_intake_stded_{}'.format(pft_i)],
+            gdal.GDT_Float32, _TARGET_NODATA)
+        for statv in ['agliv', 'stded']:
+            # calculate digestibility of this feed type
+            pygeoprocessing.raster_calculator(
+                [(path, 1) for path in [
+                    sv_reg['{}c_{}_path'.format(statv, pft_i)],
+                    sv_reg['{}e_1_{}_path'.format(statv, pft_i)],
+                    param_val_dict['digestibility_slope_{}'.format(pft_i)],
+                    param_val_dict[
+                        'digestibility_intercept_{}'.format(pft_i)]]],
+                calc_digestibility,
+                temp_val_dict['digestibility_{}_{}'.format(statv, pft_i)],
+                gdal.GDT_Float32, _TARGET_NODATA)
+
+    # calculate diet intermediates necessary for diet sufficiency
+    feed_type_list = [
+        '{}_{}'.format(sv, pft_i) for sv in ['agliv', 'stded'] for pft_i in
+        pft_id_set]
+    intake_list = [
+        temp_val_dict['daily_intake_{}'.format(feed_type)] for feed_type in
+        feed_type_list]
+    raster_list_sum(
+        intake_list, _TARGET_NODATA, temp_val_dict['total_intake'],
+        _TARGET_NODATA)
+    calc_digestibility_intake(
+        temp_val_dict, feed_type_list, temp_val_dict['total_digestibility'])
+    calc_crude_protein_intake(
+        sv_reg, temp_val_dict, feed_type_list,
+        temp_val_dict['total_crude_protein_intake'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['total_intake'],
+            temp_val_dict['total_digestibility']]],
+        calc_energy_intake, temp_val_dict['energy_intake'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            param_val_dict['age'], param_val_dict['sex_int'],
+            param_val_dict['W_total'], temp_val_dict['energy_intake'],
+            temp_val_dict['total_intake'],
+            temp_val_dict['total_digestibility'],
+            param_val_dict['CK1'], param_val_dict['CK2'],
+            param_val_dict['CM1'], param_val_dict['CM2'],
+            param_val_dict['CM3'], param_val_dict['CM4'],
+            param_val_dict['CM6'], param_val_dict['CM7'],
+            param_val_dict['CM16']]],
+        calc_energy_maintenance, temp_val_dict['energy_maintenance'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['total_crude_protein_intake'],
+            temp_val_dict['total_digestibility']]],
+        calc_degr_protein_intake, temp_val_dict['degr_protein_intake'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+    calc_protein_req(
+        temp_val_dict['energy_intake'], temp_val_dict['energy_maintenance'],
+        param_val_dict['CRD4'], param_val_dict['CRD5'], param_val_dict['CRD6'],
+        param_val_dict['CRD7'], current_month, temp_val_dict['protein_req'])
+
+    # calculate diet sufficiency: ratio of energy intake to energy requirements
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['total_intake'], temp_val_dict['energy_intake'],
+            temp_val_dict['energy_maintenance'],
+            temp_val_dict['total_crude_protein_intake'],
+            temp_val_dict['degr_protein_intake'], temp_val_dict['protein_req'],
+            param_val_dict['animal_type'],
+            param_val_dict['reproductive_status'], param_val_dict['SRW'],
+            param_val_dict['SFW'], param_val_dict['age'], param_val_dict['Z'],
+            param_val_dict['BC'], param_val_dict['A_foet'],
+            param_val_dict['A_y'], param_val_dict['CK5'],
+            param_val_dict['CK6'], param_val_dict['CK8'],
+            param_val_dict['CP1'], param_val_dict['CP4'],
+            param_val_dict['CP5'], param_val_dict['CP8'],
+            param_val_dict['CP9'], param_val_dict['CP10'],
+            param_val_dict['CP15'], param_val_dict['CL0'],
+            param_val_dict['CL1'], param_val_dict['CL2'],
+            param_val_dict['CL3'], param_val_dict['CL5'],
+            param_val_dict['CL6'], param_val_dict['CL15'],
+            param_val_dict['CA1'], param_val_dict['CA2'],
+            param_val_dict['CA3'], param_val_dict['CA4'],
+            param_val_dict['CA6'], param_val_dict['CA7'],
+            param_val_dict['CW1'], param_val_dict['CW2'],
+            param_val_dict['CW3'], param_val_dict['CW5'],
+            param_val_dict['CW6'], param_val_dict['CW7'],
+            param_val_dict['CW8'], param_val_dict['CW9'],
+            param_val_dict['CW12']]],
+        calc_diet_sufficiency, month_reg['diet_sufficiency'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up temporary files
+    shutil.rmtree(temp_dir)

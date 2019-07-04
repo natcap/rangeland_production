@@ -10463,38 +10463,49 @@ class foragetests(unittest.TestCase):
             month_reg['fdgrem_1'], fdgrem - tolerance, fdgrem + tolerance,
             _TARGET_NODATA)
 
-    def test_calc_diet_sufficiency(self):
-        """Test `calc_diet_sufficiency`.
+    def test_animal_diet_sufficiency(self):
+        """Test `_animal_diet_sufficiency`.
 
-        Use the function `calc_diet_sufficiency` to calculate the ratio of
-        energy intake supplied by the diet to energy requirements of
-        maintenance, pregnancy, lactation, and wool production.  Ensure that
-        the estimated ratio matches the results of the beta rangeland model.
+        Use the function `_animal_diet_sufficiency` to calculate the energy
+        content of forage offtake and compare it to energy requirements of
+        grazing animals. Ensure that estimated diet sufficiency matches the
+        result of the beta rangeland model.
 
         Raises:
-            AssertionError if `calc_diet_sufficiency` does not match results of
-                the beta rangeland model
-
-        Returns:
-            None
+            AssertionError if `_animal_diet_sufficiency` does not match results
+                of the beta rangeland model
 
         """
         from natcap.invest import forage
-        array_shape = (2, 2)
         tolerance = 0.000001
 
         # known inputs
-        total_intake = 0.23866
-        energy_intake = 1.79385
-        energy_maintenance = 4.053027
-        total_crude_protein_intake = 0.0225595
-        degr_protein_intake = 0.018053
-        protein_req = 0.015349
+        aglivc = 0.426
+        aglive_1 = 0.0187
+        stdedc = 11.2257
+        stdede_1 = 0.4238
+        stocking_density = 0.1
+
         animal_type = 4
         reproductive_status = 0
         SRW = 32.4
         SFW = 2.28
         age = 116
+        sex_int = 4
+        W_total = 18.6
+        CK1 = 0.5
+        CK2 = 0.02
+        CM1 = 0.09
+        CM2 = 0.26
+        CM3 = 0.00008
+        CM4 = 0.84
+        CM6 = 0.02
+        CM7 = 0.9
+        CM16 = 0.0026
+        CRD4 = 0.007
+        CRD5 = 0.005
+        CRD6 = 0.35
+        CRD7 = 0.1
         Z = 0.562727
         BC = 1.020165
         A_foet = 0
@@ -10532,69 +10543,113 @@ class foragetests(unittest.TestCase):
         CW9 = 1
         CW12 = 0.025
 
+        digestibility_slope = 1.5349
+        digestibility_intercept = 0.4147
+        current_month = 4
+
+        flgrem = 0.000643
+        fdgrem = 0.002561
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc.tif'),
+            'aglive_1_1_path': os.path.join(self.workspace_dir, 'aglive.tif'),
+            'stdedc_1_path': os.path.join(self.workspace_dir, 'stdedc.tif'),
+            'stdede_1_1_path': os.path.join(self.workspace_dir, 'stdede.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+
+        pft_id_set = [1]
+        animal_index_path = os.path.join(self.workspace_dir, 'animal.tif')
+        create_constant_raster(animal_index_path, 1)
+        animal_trait_table = {
+            1: {
+                'animal_type': animal_type,
+                'reproductive_status': reproductive_status,
+                'SRW': SRW,
+                'SFW': SFW,
+                'age': age,
+                'sex_int': sex_int,
+                'W_total': W_total,
+                'CK1': CK1,
+                'CK2': CK2,
+                'CM1': CM1,
+                'CM2': CM2,
+                'CM3': CM3,
+                'CM4': CM4,
+                'CM6': CM6,
+                'CM7': CM7,
+                'CM16': CM16,
+                'CRD4': CRD4,
+                'CRD5': CRD5,
+                'CRD6': CRD6,
+                'CRD7': CRD7,
+                'Z': Z,
+                'BC': BC,
+                'A_foet': A_foet,
+                'A_y': A_y,
+                'CK5': CK5,
+                'CK6': CK6,
+                'CK8': CK8,
+                'CP1': CP1,
+                'CP4': CP4,
+                'CP5': CP5,
+                'CP8': CP8,
+                'CP9': CP9,
+                'CP10': CP10,
+                'CP15': CP15,
+                'CL0': CL0,
+                'CL1': CL1,
+                'CL2': CL2,
+                'CL3': CL3,
+                'CL5': CL5,
+                'CL6': CL6,
+                'CL15': CL15,
+                'CA1': CA1,
+                'CA2': CA2,
+                'CA3': CA3,
+                'CA4': CA4,
+                'CA6': CA6,
+                'CA7': CA7,
+                'CW1': CW1,
+                'CW2': CW2,
+                'CW3': CW3,
+                'CW5': CW5,
+                'CW6': CW6,
+                'CW7': CW7,
+                'CW8': CW8,
+                'CW9': CW9,
+                'CW12': CW12,
+            }
+        }
+        veg_trait_table = {
+            1: {
+                'digestibility_intercept': digestibility_intercept,
+                'digestibility_slope': digestibility_slope,
+            }
+        }
+        month_reg = {
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
+            'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
+            'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
+            'diet_sufficiency': os.path.join(
+                self.workspace_dir, 'diet_sufficiency.tif')
+        }
+        create_constant_raster(month_reg['animal_density'], stocking_density)
+        create_constant_raster(month_reg['flgrem_1'], flgrem)
+        create_constant_raster(month_reg['fdgrem_1'], fdgrem)
+
         # non-breeding goat
-        diet_sufficiency = 0.44763
+        diet_sufficiency = 0.4476615
 
-        # array-based inputs
-        total_intake_ar = numpy.full(array_shape, total_intake)
-        energy_intake_ar = numpy.full(array_shape, energy_intake)
-        energy_maintenance_ar = numpy.full(array_shape, energy_maintenance)
-        total_crude_protein_intake_ar = numpy.full(
-            array_shape, total_crude_protein_intake)
-        degr_protein_intake_ar = numpy.full(array_shape, degr_protein_intake)
-        protein_req_ar = numpy.full(array_shape, protein_req)
-        animal_type_ar = numpy.full(array_shape, animal_type)
-        reproductive_status_ar = numpy.full(array_shape, reproductive_status)
-        SRW_ar = numpy.full(array_shape, SRW)
-        SFW_ar = numpy.full(array_shape, SFW)
-        age_ar = numpy.full(array_shape, age)
-        Z_ar = numpy.full(array_shape, Z)
-        BC_ar = numpy.full(array_shape, BC)
-        A_foet_ar = numpy.full(array_shape, A_foet)
-        A_y_ar = numpy.full(array_shape, A_y)
-        CK5_ar = numpy.full(array_shape, CK5)
-        CK6_ar = numpy.full(array_shape, CK6)
-        CK8_ar = numpy.full(array_shape, CK8)
-        CP1_ar = numpy.full(array_shape, CP1)
-        CP4_ar = numpy.full(array_shape, CP4)
-        CP5_ar = numpy.full(array_shape, CP5)
-        CP8_ar = numpy.full(array_shape, CP8)
-        CP9_ar = numpy.full(array_shape, CP9)
-        CP10_ar = numpy.full(array_shape, CP10)
-        CP15_ar = numpy.full(array_shape, CP15)
-        CL0_ar = numpy.full(array_shape, CL0)
-        CL1_ar = numpy.full(array_shape, CL1)
-        CL2_ar = numpy.full(array_shape, CL2)
-        CL3_ar = numpy.full(array_shape, CL3)
-        CL5_ar = numpy.full(array_shape, CL5)
-        CL6_ar = numpy.full(array_shape, CL6)
-        CL15_ar = numpy.full(array_shape, CL15)
-        CA1_ar = numpy.full(array_shape, CA1)
-        CA2_ar = numpy.full(array_shape, CA2)
-        CA3_ar = numpy.full(array_shape, CA3)
-        CA4_ar = numpy.full(array_shape, CA4)
-        CA6_ar = numpy.full(array_shape, CA6)
-        CA7_ar = numpy.full(array_shape, CA7)
-        CW1_ar = numpy.full(array_shape, CW1)
-        CW2_ar = numpy.full(array_shape, CW2)
-        CW3_ar = numpy.full(array_shape, CW3)
-        CW5_ar = numpy.full(array_shape, CW5)
-        CW6_ar = numpy.full(array_shape, CW6)
-        CW7_ar = numpy.full(array_shape, CW7)
-        CW8_ar = numpy.full(array_shape, CW8)
-        CW9_ar = numpy.full(array_shape, CW9)
-        CW12_ar = numpy.full(array_shape, CW12)
+        forage._animal_diet_sufficiency(
+            sv_reg, pft_id_set, animal_index_path, animal_trait_table,
+            veg_trait_table, current_month, month_reg)
 
-        diet_sufficiency_ar = forage.calc_diet_sufficiency(
-            total_intake_ar, energy_intake_ar, energy_maintenance_ar,
-            total_crude_protein_intake_ar, degr_protein_intake_ar,
-            protein_req_ar, animal_type_ar, reproductive_status_ar, SRW_ar,
-            SFW_ar, age_ar, Z_ar, BC_ar, A_foet_ar, A_y_ar,
-            CK5_ar, CK6_ar, CK8_ar, CP1_ar, CP4_ar, CP5_ar,
-            CP8_ar, CP9_ar, CP10_ar, CP15_ar, CL0_ar, CL1_ar, CL2_ar, CL3_ar,
-            CL5_ar, CL6_ar, CL15_ar, CA1_ar, CA2_ar, CA3_ar, CA4_ar, CA6_ar,
-            CA7_ar, CW1_ar, CW2_ar, CW3_ar, CW5_ar, CW6_ar, CW7_ar, CW8_ar,
-            CW9_ar, CW12_ar)
-        self.assert_all_values_in_array_within_range(
-            diet_sufficiency_ar, diet_sufficiency - tolerance,
+        self.assert_all_values_in_raster_within_range(
+            month_reg['diet_sufficiency'], diet_sufficiency - tolerance,
             diet_sufficiency + tolerance, _TARGET_NODATA)
