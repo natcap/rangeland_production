@@ -1249,8 +1249,8 @@ def execute(args):
             month_reg, current_month, sv_reg)
 
         _animal_diet_sufficiency(
-            sv_reg, pft_id_set, aligned_inputs['animal_index'],
-            animal_trait_table, veg_trait_table, current_month, month_reg)
+            sv_reg, pft_id_set, aligned_inputs, animal_trait_table,
+            veg_trait_table, current_month, month_reg)
 
         _grazing(
             aligned_inputs, site_param_table, month_reg, animal_trait_table,
@@ -11035,6 +11035,8 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
         input_animal_trait_table, orient='index')
     animal_df = pandas.merge(
         input_df, freer_parameter_df, how='left', on='type')
+    animal_df.replace('', numpy.nan, inplace=True)
+    animal_df.fillna(_IC_NODATA, inplace=True)
     animal_df['W_total'] = animal_df['weight']
     animal_df['SRW_modified'] = numpy.select(
         [animal_df['sex'] == 'entire_m', animal_df['sex'] == 'castrate',
@@ -11168,17 +11170,16 @@ def calc_max_intake(inner_animal_trait_dict):
     YF = 1.  # eq 4 gives a different value for unweaned animals
     TF = 1.  # ignore effect of temperature on intake
     LF = 1.  # assume any lactating animals are suckling young (eq 8)
-    if 'reproductive_status' in updated_trait_table.keys():
-        if updated_trait_table['reproductive_status'] == 'lactating':
-            BCpart = updated_trait_table['BC']  # body condition at parturition
-            Mi = updated_trait_table['A_y'] / updated_trait_table['CI8']
-            LA = (
-                1. - updated_trait_table['CI15'] +
-                updated_trait_table['CI15'] * BCpart)
-            LF = (
-                1. + updated_trait_table['CI19'] * Mi **
-                updated_trait_table['CI9'] * math.exp(
-                    updated_trait_table['CI9'] * (1 - Mi)) * LA)
+    if updated_trait_table['reproductive_status_int'] == 2:
+        BCpart = updated_trait_table['BC']  # body condition at parturition
+        Mi = updated_trait_table['A_y'] / updated_trait_table['CI8']
+        LA = (
+            1. - updated_trait_table['CI15'] +
+            updated_trait_table['CI15'] * BCpart)
+        LF = (
+            1. + updated_trait_table['CI19'] * Mi **
+            updated_trait_table['CI9'] * math.exp(
+                updated_trait_table['CI9'] * (1 - Mi)) * LA)
     updated_trait_table['max_intake'] = (
         updated_trait_table['CI1'] * updated_trait_table['SRW_modified'] *
         updated_trait_table['Z'] * (
@@ -12100,79 +12101,6 @@ def calc_max_fraction_removed(total_weighted_C, management_threshold):
     return max_fgrem
 
 
-def calc_fraction_removed(
-        cstatv, daily_intake, animal_density, max_fgrem):
-    """Calculate the fraction of carbon in one feed type removed by grazing.
-
-    Monthly demand for carbon offtake by grazing animals is calculated from the
-    predicted daily intake of an individual animal and the estimated density of
-    animals, assuming that there are 30.4 days in one model timestep. The
-    carbon actually removed by grazing is restricted to be less than or equal
-    to the maximum fraction of biomass that may be removed, according to the
-    management threshold supplied as an input by the user.
-
-    Parameters:
-        cstatv (numpy.ndarray): state variable, C in biomass of this feed type
-        daily_intake (numpy.ndarray): derived, daily intake of this feed type
-            by an individual animal, estimated by diet selection
-        animal_density (numpy.ndarray): derived, density of animals per ha
-            estimated by the animal spatial distribution submodel
-        max_fgrem (numpy.ndarray): derived, the maximum fraction of carbon that
-            may be removed by grazing according to the management threshold
-
-    Returns:
-        fgrem, fraction of carbon in this state variable removed by grazing
-
-    """
-    valid_mask = (
-        (~numpy.isclose(cstatv, _SV_NODATA)) &
-        (daily_intake != _TARGET_NODATA) &
-        (animal_density != _TARGET_NODATA) &
-        (max_fgrem != _TARGET_NODATA))
-    demand = numpy.zeros(cstatv.shape, dtype=numpy.float32)
-    demand[valid_mask] = (
-        (daily_intake[valid_mask] * animal_density[valid_mask] * 30.4) /
-        (cstatv[valid_mask] * 2.5 * 10))
-    # restrict fraction of biomass removed according to management threshold
-    fgrem = numpy.empty(cstatv.shape, dtype=numpy.float32)
-    fgrem[:] = _TARGET_NODATA
-    fgrem[valid_mask] = numpy.minimum(
-        demand[valid_mask], max_fgrem[valid_mask])
-    return fgrem
-
-
-def daily_intake_from_fraction_removed(c_statv, animal_density, fgrem):
-    """Calculate daily intake by an individual animal from fraction C removed.
-
-    Convert the total fraction of C in one feed type removed by grazing to
-    daily intake of that feed type by an individual animal, accounting for
-    standing biomass of the feed type and estimated animal density. Assume that
-    there are 30.4 days in one model timestep.
-
-    Parameters:
-        c_statv (numpy.ndarray): state variable, C in biomass (g per square m)
-        animal_density (numpy.ndarray): derived, density of animals estimated
-            by the animal spatial distribution submodel (animals per ha)
-        fgrem (numpy.ndarray): derived, fraction of C in this state variable
-            removed by grazing
-
-    Returns:
-        daily_intake, intake of this feed type by an individual animal in
-            kg per day
-
-    """
-    valid_mask = (
-        (~numpy.isclose(c_statv, _SV_NODATA)) &
-        (animal_density != _TARGET_NODATA) &
-        (fgrem != _TARGET_NODATA))
-    daily_intake = numpy.empty(c_statv.shape, dtype=numpy.float32)
-    daily_intake[:] = _TARGET_NODATA
-    daily_intake[valid_mask] = (
-        (fgrem[valid_mask] * c_statv[valid_mask] * 2.5 * 10) /
-        (animal_density[valid_mask] * 30.4))
-    return daily_intake
-
-
 def _calc_grazing_offtake(
         aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
         animal_index_path, animal_trait_table, veg_trait_table, current_month,
@@ -12381,6 +12309,57 @@ def _calc_grazing_offtake(
                 relative_availability_sum[valid_mask] ** 2 *
                 proportion_legume[valid_mask]))
         return daily_intake
+
+    def calc_fraction_removed(
+            cstatv, pft_cover, daily_intake, animal_density, max_fgrem):
+        """Calculate fraction of carbon in one feed type removed by grazing.
+
+        Monthly demand for carbon offtake by grazing animals is calculated from
+        the predicted daily intake of an individual animal and the estimated
+        density of animals, assuming that there are 30.4 days in one model
+        timestep. The carbon actually removed by grazing is restricted to be
+        less than or equal to the maximum fraction of biomass that may be
+        removed, according to the management threshold supplied as an input by
+        the user.
+
+        Parameters:
+            cstatv (numpy.ndarray): state variable, C in biomass of this feed
+                type
+            pft_cover (numpy.ndarray): input, fractional cover of this plant
+                functional type
+            daily_intake (numpy.ndarray): derived, daily intake of this feed
+                type by an individual animal, estimated by diet selection
+            animal_density (numpy.ndarray): derived, density of animals per ha
+                estimated by the animal spatial distribution submodel
+            max_fgrem (numpy.ndarray): derived, the maximum fraction of carbon
+                that may be removed by grazing according to the management
+                threshold
+
+        Returns:
+            fgrem, fraction of carbon in this state variable removed by grazing
+
+        """
+        valid_mask = (
+            (~numpy.isclose(cstatv, _SV_NODATA)) &
+            (~numpy.isclose(pft_cover, pft_nodata)) &
+            (daily_intake != _TARGET_NODATA) &
+            (animal_density != _TARGET_NODATA) &
+            (max_fgrem != _TARGET_NODATA))
+        # calculate weighted biomass in kg/ha from C state variable in g/m2
+        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
+        biomass[valid_mask] = (
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        # calculate forage demand as percentage of available biomass
+        demand = numpy.zeros(cstatv.shape, dtype=numpy.float32)
+        demand[valid_mask] = (
+            (daily_intake[valid_mask] * animal_density[valid_mask] * 30.4) /
+            biomass[valid_mask])
+        # restrict fraction removed according to management threshold
+        fgrem = numpy.empty(cstatv.shape, dtype=numpy.float32)
+        fgrem[:] = _TARGET_NODATA
+        fgrem[valid_mask] = numpy.minimum(
+            demand[valid_mask], max_fgrem[valid_mask])
+        return fgrem
 
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
@@ -12616,9 +12595,12 @@ def _calc_grazing_offtake(
 
     # calculate fraction removed, restricted by management threshold
     for pft_i in pft_id_set:
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['aglivc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
                 temp_val_dict['daily_intake_agliv_{}'.format(pft_i)],
                 month_reg['animal_density'], temp_val_dict['max_fgrem']]],
             calc_fraction_removed, month_reg['flgrem_{}'.format(pft_i)],
@@ -12626,6 +12608,7 @@ def _calc_grazing_offtake(
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['stdedc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
                 temp_val_dict['daily_intake_stded_{}'.format(pft_i)],
                 month_reg['animal_density'], temp_val_dict['max_fgrem']]],
             calc_fraction_removed, month_reg['fdgrem_{}'.format(pft_i)],
@@ -12741,16 +12724,17 @@ def calc_diet_sufficiency(
     energy_pregnancy = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
     pregnant_mask = ((reproductive_status == 1) & valid_mask)
     MEc_num1 = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    MEc_num1[valid_mask] = (
-        CP8[valid_mask] * CP5[valid_mask] * (
-            (1. - CP4[valid_mask] + CP4[valid_mask] * Z[valid_mask]) *
-            CP15[valid_mask] * SRW[valid_mask]) *
-        (CP9[valid_mask] * CP10[valid_mask]) / CP1[valid_mask])
+    MEc_num1[pregnant_mask] = (
+        CP8[pregnant_mask] * CP5[pregnant_mask] * (
+            (1. - CP4[pregnant_mask] + CP4[pregnant_mask] * Z[pregnant_mask]) *
+            CP15[pregnant_mask] * SRW[pregnant_mask]) *
+        (CP9[pregnant_mask] * CP10[pregnant_mask]) / CP1[pregnant_mask])
     MEc_num2 = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    MEc_num2[valid_mask] = numpy.exp(
-        CP10[valid_mask] * (1. - (A_foet[valid_mask] / CP1[valid_mask])) +
-        CP9[valid_mask] * (1. - numpy.exp(CP10[valid_mask] * (
-            1. - (A_foet[valid_mask] / CP1[valid_mask])))))
+    MEc_num2[pregnant_mask] = numpy.exp(
+        CP10[pregnant_mask] * (
+            1. - (A_foet[pregnant_mask] / CP1[pregnant_mask])) +
+        CP9[pregnant_mask] * (1. - numpy.exp(CP10[pregnant_mask] * (
+            1. - (A_foet[pregnant_mask] / CP1[pregnant_mask])))))
     energy_pregnancy[pregnant_mask] = (
         (MEc_num1[pregnant_mask] * MEc_num2[pregnant_mask]) /
         CK8[pregnant_mask])
@@ -12760,16 +12744,17 @@ def calc_diet_sufficiency(
     protein_lactation = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
     lactating_mask = ((reproductive_status == 2) & valid_mask)
     kl = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    kl[valid_mask] = (
-        CK5[valid_mask] + CK6[valid_mask] * (
-            energy_intake[valid_mask] / total_intake[valid_mask]))
+    kl[lactating_mask] = (
+        CK5[lactating_mask] + CK6[lactating_mask] * (
+            energy_intake[lactating_mask] / total_intake[lactating_mask]))
     Mm = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    Mm[valid_mask] = (A_y[valid_mask] + CL1[valid_mask]) / CL2[valid_mask]
+    Mm[lactating_mask] = (
+        (A_y[lactating_mask] + CL1[lactating_mask]) / CL2[lactating_mask])
     MPmax = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    MPmax[valid_mask] = (
-        CL0[valid_mask] * SRW[valid_mask] ** 0.75 * Z[valid_mask] *
-        BC[valid_mask] * Mm[valid_mask] ** CL3[valid_mask] *
-        numpy.exp(CL3[valid_mask] * (1. - Mm[valid_mask])))
+    MPmax[lactating_mask] = (
+        CL0[lactating_mask] * SRW[lactating_mask] ** 0.75 * Z[lactating_mask] *
+        BC[lactating_mask] * Mm[lactating_mask] ** CL3[lactating_mask] *
+        numpy.exp(CL3[lactating_mask] * (1. - Mm[lactating_mask])))
     energy_lactation[lactating_mask] = (
          MPmax[lactating_mask] / CL5[lactating_mask] * kl[lactating_mask])
     protein_lactation[lactating_mask] = (
@@ -12794,22 +12779,22 @@ def calc_diet_sufficiency(
         ((animal_type == 4) | (animal_type == 5)) &
         valid_mask)
     AF = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    AF[valid_mask] = (
-        CW5[valid_mask] + (1. - CW5[valid_mask]) * (
-            1. - numpy.exp(-CW12[valid_mask] * age[valid_mask])))
+    AF[wool_mask] = (
+        CW5[wool_mask] + (1. - CW5[wool_mask]) * (
+            1. - numpy.exp(-CW12[wool_mask] * age[wool_mask])))
     DPLSw = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    DPLSw[valid_mask] = numpy.maximum(
-        0., DPLS[valid_mask] - CW9[valid_mask] * protein_lactation[valid_mask])
+    DPLSw[wool_mask] = numpy.maximum(
+        0., DPLS[wool_mask] - CW9[wool_mask] * protein_lactation[wool_mask])
     MEw = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    MEw[valid_mask] = numpy.maximum(
-        0., energy_intake[valid_mask] - (
-            energy_lactation[valid_mask] + energy_pregnancy[valid_mask]))
+    MEw[wool_mask] = numpy.maximum(
+        0., energy_intake[wool_mask] - (
+            energy_lactation[wool_mask] + energy_pregnancy[wool_mask]))
     protein_wool = numpy.empty(energy_intake.shape, dtype=numpy.float32)
-    protein_wool[valid_mask] = numpy.minimum(
-        CW7[valid_mask] * (SFW[valid_mask] / SRW[valid_mask]) *
-        AF[valid_mask] * (1 + CW6[valid_mask]) * DPLSw[valid_mask],
-        CW8[valid_mask] * (SFW[valid_mask] / SRW[valid_mask]) *
-        AF[valid_mask] * (1 + CW6[valid_mask]) * MEw[valid_mask])
+    protein_wool[wool_mask] = numpy.minimum(
+        CW7[wool_mask] * (SFW[wool_mask] / SRW[wool_mask]) *
+        AF[wool_mask] * (1 + CW6[wool_mask]) * DPLSw[wool_mask],
+        CW8[wool_mask] * (SFW[wool_mask] / SRW[wool_mask]) *
+        AF[wool_mask] * (1 + CW6[wool_mask]) * MEw[wool_mask])
     energy_wool[wool_mask] = (
         CW1[wool_mask] * (
             protein_wool[wool_mask] - CW2[wool_mask] * Z[wool_mask]) /
@@ -12825,7 +12810,7 @@ def calc_diet_sufficiency(
 
 
 def _animal_diet_sufficiency(
-        sv_reg, pft_id_set, animal_index_path, animal_trait_table,
+        sv_reg, pft_id_set, aligned_inputs, animal_trait_table,
         veg_trait_table, current_month, month_reg):
     """Calculate energy content of forage offtake and compare to energy needs.
 
@@ -12842,8 +12827,9 @@ def _animal_diet_sufficiency(
         sv_reg (dict): map of key, path pairs giving paths to state
             variables, including C and N in aboveground live and standing dead
         pft_id_set (set): set of integers identifying plant functional types
-        animal_index_path (string): path to raster that indexes the location of
-            grazing animal types to their parameters and traits
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each plant
+            functional type and animal spatial index
         animal_trait_table (dict): map of animal id to dictionaries containing
             animal parameters and traits
         veg_trait_table (dict): map of pft id to dictionaries containing
@@ -12866,6 +12852,48 @@ def _animal_diet_sufficiency(
         None
 
     """
+    def daily_intake_from_fraction_removed(
+            cstatv, pft_cover, animal_density, fgrem):
+        """Calculate daily intake by one animal from fraction C removed.
+
+        Convert the total fraction of C in one feed type removed by grazing to
+        daily intake of that feed type by an individual animal, accounting for
+        standing biomass of the feed type and estimated animal density. Assume
+        that there are 30.4 days in one model timestep.
+
+        Parameters:
+            cstatv (numpy.ndarray): state variable, C in biomass (g per square
+                m)
+            pft_cover (numpy.ndarray): input, fractional cover of this plant
+                functional type
+            animal_density (numpy.ndarray): derived, density of animals
+                estimated by the animal spatial distribution submodel (animals
+                per ha)
+            fgrem (numpy.ndarray): derived, fraction of C in this state
+                variable removed by grazing
+
+        Returns:
+            daily_intake, intake of this feed type by an individual animal in
+                kg per day
+
+        """
+        valid_mask = (
+            (~numpy.isclose(cstatv, _SV_NODATA)) &
+            (~numpy.isclose(pft_cover, pft_nodata)) &
+            (animal_density != _TARGET_NODATA) &
+            (fgrem != _TARGET_NODATA))
+        # calculate weighted biomass in kg/ha from C state variable in g/m2
+        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
+        biomass[valid_mask] = (
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        # calculate forage intake from percentage of available biomass
+        daily_intake = numpy.empty(cstatv.shape, dtype=numpy.float32)
+        daily_intake[:] = _TARGET_NODATA
+        daily_intake[valid_mask] = (
+            (fgrem[valid_mask] * biomass[valid_mask]) /
+            (animal_density[valid_mask] * 30.4))
+        return daily_intake
+
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in [
@@ -12883,11 +12911,12 @@ def _animal_diet_sufficiency(
                 temp_val_dict[value_string] = target_path
     param_val_dict = {}
     # animal parameters
+    animal_index_path = aligned_inputs['animal_index']
     for val in [
-            'animal_type', 'reproductive_status', 'SRW', 'SFW', 'age',
-            'sex_int', 'W_total', 'Z', 'BC', 'A_foet', 'A_y', 'CK1', 'CK2',
-            'CK5', 'CK6', 'CK8', 'CM1', 'CM2', 'CM3', 'CM4', 'CM6', 'CM7',
-            'CM16', 'CP1', 'CP4', 'CP5', 'CRD4', 'CRD5', 'CRD6', 'CRD7',
+            'type_int', 'reproductive_status_int', 'SRW_modified', 'sfw',
+            'age', 'sex_int', 'W_total', 'Z', 'BC', 'A_foet', 'A_y', 'CK1',
+            'CK2', 'CK5', 'CK6', 'CK8', 'CM1', 'CM2', 'CM3', 'CM4', 'CM6',
+            'CM7', 'CM16', 'CP1', 'CP4', 'CP5', 'CRD4', 'CRD5', 'CRD6', 'CRD7',
             'CP8', 'CP9', 'CP10', 'CP15', 'CL0', 'CL1', 'CL2', 'CL3', 'CL5',
             'CL6', 'CL15', 'CA1', 'CA2', 'CA3', 'CA4', 'CA6', 'CA7', 'CW1',
             'CW2', 'CW3', 'CW5', 'CW6', 'CW7', 'CW8', 'CW9', 'CW12']:
@@ -12912,9 +12941,12 @@ def _animal_diet_sufficiency(
 
     # calculate daily intake of each feed type
     for pft_i in pft_id_set:
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['aglivc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
                 month_reg['animal_density'],
                 month_reg['flgrem_{}'.format(pft_i)]]],
             daily_intake_from_fraction_removed,
@@ -12923,6 +12955,7 @@ def _animal_diet_sufficiency(
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 sv_reg['stdedc_{}_path'.format(pft_i)],
+                aligned_inputs['pft_{}'.format(pft_i)],
                 month_reg['animal_density'],
                 month_reg['fdgrem_{}'.format(pft_i)]]],
             daily_intake_from_fraction_removed,
@@ -12993,9 +13026,10 @@ def _animal_diet_sufficiency(
             temp_val_dict['energy_maintenance'],
             temp_val_dict['total_crude_protein_intake'],
             temp_val_dict['degr_protein_intake'], temp_val_dict['protein_req'],
-            param_val_dict['animal_type'],
-            param_val_dict['reproductive_status'], param_val_dict['SRW'],
-            param_val_dict['SFW'], param_val_dict['age'], param_val_dict['Z'],
+            param_val_dict['type_int'],
+            param_val_dict['reproductive_status_int'],
+            param_val_dict['SRW_modified'], param_val_dict['sfw'],
+            param_val_dict['age'], param_val_dict['Z'],
             param_val_dict['BC'], param_val_dict['A_foet'],
             param_val_dict['A_y'], param_val_dict['CK5'],
             param_val_dict['CK6'], param_val_dict['CK8'],

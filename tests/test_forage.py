@@ -10563,14 +10563,18 @@ class foragetests(unittest.TestCase):
         create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
 
         pft_id_set = [1]
-        animal_index_path = os.path.join(self.workspace_dir, 'animal.tif')
-        create_constant_raster(animal_index_path, 1)
+        aligned_inputs = {
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'animal_index': os.path.join(self.workspace_dir, 'animal.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        create_constant_raster(aligned_inputs['animal_index'], 1)
         animal_trait_table = {
             1: {
-                'animal_type': animal_type,
-                'reproductive_status': reproductive_status,
-                'SRW': SRW,
-                'SFW': SFW,
+                'type_int': animal_type,
+                'reproductive_status_int': reproductive_status,
+                'SRW_modified': SRW,
+                'sfw': SFW,
                 'age': age,
                 'sex_int': sex_int,
                 'W_total': W_total,
@@ -10647,7 +10651,7 @@ class foragetests(unittest.TestCase):
         diet_sufficiency = 0.4476615
 
         forage._animal_diet_sufficiency(
-            sv_reg, pft_id_set, animal_index_path, animal_trait_table,
+            sv_reg, pft_id_set, aligned_inputs, animal_trait_table,
             veg_trait_table, current_month, month_reg)
 
         self.assert_all_values_in_raster_within_range(
