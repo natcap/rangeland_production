@@ -1053,7 +1053,7 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_mgmt_layer_path': os.path.join(
-                SAMPLE_DATA, 'animal_mgmt_layer.shp'),
+                SAMPLE_DATA, 'animal_mgmt_layer_WGS1984.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
         }
