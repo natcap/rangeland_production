@@ -223,7 +223,6 @@ _FREER_PARAM_DICT = {
         'CL1': 4,
         'CL2': 30,
         'CL3': 0.6,
-        'CL4': 0.6,
         'CL5': 0.94,
         'CL6': 3.1,
         'CL15': 0.032,
@@ -286,7 +285,6 @@ _FREER_PARAM_DICT = {
         'CL1': 4,
         'CL2': 30,
         'CL3': 0.6,
-        'CL4': 0.6,
         'CL5': 0.94,
         'CL6': 3.1,
         'CL15': 0.032,
@@ -349,7 +347,6 @@ _FREER_PARAM_DICT = {
         'CL1': 4,
         'CL2': 30,
         'CL3': 0.6,
-        'CL4': 0.6,
         'CL5': 0.94,
         'CL6': 3.1,
         'CL15': 0.032,
@@ -11021,7 +11018,10 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
 
         Convert a state variable representing grams of carbon per square meter
         into kg of biomass per ha, accounting for fractional cover of the
-        plant functional type.
+        plant functional type. Biomass in kg/ha is calculated from the state
+        variable representing grams of carbon per square meter, entailing two
+        conversion steps: first multiply by 2.5 to get biomass, then multiply
+        by 10 to get kg/ha from g/m2.
 
         Parameters:
             cstatv (numpy.ndarray): state variable, C state variable belonging
@@ -11380,7 +11380,7 @@ def calc_digestibility_intake(
             diet
 
     Returns:
-        none
+        None
 
     """
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -11844,6 +11844,9 @@ def calc_max_fraction_removed(total_weighted_C, management_threshold):
     is removed from the state variables describing aboveground carbon for each
     plant functional type, the total remaining biomass across plant functional
     types is equal to the management threshold.
+    Biomass in kg/ha is calculated from the state variable representing grams
+    of carbon per square meter, entailing two conversion steps: multiply by 2.5
+    to get biomass, and multiply by 10 to get kg/ha from g/m2.
 
     Parameters:
         total_weighted_C (numpy.ndarray): derived, total carbon in
@@ -11926,6 +11929,10 @@ def _calc_grazing_offtake(
         rate of eating and the relative time spent eating.  These are related
         to the biomass of the forage type and the estimated mouth size of the
         animal. Equations 16-17, Freer et al. 2012.
+        Biomass in kg/ha is calculated from the state variable representing
+        grams of carbon per square meter, entailing two conversion steps:
+        multiply by 2.5 to get biomass, and multiply by 10 to get kg/ha from
+        g/m2.
 
         Parameters:
             cstatv (numpy.ndarray): state variable, C in biomass
@@ -11963,9 +11970,7 @@ def _calc_grazing_offtake(
             (CR13 != _IC_NODATA))
 
         # calculate weighted biomass in kg/ha from C state variable in g/m2
-        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
-        biomass[valid_mask] = (
-            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        biomass = cstatv * 2.5 * 10 * pft_cover
         relative_time = numpy.empty(cstatv.shape, dtype=numpy.float32)
         relative_time[:] = _TARGET_NODATA
         relative_time[valid_mask] = (
@@ -12091,6 +12096,10 @@ def _calc_grazing_offtake(
         less than or equal to the maximum fraction of biomass that may be
         removed, according to the management threshold supplied as an input by
         the user.
+        Biomass in kg/ha is calculated from the state variable representing
+        grams of carbon per square meter, entailing two conversion steps:
+        multiply by 2.5 to get biomass, and multiply by 10 to get kg/ha from
+        g/m2.
 
         Parameters:
             cstatv (numpy.ndarray): state variable, C in biomass of this feed
@@ -12115,10 +12124,7 @@ def _calc_grazing_offtake(
             (daily_intake != _TARGET_NODATA) &
             (animal_density != _TARGET_NODATA) &
             (max_fgrem != _TARGET_NODATA))
-        # calculate weighted biomass in kg/ha from C state variable in g/m2
-        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
-        biomass[valid_mask] = (
-            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        biomass = cstatv * 2.5 * 10 * pft_cover
         # calculate forage demand as percentage of available biomass
         demand = numpy.zeros(cstatv.shape, dtype=numpy.float32)
         demand[valid_mask] = (
@@ -12630,6 +12636,10 @@ def _animal_diet_sufficiency(
         daily intake of that feed type by an individual animal, accounting for
         standing biomass of the feed type and estimated animal density. Assume
         that there are 30.4 days in one model timestep.
+        Biomass in kg/ha is calculated from the state variable representing
+        grams of carbon per square meter, entailing two conversion steps:
+        multiply by 2.5 to get biomass, and multiply by 10 to get kg/ha from
+        g/m2.
 
         Parameters:
             cstatv (numpy.ndarray): state variable, C in biomass (g per square
@@ -12652,10 +12662,7 @@ def _animal_diet_sufficiency(
             (~numpy.isclose(pft_cover, pft_nodata)) &
             (animal_density != _TARGET_NODATA) &
             (fgrem != _TARGET_NODATA))
-        # calculate weighted biomass in kg/ha from C state variable in g/m2
-        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
-        biomass[valid_mask] = (
-            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
+        biomass = cstatv * 2.5 * 10 * pft_cover
         # calculate forage intake from percentage of available biomass
         daily_intake = numpy.empty(cstatv.shape, dtype=numpy.float32)
         daily_intake[:] = _TARGET_NODATA
