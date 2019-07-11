@@ -1043,6 +1043,8 @@ class foragetests(unittest.TestCase):
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmin_<month>.tif'),
             'max_temp_path_pattern': os.path.join(
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmax_<month>.tif'),
+            'monthly_vi_path_pattern': os.path.join(
+                SAMPLE_DATA, 'ndvi', 'ndvi_<year>_<month>.tif'),
             'site_param_table': os.path.join(
                 SAMPLE_DATA, 'site_parameters.csv'),
             'site_param_spatial_index_path': os.path.join(
@@ -1052,7 +1054,7 @@ class foragetests(unittest.TestCase):
                 SAMPLE_DATA, 'pft<PFT>.tif'),
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
-            'animal_mgmt_layer_path': os.path.join(
+            'animal_grazing_areas_path': os.path.join(
                 SAMPLE_DATA, 'animal_mgmt_layer_WGS1984.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
@@ -10703,8 +10705,8 @@ class foragetests(unittest.TestCase):
 
         site_param_table = {
             1: {
-                'EO_biomass_intercept': 0,
-                'EO_biomass_slope': 1,
+                'eo_biomass_intercept': 0,
+                'eo_biomass_slope': 1,
             }
         }
         sv_reg = {

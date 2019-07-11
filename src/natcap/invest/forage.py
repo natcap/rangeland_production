@@ -533,6 +533,18 @@ def execute(args):
             named
                 "./temperature/max_temperature_01.tif to
                 "./temperature/max_temperature_12.tif"
+        args['monthly_vi_path_pattern'] (string): path to the monthly
+            vegetation index path pattern, where the strings <month> and <year>
+            can be replaced with the number 01..12 for the month and the
+            integer year.  The model requires that one vegetation index raster
+            be supplied per month that the model is run. The <month> value in
+            input file paths must be two digits.
+            Example: if this value is given as:
+            `./ndvi/vi_<month>_<year>.tif`, `starting_year` as 2016,
+            `starting_month` as 5, and `n_months` is 12, the model will expect
+            to find files named:
+                "./ndvi/vi_05_2016.tif" to
+                "./ndvi/vi_04_2017.tif"
         args['site_param_table'] (string): path to csv file giving site
             parameters. This file must contain a column named "site" that
             contains unique integers. These integer values correspond to site
@@ -581,16 +593,17 @@ def execute(args):
                 SFW (standard fleece weight, kg; the average weight of fleece
                     of a mature adult; for sheep only)
                 birth_weight (kg)
-                num_animals (number of animals grazing inside the polygon)
                 grz_months (a string of integers, separated by ','; months of
                     the simulation when animals are present,
                     relative to `starting_month`. For example, if `n_months`
                     is 3, and animals are present during the entire simulation
                     period, `grz_months` should be "1,2,3")
-        args['animal_mgmt_layer_path'] (string): path to animal vector inputs
-            giving the location of grazing animals. Must have a field named
-            "animal_id", containing unique integers that correspond to the
-            values in the "animal_id" column of the animal trait csv.
+        args['animal_grazing_areas_path'] (string): path to animal vector
+            inputs giving the location of grazing animals. Must have a field
+            named "animal_id", containing unique integers that correspond to
+            the values in the "animal_id" column of the animal trait csv, and
+            a field named "num_animal" giving the number of animals grazing
+            inside each polygon feature.
         args['initial_conditions_dir'] (string): path to directory
             containing initial conditions. This directory must
             contain a series of rasters with initial values for each PFT and
@@ -611,9 +624,6 @@ def execute(args):
     starting_month = int(args['starting_month'])
     starting_year = int(args['starting_year'])
     n_months = int(args['n_months'])
-    # this will be used to look up precip path given the model's month
-    # timestep index that starts at 0
-    precip_path_list = []
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
     temperature_month_set = set()
@@ -624,22 +634,37 @@ def execute(args):
     base_align_raster_path_id_map = {}
     # we'll use this to report any missing paths
     missing_precip_path_list = []
+    missing_EO_index_path_list = []
     for month_index in xrange(n_months):
         month_i = (starting_month + month_index - 1) % 12 + 1
         temperature_month_set.add(month_i)
         year = starting_year + (starting_month + month_index - 1) // 12
         precip_path = args[
             'monthly_precip_path_pattern'].replace(
-                '<year>', str(year)).replace('<month>', '%.2d' % month_i)
-        base_align_raster_path_id_map['precip_%d' % month_index] = precip_path
-        precip_path_list.append(precip_path)
+                '<year>', str(year)).replace(
+                '<month>', '{:02d}'.format(month_i))
+        base_align_raster_path_id_map[
+            'precip_{}'.format(month_index)] = precip_path
         if not os.path.exists(precip_path):
             missing_precip_path_list.append(precip_path)
+        EO_index_path = args[
+            'monthly_vi_path_pattern'].replace(
+                '<year>', str(year)).replace(
+                '<month>', '{:02d}'.format(month_i))
+        base_align_raster_path_id_map[
+            'EO_index_{}'.format(month_index)] = EO_index_path
+        if not os.path.exists(EO_index_path):
+            missing_EO_index_path_list.append(EO_index_path)
     if missing_precip_path_list:
         raise ValueError(
             "Couldn't find the following precipitation paths given the " +
             "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
             "\n\t".join(missing_precip_path_list))
+    if missing_EO_index_path_list:
+        raise ValueError(
+            "Couldn't find the following vegetation index paths given the " +
+            "pattern: %s\n\t" % args['monthly_vi_path_pattern'] +
+            "\n\t".join(missing_EO_index_path_list))
     # the model requires 12 months of precipitation data to calculate
     # atmospheric N deposition and potential production from annual precip
     n_precip_months = int(args['n_months'])
@@ -651,7 +676,6 @@ def execute(args):
             precip_path = args['monthly_precip_path_pattern'].replace(
                 '<year>', str(year)).replace('<month>', '%.2d' % month_i)
             base_align_raster_path_id_map['precip_%d' % m_index] = precip_path
-            precip_path_list.append(precip_path)
             if os.path.exists(precip_path):
                 n_precip_months = n_precip_months + 1
             m_index = m_index + 1
@@ -759,7 +783,7 @@ def execute(args):
     # layer
     anim_id_list = []
     driver = ogr.GetDriverByName('ESRI Shapefile')
-    datasource = driver.Open(args['animal_mgmt_layer_path'], 0)
+    datasource = driver.Open(args['animal_grazing_areas_path'], 0)
     layer = datasource.GetLayer()
     for feature in layer:
         anim_id_list.append(feature.GetField('animal_id'))
@@ -873,7 +897,7 @@ def execute(args):
         aligned_inputs['site_index'], aligned_inputs['animal_index'],
         gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
     pygeoprocessing.rasterize(
-        args['animal_mgmt_layer_path'], aligned_inputs['animal_index'],
+        args['animal_grazing_areas_path'], aligned_inputs['animal_index'],
         option_list=["ATTRIBUTE=animal_id"])
 
     # Initialization
@@ -976,8 +1000,9 @@ def execute(args):
                 animal_trait_table[animal_id])
             animal_trait_table[animal_id] = revised_animal_trait_dict
 
-        # _estimate_animal_density(
-        #     aligned_inputs, args['animal_mgmt_layer_path'], month_reg)
+        _estimate_animal_density(
+            aligned_inputs, month_index, pft_id_set, site_param_table,
+            args['animal_grazing_areas_path'], prev_sv_reg, month_reg)
 
         _calc_grazing_offtake(
             aligned_inputs, args['aoi_path'], args['management_threshold'],
@@ -12823,7 +12848,8 @@ def animal_density(
     """
     valid_mask = (
         (biomass_diff != _TARGET_NODATA) &
-        (sum_biomass_diff != _TARGET_NODATA))
+        (sum_biomass_diff != _TARGET_NODATA) &
+        (total_animals != _TARGET_NODATA))
     animals_per_pixel = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
     animals_per_pixel[:] = _TARGET_NODATA
     animals_per_pixel[valid_mask] = (
@@ -12888,7 +12914,7 @@ def add_shp_id_field(base_vector_path, target_vector_path):
 
 def _estimate_animal_density(
         aligned_inputs, month_index, pft_id_set, site_param_table,
-        animal_mgmt_layer_path, sv_reg, month_reg):
+        animal_grazing_areas_path, sv_reg, month_reg):
     """Estimate the density of grazing animals on each pixel of the study area.
 
     Calculate observed biomass for the current month from a remotely sensed
@@ -12910,7 +12936,7 @@ def _estimate_animal_density(
         site_param_table (dict): map of site spatial index to dictionaries
             that contain site-level parameters, including slope and intercept
             of relationship between NDVI and biomass
-        animal_mgmt_layer_path (string): path to animal vector inputs giving
+        animal_grazing_areas_path (string): path to animal vector inputs giving
             the location of grazing animals
         sv_reg (dict): map of key, path pairs giving paths to state variables,
             including carbon in aboveground biomass for each plant functional
@@ -13071,7 +13097,7 @@ def _estimate_animal_density(
     temp_val_dict['animal_mgmt_copy'] = os.path.join(
         temp_dir, 'animal_mgmt_copy.shp')
     param_val_dict = {}
-    for val in ['EO_biomass_intercept', 'EO_biomass_slope']:
+    for val in ['eo_biomass_intercept', 'eo_biomass_slope']:
         target_path = os.path.join(temp_dir, '{}.tif'.format(val))
         param_val_dict[val] = target_path
         site_to_val = dict(
@@ -13086,8 +13112,8 @@ def _estimate_animal_density(
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             aligned_inputs['EO_index_{}'.format(month_index)],
-            param_val_dict['EO_biomass_intercept'],
-            param_val_dict['EO_biomass_slope']]],
+            param_val_dict['eo_biomass_intercept'],
+            param_val_dict['eo_biomass_slope']]],
         calc_observed_biomass, temp_val_dict['biomass_obs'],
         gdal.GDT_Float32, _TARGET_NODATA)
     calc_potential_biomass(
@@ -13102,12 +13128,12 @@ def _estimate_animal_density(
 
     # calculate the sum of biomass_diff within animal management polygons
     biomass_diff_table = pygeoprocessing.zonal_statistics(
-        (temp_val_dict['biomass_diff'], 1), animal_mgmt_layer_path,
+        (temp_val_dict['biomass_diff'], 1), animal_grazing_areas_path,
         polygons_might_overlap=False)
 
     # generate raster with the sum of biomass diff within animal polygons
     add_shp_id_field(
-        animal_mgmt_layer_path, temp_val_dict['animal_mgmt_copy'])
+        animal_grazing_areas_path, temp_val_dict['animal_mgmt_copy'])
     pygeoprocessing.new_raster_from_base(
         aligned_inputs['animal_index'], temp_val_dict['animal_mgmt_features'],
         gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
@@ -13127,7 +13153,7 @@ def _estimate_animal_density(
         aligned_inputs['animal_index'], temp_val_dict['total_animals'],
         gdal.GDT_Float32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
     pygeoprocessing.rasterize(
-        animal_mgmt_layer_path, temp_val_dict['total_animals'],
+        animal_grazing_areas_path, temp_val_dict['total_animals'],
         option_list=["ATTRIBUTE=num_animal"])
 
     # pixel area in ha to calculate density from number of animals per pixel
