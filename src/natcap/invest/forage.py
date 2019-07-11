@@ -12830,7 +12830,12 @@ def animal_density(
     Calculate animal density in animals per ha from the difference between
     potential and observed biomass inside polygon features containing grazing
     animals. First calculate the number of animals per pixel from the
-    proportional
+    proportional difference between observed and potential biomass inside
+    grazing area polygons, assuming that pixels with a greater proportional
+    difference between potential and observed biomass contain a greater
+    proportion of the total number of animals grazing inside that polygon
+    feature. Then divide the number of animals per pixel by the pixel area in
+    ha to get animals per ha.
 
     Parameters:
         biomass_diff (numpy.ndarray): derived, difference between observed and
