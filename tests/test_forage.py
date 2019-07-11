@@ -8,6 +8,7 @@ import sys
 import math
 
 import numpy
+import pandas
 from osgeo import osr
 from osgeo import gdal
 
@@ -16,6 +17,7 @@ import pygeoprocessing
 SAMPLE_DATA = "C:/Users/ginge/Dropbox/sample_inputs"
 REGRESSION_DATA = "C:/Users/ginge/Documents/NatCap/regression_test_data"
 PROCESSING_DIR = None
+TEST_AOI = "C:/Users/ginge/Dropbox/sample_inputs/test_aoi.shp"
 
 _TARGET_NODATA = -1.0
 _IC_NODATA = float(numpy.finfo('float32').min)
@@ -1021,6 +1023,9 @@ class foragetests(unittest.TestCase):
             'n_months': 1,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'aoi_small.shp'),
+            'management_threshold': 300,
+            'proportion_legume_path': os.path.join(
+                SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
                 SAMPLE_DATA, 'soil', 'bulkd.tif'),
             'ph_path': os.path.join(
@@ -1048,7 +1053,7 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_mgmt_layer_path': os.path.join(
-                SAMPLE_DATA, 'sheep_units_density_2016_monitoring_area.shp'),
+                SAMPLE_DATA, 'animal_mgmt_layer_WGS1984.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
         }
@@ -9435,3 +9440,1220 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             sv_reg['aglive_2_1_path'], mod_aglive_2 - tolerance,
             mod_aglive_2 + tolerance, _SV_NODATA)
+
+    def test_nonspatial_derived_animal_traits(self):
+        """Test calculation of nonspatial derived animal traits.
+
+        Use the function `calc_derived_animal_traits` to populate the animal
+        trait table with fixed parameters from Freer et al. (2012) and derived
+        animal traits. Test the derived animal traits against values calculated
+        by hand. Use the function `update_breeding_female_status` to update the
+        reproductive status of breeding females. Use the function
+        `calc_max_intake` to calculate maximum potential intake.
+
+        Raises:
+            AssertionError if derived animal traits calculated by
+            `calc_derived_animal_traits` do not match values calculated by
+            hand.
+            AssertionError if the reproductive status of breeding females is
+            not correctly updated according to model step.
+            AssertionError if `calc_max_intake` does not match values
+            calculated by hand.
+
+        Returns:
+            None
+
+        """
+        # Freer parameters stored as constants in forage.py
+        _FREER_PARAM_DICT = {
+            'b_indicus': {
+                'CN1': 0.0115,
+                'CN2': 0.27,
+                'CN3': 0.4,
+                'CI1': 0.025,
+                'CI2': 1.7,
+                'CI3': 0.22,
+                'CI4': 60,
+                'CI5': 0.01,
+                'CI6': 25,
+                'CI7': 22,
+                'CI8': 62,
+                'CI9': 1.7,
+                'CI10': 0.6,
+                'CI11': 0.05,
+                'CI12': 0.15,
+                'CI13': 0.005,
+                'CI14': 0.002,
+                'CI15': 0.5,
+                'CI19': 0.416,
+                'CI20': 1.5,
+                'CR1': 0.8,
+                'CR2': 0.17,
+                'CR3': 1.7,
+                'CR4': 0.00078,
+                'CR5': 0.6,
+                'CR6': 0.00074,
+                'CR7': 0.5,
+                'CR11': 10.5,
+                'CR12': 0.8,
+                'CR13': 0.35,
+                'CR14': 1,
+                'CR20': 11.5,
+                'CK1': 0.5,
+                'CK2': 0.02,
+                'CK3': 0.85,
+                'CK5': 0.4,
+                'CK6': 0.02,
+                'CK8': 0.133,
+                'CK10': 0.84,
+                'CK11': 0.8,
+                'CK13': 0.035,
+                'CK14': 0.33,
+                'CK15': 0.12,
+                'CK16': 0.043,
+                'CL0': 0.375,
+                'CL1': 4,
+                'CL2': 30,
+                'CL3': 0.6,
+                'CL4': 0.6,
+                'CL5': 0.94,
+                'CL6': 3.1,
+                'CL7': 1.17,
+                'CL15': 0.032,
+                'CL16': 0.7,
+                'CL17': 0.01,
+                'CL19': 1.6,
+                'CL20': 4,
+                'CL21': 0.004,
+                'CL22': 0.006,
+                'CL23': 3,
+                'CL24': 0.6,
+                'CM1': 0.09,
+                'CM2': 0.31,
+                'CM3': 0.00008,
+                'CM4': 0.84,
+                'CM5': 0.23,
+                'CM6': 0.0025,
+                'CM7': 0.9,
+                'CM8': 0.000057,
+                'CM9': 0.16,
+                'CM10': 0.0152,
+                'CM11': 0.000526,
+                'CM12': 0.0129,
+                'CM13': 0.0338,
+                'CM14': 0.00011,
+                'CM15': 1.15,
+                'CM16': 0.0026,
+                'CM17': 5,
+                'CRD1': 0.3,
+                'CRD2': 0.25,
+                'CRD3': 0.1,
+                'CRD4': 0.007,
+                'CRD5': 0.005,
+                'CRD6': 0.35,
+                'CRD7': 0.1,
+                'CA1': 0.05,
+                'CA2': 0.85,
+                'CA3': 5.5,
+                'CA4': 0.178,
+                'CA6': 1,
+                'CA7': 0.6,
+                'CG1': 1,
+                'CG2': 0.7,
+                'CG4': 6,
+                'CG5': 0.4,
+                'CG6': 0.9,
+                'CG7': 0.97,
+                'CG8': 23.2,
+                'CG9': 16.5,
+                'CG10': 2,
+                'CG11': 13.8,
+                'CG12': 0.092,
+                'CG13': 0.12,
+                'CG14': 0.008,
+                'CG15': 0.115,
+                'CP1': 285,
+                'CP2': 2.2,
+                'CP3': 1.77,
+                'CP4': 0.33,
+                'CP5': 1.8,
+                'CP6': 2.42,
+                'CP7': 1.16,
+                'CP8': 4.11,
+                'CP9': 343.5,
+                'CP10': 0.0164,
+                'CP11': 0.134,
+                'CP12': 6.22,
+                'CP13': 0.747,
+                'CP14': 1,
+                'CP15': 0.07,
+            },
+            'b_taurus': {
+                'CN1': 0.0115,
+                'CN2': 0.27,
+                'CN3': 0.4,
+                'CI1': 0.025,
+                'CI2': 1.7,
+                'CI3': 0.22,
+                'CI4': 60,
+                'CI5': 0.02,
+                'CI6': 25,
+                'CI7': 22,
+                'CI8': 62,
+                'CI9': 1.7,
+                'CI10': 0.6,
+                'CI11': 0.05,
+                'CI12': 0.15,
+                'CI13': 0.005,
+                'CI14': 0.002,
+                'CI15': 0.5,
+                'CI19': 0.416,
+                'CI20': 1.5,
+                'CR1': 0.8,
+                'CR2': 0.17,
+                'CR3': 1.7,
+                'CR4': 0.00078,
+                'CR5': 0.6,
+                'CR6': 0.00074,
+                'CR7': 0.5,
+                'CR11': 10.5,
+                'CR12': 0.8,
+                'CR13': 0.35,
+                'CR14': 1,
+                'CR20': 11.5,
+                'CK1': 0.5,
+                'CK2': 0.02,
+                'CK3': 0.85,
+                'CK5': 0.4,
+                'CK6': 0.02,
+                'CK8': 0.133,
+                'CK10': 0.84,
+                'CK11': 0.8,
+                'CK13': 0.035,
+                'CK14': 0.33,
+                'CK15': 0.12,
+                'CK16': 0.043,
+                'CL0': 0.375,
+                'CL1': 4,
+                'CL2': 30,
+                'CL3': 0.6,
+                'CL4': 0.6,
+                'CL5': 0.94,
+                'CL6': 3.1,
+                'CL7': 1.17,
+                'CL15': 0.032,
+                'CL16': 0.7,
+                'CL17': 0.01,
+                'CL19': 1.6,
+                'CL20': 4,
+                'CL21': 0.004,
+                'CL22': 0.006,
+                'CL23': 3,
+                'CL24': 0.6,
+                'CM1': 0.09,
+                'CM2': 0.36,
+                'CM3': 0.00008,
+                'CM4': 0.84,
+                'CM5': 0.23,
+                'CM6': 0.0025,
+                'CM7': 0.9,
+                'CM8': 0.000057,
+                'CM9': 0.16,
+                'CM10': 0.0152,
+                'CM11': 0.000526,
+                'CM12': 0.0161,
+                'CM13': 0.0422,
+                'CM14': 0.00011,
+                'CM15': 1.15,
+                'CM16': 0.0026,
+                'CM17': 5,
+                'CRD1': 0.3,
+                'CRD2': 0.25,
+                'CRD3': 0.1,
+                'CRD4': 0.007,
+                'CRD5': 0.005,
+                'CRD6': 0.35,
+                'CRD7': 0.1,
+                'CA1': 0.05,
+                'CA2': 0.85,
+                'CA3': 5.5,
+                'CA4': 0.178,
+                'CA6': 1,
+                'CA7': 0.6,
+                'CG1': 1,
+                'CG2': 0.7,
+                'CG4': 6,
+                'CG5': 0.4,
+                'CG6': 0.9,
+                'CG7': 0.97,
+                'CG8': 27,
+                'CG9': 20.3,
+                'CG10': 2,
+                'CG11': 13.8,
+                'CG12': 0.072,
+                'CG13': 0.14,
+                'CG14': 0.008,
+                'CG15': 0.115,
+                'CP1': 285,
+                'CP2': 2.2,
+                'CP3': 1.77,
+                'CP4': 0.33,
+                'CP5': 1.8,
+                'CP6': 2.42,
+                'CP7': 1.16,
+                'CP8': 4.11,
+                'CP9': 343.5,
+                'CP10': 0.0164,
+                'CP11': 0.134,
+                'CP12': 6.22,
+                'CP13': 0.747,
+                'CP14': 1,
+                'CP15': 0.07,
+            },
+            'indicus_x_taurus': {
+                'CN1': 0.0115,
+                'CN2': 0.27,
+                'CN3': 0.4,
+                'CI1': 0.025,
+                'CI2': 1.7,
+                'CI3': 0.22,
+                'CI4': 60,
+                'CI5': 0.015,
+                'CI6': 25,
+                'CI7': 22,
+                'CI8': 62,
+                'CI9': 1.7,
+                'CI10': 0.6,
+                'CI11': 0.05,
+                'CI12': 0.15,
+                'CI13': 0.005,
+                'CI14': 0.002,
+                'CI15': 0.5,
+                'CI19': 0.416,
+                'CI20': 1.5,
+                'CR1': 0.8,
+                'CR2': 0.17,
+                'CR3': 1.7,
+                'CR4': 0.00078,
+                'CR5': 0.6,
+                'CR6': 0.00074,
+                'CR7': 0.5,
+                'CR11': 10.5,
+                'CR12': 0.8,
+                'CR13': 0.35,
+                'CR14': 1,
+                'CR20': 11.5,
+                'CK1': 0.5,
+                'CK2': 0.02,
+                'CK3': 0.85,
+                'CK5': 0.4,
+                'CK6': 0.02,
+                'CK8': 0.133,
+                'CK10': 0.84,
+                'CK11': 0.8,
+                'CK13': 0.035,
+                'CK14': 0.33,
+                'CK15': 0.12,
+                'CK16': 0.043,
+                'CL0': 0.375,
+                'CL1': 4,
+                'CL2': 30,
+                'CL3': 0.6,
+                'CL4': 0.6,
+                'CL5': 0.94,
+                'CL6': 3.1,
+                'CL7': 1.17,
+                'CL15': 0.032,
+                'CL16': 0.7,
+                'CL17': 0.01,
+                'CL19': 1.6,
+                'CL20': 4,
+                'CL21': 0.004,
+                'CL22': 0.006,
+                'CL23': 3,
+                'CL24': 0.6,
+                'CM1': 0.09,
+                'CM2': 0.335,
+                'CM3': 0.00008,
+                'CM4': 0.84,
+                'CM5': 0.23,
+                'CM6': 0.0025,
+                'CM7': 0.9,
+                'CM8': 0.000057,
+                'CM9': 0.16,
+                'CM10': 0.0152,
+                'CM11': 0.000526,
+                'CM12': 0.0145,
+                'CM13': 0.038,
+                'CM14': 0.00011,
+                'CM15': 1.15,
+                'CM16': 0.0026,
+                'CM17': 5,
+                'CRD1': 0.3,
+                'CRD2': 0.25,
+                'CRD3': 0.1,
+                'CRD4': 0.007,
+                'CRD5': 0.005,
+                'CRD6': 0.35,
+                'CRD7': 0.1,
+                'CA1': 0.05,
+                'CA2': 0.85,
+                'CA3': 5.5,
+                'CA4': 0.178,
+                'CA6': 1,
+                'CA7': 0.6,
+                'CG1': 1,
+                'CG2': 0.7,
+                'CG4': 6,
+                'CG5': 0.4,
+                'CG6': 0.9,
+                'CG7': 0.97,
+                'CG8': 27,
+                'CG9': 20.3,
+                'CG10': 2,
+                'CG11': 13.8,
+                'CG12': 0.072,
+                'CG13': 0.14,
+                'CG14': 0.008,
+                'CG15': 0.115,
+                'CP1': 285,
+                'CP2': 2.2,
+                'CP3': 1.77,
+                'CP4': 0.33,
+                'CP5': 1.8,
+                'CP6': 2.42,
+                'CP7': 1.16,
+                'CP8': 4.11,
+                'CP9': 343.5,
+                'CP10': 0.0164,
+                'CP11': 0.134,
+                'CP12': 6.22,
+                'CP13': 0.747,
+                'CP14': 1,
+                'CP15': 0.07,
+            },
+            'sheep': {
+                'CN1': 0.0157,
+                'CN2': 0.27,
+                'CN3': 0.4,
+                'CI1': 0.04,
+                'CI2': 1.7,
+                'CI3': 0.5,
+                'CI4': 25,
+                'CI5': 0.01,
+                'CI6': 25,
+                'CI7': 22,
+                'CI8': 28,
+                'CI9': 1.4,
+                'CI12': 0.15,
+                'CI13': 0.02,
+                'CI14': 0.002,
+                'CI20': 1.5,
+                'CR1': 0.8,
+                'CR2': 0.17,
+                'CR3': 1.7,
+                'CR4': 0.00112,
+                'CR5': 0.6,
+                'CR6': 0.00112,
+                'CR7': 0,
+                'CR11': 10.5,
+                'CR12': 0.8,
+                'CR13': 0.35,
+                'CR14': 1,
+                'CR20': 11.5,
+                'CK1': 0.5,
+                'CK2': 0.02,
+                'CK3': 0.85,
+                'CK5': 0.4,
+                'CK6': 0.02,
+                'CK8': 0.133,
+                'CK10': 0.84,
+                'CK11': 0.8,
+                'CK13': 0.035,
+                'CK14': 0.33,
+                'CK15': 0.12,
+                'CK16': 0.043,
+                'CL0': 0.486,
+                'CL1': 2,
+                'CL2': 22,
+                'CL3': 1,
+                'CL5': 0.94,
+                'CL6': 4.7,
+                'CL7': 1.17,
+                'CL15': 0.045,
+                'CL16': 0.7,
+                'CL17': 0.01,
+                'CL19': 1.6,
+                'CL20': 4,
+                'CL21': 0.008,
+                'CL22': 0.012,
+                'CL23': 3,
+                'CL24': 0.6,
+                'CM1': 0.09,
+                'CM2': 0.26,
+                'CM3': 0.00008,
+                'CM4': 0.84,
+                'CM5': 0.23,
+                'CM6': 0.02,
+                'CM7': 0.9,
+                'CM8': 0.000057,
+                'CM9': 0.16,
+                'CM10': 0.0152,
+                'CM11': 0.00046,
+                'CM12': 0.000147,
+                'CM13': 0.003375,
+                'CM15': 1.15,
+                'CM16': 0.0026,
+                'CM17': 40,
+                'CRD1': 0.3,
+                'CRD2': 0.25,
+                'CRD3': 0.1,
+                'CRD4': 0.007,
+                'CRD5': 0.005,
+                'CRD6': 0.35,
+                'CRD7': 0.1,
+                'CA1': 0.05,
+                'CA2': 0.85,
+                'CA3': 5.5,
+                'CA4': 0.178,
+                'CA6': 1,
+                'CA7': 0.6,
+                'CG1': 0.6,
+                'CG2': 0.7,
+                'CG4': 6,
+                'CG5': 0.4,
+                'CG6': 0.9,
+                'CG7': 0.97,
+                'CG8': 27,
+                'CG9': 20.3,
+                'CG10': 2,
+                'CG11': 13.8,
+                'CG12': 0.072,
+                'CG13': 0.14,
+                'CG14': 0.008,
+                'CG15': 0.115,
+                'CW1': 24,
+                'CW2': 0.004,
+                'CW3': 0.7,
+                'CW5': 0.25,
+                'CW6': 0.072,
+                'CW7': 1.35,
+                'CW8': 0.016,
+                'CW9': 1,
+                'CW12': 0.025,
+                'CP1': 150,
+                'CP2': 1.304,
+                'CP3': 2.625,
+                'CP4': 0.33,
+                'CP5': 1.43,
+                'CP6': 3.38,
+                'CP7': 0.91,
+                'CP8': 4.33,
+                'CP9': 4.37,
+                'CP10': 0.965,
+                'CP11': 0.145,
+                'CP12': 4.56,
+                'CP13': 0.9,
+                'CP14': 1.5,
+                'CP15': 0.1,
+            },
+        }
+        from natcap.invest import forage
+        from natcap.invest import utils
+
+        # known derived trait values
+        entire_m_Z = 0.480537
+        castrate_Z = 0.394308
+        heifer_Z = 0.421794
+        sheep_Z = 0.562727
+
+        entire_m_ZF = 1.019463
+        castrate_ZF = 1.105692
+        heifer_ZF = 1.078206
+        sheep_ZF = 1.
+
+        entire_m_BC = 0.998350
+        castrate_BC = 0.995369
+        heifer_BC = 0.998655
+        sheep_BC = 1.020165
+
+        args = foragetests.generate_base_args(self.workspace_dir)
+        freer_parameter_df = pandas.DataFrame.from_dict(
+            _FREER_PARAM_DICT, orient='index')
+        freer_parameter_df['type'] = freer_parameter_df.index
+        input_animal_trait_table = utils.build_lookup_from_csv(
+            args['animal_trait_path'], 'animal_id')
+        animal_trait_table = forage.calc_derived_animal_traits(
+            input_animal_trait_table, freer_parameter_df)
+
+        self.assertAlmostEqual(
+            animal_trait_table[1]['Z'], entire_m_Z, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[3]['Z'], castrate_Z, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[4]['Z'], heifer_Z, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[0]['Z'], sheep_Z, places=6)
+
+        self.assertAlmostEqual(
+            animal_trait_table[1]['ZF'], entire_m_ZF, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[3]['ZF'], castrate_ZF, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[4]['ZF'], heifer_ZF, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[0]['ZF'], sheep_ZF, places=6)
+
+        self.assertAlmostEqual(
+            animal_trait_table[1]['BC'], entire_m_BC, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[3]['BC'], castrate_BC, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[4]['BC'], heifer_BC, places=6)
+        self.assertAlmostEqual(
+            animal_trait_table[0]['BC'], sheep_BC, places=6)
+
+        # Test updating reproductive status of breeding females.
+        # model step indicates pregnancy
+        month_index = 2
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_dict = forage.update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_dict
+        # assert that reproductive status of breeding females is correct
+        self.assertEqual(
+            animal_trait_table[2]['reproductive_status_int'], 1)
+        # assert that reproductive status of all other animal types is 0
+        for animal_id in [0, 1, 3, 4]:
+            self.assertEqual(
+                animal_trait_table[animal_id]['reproductive_status_int'], 0)
+
+        # model step indicates lactating
+        month_index = 6
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_dict = forage.update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_dict
+        # assert that reproductive status of breeding females is correct
+        self.assertEqual(
+            animal_trait_table[2]['reproductive_status_int'], 2)
+        # assert that reproductive status of all other animal types is 0
+        for animal_id in [0, 1, 3, 4]:
+            self.assertEqual(
+                animal_trait_table[animal_id]['reproductive_status_int'], 0)
+
+        # model step indicates open
+        month_index = 8
+        for animal_id in animal_trait_table.keys():
+            if animal_trait_table[animal_id]['sex'] == 'breeding_female':
+                revised_animal_dict = forage.update_breeding_female_status(
+                    animal_trait_table[animal_id], month_index)
+                animal_trait_table[animal_id] = revised_animal_dict
+        self.assertEqual(
+            animal_trait_table[2]['reproductive_status_int'], 0)
+        # assert that reproductive status of all other animal types is 0
+        for animal_id in [0, 1, 3, 4]:
+            self.assertEqual(
+                animal_trait_table[animal_id]['reproductive_status_int'], 0)
+
+        # Test calculating maximum intake.
+        # known values calculated by hand
+        entire_m_max_intake = 12.3674657
+        castrate_max_intake = 9.3135440
+        heifer_max_intake = 8.1275358
+        sheep_max_intake = 0.8120074
+
+        for animal_id in animal_trait_table.keys():
+            revised_animal_trait_dict = forage.calc_max_intake(
+                animal_trait_table[animal_id])
+            animal_trait_table[animal_id] = revised_animal_trait_dict
+        self.assertAlmostEqual(
+            animal_trait_table[1]['max_intake'], entire_m_max_intake)
+        self.assertAlmostEqual(
+            animal_trait_table[3]['max_intake'], castrate_max_intake)
+        self.assertAlmostEqual(
+            animal_trait_table[4]['max_intake'], heifer_max_intake)
+        self.assertAlmostEqual(
+            animal_trait_table[0]['max_intake'], sheep_max_intake)
+
+    def test_calc_pasture_height(self):
+        """Test `calc_pasture_height`.
+
+        Use the function `calc_pasture_height` to estimate the height of each
+        feed type from its biomass. Test that the function matches values
+        calculated by hand.
+
+        Raises:
+            AssertionError if `calc_pasture_height` does not match values
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc_4 = 80
+        stdedc_4 = 45
+        cover_4 = 0.5
+        aglivc_5 = 99
+        stdedc_5 = 36
+        cover_5 = 0.3
+
+        height_agliv_4 = 10.2503075704191
+        height_dead_4 = 5.76579800836076
+        height_agliv_5 = 7.61085337103621
+        height_dead_5 = 2.76758304401317
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_4_path': os.path.join(self.workspace_dir, 'aglivc_4.tif'),
+            'stdedc_4_path': os.path.join(self.workspace_dir, 'stdedc_4.tif'),
+            'aglivc_5_path': os.path.join(self.workspace_dir, 'aglivc_5.tif'),
+            'stdedc_5_path': os.path.join(self.workspace_dir, 'stdedc_5.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_4_path'], aglivc_4)
+        create_constant_raster(sv_reg['stdedc_4_path'], stdedc_4)
+        create_constant_raster(sv_reg['aglivc_5_path'], aglivc_5)
+        create_constant_raster(sv_reg['stdedc_5_path'], stdedc_5)
+        aligned_inputs = {
+            'pft_4': os.path.join(self.workspace_dir, 'cover_4.tif'),
+            'pft_5': os.path.join(self.workspace_dir, 'cover_5.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_4'], cover_4)
+        create_constant_raster(aligned_inputs['pft_5'], cover_5)
+        pft_id_set = [4, 5]
+        processing_dir = self.workspace_dir
+
+        pasture_height_dict = forage.calc_pasture_height(
+            sv_reg, aligned_inputs, pft_id_set, processing_dir)
+
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['agliv_4'], height_agliv_4 - tolerance,
+            height_agliv_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['stded_4'], height_dead_4 - tolerance,
+            height_dead_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['agliv_5'], height_agliv_5 - tolerance,
+            height_agliv_5 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            pasture_height_dict['stded_5'], height_dead_5 - tolerance,
+            height_dead_5 + tolerance, _TARGET_NODATA)
+
+    def test_calc_fraction_biomass(self):
+        """Test `calc_fraction_biomass`.
+
+        Use the function `calc_fraction_biomass` to calculate the relative
+        proportion of biomass represented by each feed type. Test that the
+        results match values calculated by hand.
+
+        Raises:
+            AssertionError if `calc_fraction_biomass` does not match values
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc_4 = 80
+        stdedc_4 = 45
+        cover_4 = 0.5
+        aglivc_5 = 99
+        stdedc_5 = 36
+        cover_5 = 0.3
+        total_weighted_C = 103
+
+        agliv_frac_bio_4 = 0.38835
+        stded_frac_bio_4 = 0.21845
+        agliv_frac_bio_5 = 0.28835
+        stded_frac_bio_5 = 0.10485
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_4_path': os.path.join(self.workspace_dir, 'aglivc_4.tif'),
+            'stdedc_4_path': os.path.join(self.workspace_dir, 'stdedc_4.tif'),
+            'aglivc_5_path': os.path.join(self.workspace_dir, 'aglivc_5.tif'),
+            'stdedc_5_path': os.path.join(self.workspace_dir, 'stdedc_5.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_4_path'], aglivc_4)
+        create_constant_raster(sv_reg['stdedc_4_path'], stdedc_4)
+        create_constant_raster(sv_reg['aglivc_5_path'], aglivc_5)
+        create_constant_raster(sv_reg['stdedc_5_path'], stdedc_5)
+        aligned_inputs = {
+            'pft_4': os.path.join(self.workspace_dir, 'cover_4.tif'),
+            'pft_5': os.path.join(self.workspace_dir, 'cover_5.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_4'], cover_4)
+        create_constant_raster(aligned_inputs['pft_5'], cover_5)
+        total_weighted_C_path = os.path.join(
+            self.workspace_dir, 'total_weighted_C.tif')
+        create_constant_raster(total_weighted_C_path, total_weighted_C)
+        pft_id_set = [4, 5]
+        processing_dir = self.workspace_dir
+
+        frac_biomass_dict = forage.calc_fraction_biomass(
+            sv_reg, aligned_inputs, pft_id_set, processing_dir,
+            total_weighted_C_path)
+
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['agliv_4'], agliv_frac_bio_4 - tolerance,
+            agliv_frac_bio_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['stded_4'], stded_frac_bio_4 - tolerance,
+            stded_frac_bio_4 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['agliv_5'], agliv_frac_bio_5 - tolerance,
+            agliv_frac_bio_5 + tolerance, _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            frac_biomass_dict['stded_5'], stded_frac_bio_5 - tolerance,
+            stded_frac_bio_5 + tolerance, _TARGET_NODATA)
+
+    def test_order_by_digestibility(self):
+        """Test `order_by_digestibility`.
+
+        Use the function `order_by_digestibility` to calculate the order of
+        feed types according to their digestibility. Ensure that the order of
+        feed types matches the order calculated by hand.
+
+        Raises:
+            AssertionError if `order_by_digestibility` does not match order
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+
+        # known inputs
+        aglivc_4 = 80
+        aglive_1_4 = 35
+        stdedc_4 = 45
+        stdede_1_4 = 12.3
+        aglivc_5 = 99
+        aglive_1_5 = 8.2
+        stdedc_5 = 36
+        stdede_1_5 = 22.5
+
+        digestibility_order = ['stded_5', 'agliv_4', 'stded_4', 'agliv_5']
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_4_path': os.path.join(self.workspace_dir, 'aglivc_4.tif'),
+            'aglive_1_4_path': os.path.join(
+                self.workspace_dir, 'aglive_1_4.tif'),
+            'stdedc_4_path': os.path.join(self.workspace_dir, 'stdedc_4.tif'),
+            'stdede_1_4_path': os.path.join(
+                self.workspace_dir, 'stdede_1_4.tif'),
+            'aglivc_5_path': os.path.join(self.workspace_dir, 'aglivc_5.tif'),
+            'aglive_1_5_path': os.path.join(
+                self.workspace_dir, 'aglive_1_5.tif'),
+            'stdedc_5_path': os.path.join(self.workspace_dir, 'stdedc_5.tif'),
+            'stdede_1_5_path': os.path.join(
+                self.workspace_dir, 'stdede_1_5.tif'),
+        }
+        args = foragetests.generate_base_args(self.workspace_dir)
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglivc_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglivc_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglive_1_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglive_1_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdedc_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdedc_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdede_1_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdede_1_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglivc_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglivc_5])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglive_1_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglive_1_5])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['aglivc_4_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[aglivc_4])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdedc_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdedc_5])
+        pygeoprocessing.new_raster_from_base(
+            args['site_param_spatial_index_path'], sv_reg['stdede_1_5_path'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[stdede_1_5])
+        pft_id_set = [4, 5]
+
+        ordered_feed_types = forage.order_by_digestibility(
+            sv_reg, pft_id_set, args['aoi_path'])
+
+        self.assertItemsEqual(ordered_feed_types, digestibility_order)
+
+    def test_calc_grazing_offtake(self):
+        """Test `_calc_grazing_offtake.`
+
+        Use the function `_calc_grazing_offtake` to perform diet selection from
+        available forage. Ensure that the selected diet matches the results
+        of diet selection performed by the beta rangeland model.
+
+        Raises:
+            AssertionError if `_calc_grazing_offtake` does not match diet
+                selection results of the beta rangeland model
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.00001
+
+        # known inputs
+        aglivc = 0.426
+        aglive_1 = 0.0187
+        stdedc = 11.2257
+        stdede_1 = 0.4238
+        stocking_density = 0.1
+        proportion_legume = 0
+
+        age = 116
+        sex_int = 4
+        type_int = 4
+        W_total = 18.6
+        max_intake = 0.8120073
+        ZF = 1.
+        CR1 = 0.8
+        CR2 = 0.17
+        CR3 = 1.7
+        CR4 = 0.00112
+        CR5 = 0.6
+        CR6 = 0.00112
+        CR12 = 0.8
+        CR13 = 0.35
+        CK1 = 0.5
+        CK2 = 0.02
+        CM1 = 0.09
+        CM2 = 0.26
+        CM3 = 0.00008
+        CM4 = 0.84
+        CM6 = 0.02
+        CM7 = 0.9
+        CM16 = 0.0026
+        CRD1 = 0.3
+        CRD2 = 0.25
+        CRD4 = 0.007
+        CRD5 = 0.005
+        CRD6 = 0.35
+        CRD7 = 0.1
+
+        species_factor = 0
+        digestibility_slope = 1.5349
+        digestibility_intercept = 0.4147
+        current_month = 4
+
+        # spatial inputs
+        aligned_inputs = {
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'proportion_legume_path': os.path.join(
+                self.workspace_dir, 'proportion_legume.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(
+            aligned_inputs['proportion_legume_path'], proportion_legume)
+        aoi_path = TEST_AOI
+        sv_reg = {
+            'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc.tif'),
+            'aglive_1_1_path': os.path.join(self.workspace_dir, 'aglive.tif'),
+            'stdedc_1_path': os.path.join(self.workspace_dir, 'stdedc.tif'),
+            'stdede_1_1_path': os.path.join(self.workspace_dir, 'stdede.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+
+        pft_id_set = [1]
+        animal_index_path = os.path.join(self.workspace_dir, 'animal.tif')
+        create_constant_raster(animal_index_path, 1)
+        animal_trait_table = {
+            1: {
+                'age': age,
+                'sex_int': sex_int,
+                'type_int': type_int,
+                'W_total': W_total,
+                'max_intake': max_intake,
+                'ZF': ZF,
+                'CR1': CR1,
+                'CR2': CR2,
+                'CR3': CR3,
+                'CR4': CR4,
+                'CR5': CR5,
+                'CR6': CR6,
+                'CR12': CR12,
+                'CR13': CR13,
+                'CK1': CK1,
+                'CK2': CK2,
+                'CM1': CM1,
+                'CM2': CM2,
+                'CM3': CM3,
+                'CM4': CM4,
+                'CM6': CM6,
+                'CM7': CM7,
+                'CM16': CM16,
+                'CRD1': CRD1,
+                'CRD2': CRD2,
+                'CRD4': CRD4,
+                'CRD5': CRD5,
+                'CRD6': CRD6,
+                'CRD7': CRD7,
+            }
+        }
+        veg_trait_table = {
+            1: {
+                'species_factor': species_factor,
+                'digestibility_intercept': digestibility_intercept,
+                'digestibility_slope': digestibility_slope,
+            }
+        }
+        month_reg = {
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
+            'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
+            'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
+        }
+        create_constant_raster(month_reg['animal_density'], stocking_density)
+
+        # management threshold does not restrict offtake
+        management_threshold = 0.1
+        forage._calc_grazing_offtake(
+            aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
+            animal_index_path, animal_trait_table, veg_trait_table,
+            current_month, month_reg)
+        flgrem = 0.000643
+        fdgrem = 0.002561
+
+        self.assert_all_values_in_raster_within_range(
+            month_reg['flgrem_1'], flgrem - tolerance, flgrem + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            month_reg['fdgrem_1'], fdgrem - tolerance, fdgrem + tolerance,
+            _TARGET_NODATA)
+
+        # management threshold restricts offtake
+        management_threshold = 300
+        forage._calc_grazing_offtake(
+            aligned_inputs, aoi_path, management_threshold, sv_reg, pft_id_set,
+            animal_index_path, animal_trait_table, veg_trait_table,
+            current_month, month_reg)
+        flgrem = 0
+        fdgrem = 0
+
+        self.assert_all_values_in_raster_within_range(
+            month_reg['flgrem_1'], flgrem - tolerance, flgrem + tolerance,
+            _TARGET_NODATA)
+        self.assert_all_values_in_raster_within_range(
+            month_reg['fdgrem_1'], fdgrem - tolerance, fdgrem + tolerance,
+            _TARGET_NODATA)
+
+    def test_animal_diet_sufficiency(self):
+        """Test `_animal_diet_sufficiency`.
+
+        Use the function `_animal_diet_sufficiency` to calculate the energy
+        content of forage offtake and compare it to energy requirements of
+        grazing animals. Ensure that estimated diet sufficiency matches the
+        result of the beta rangeland model.
+
+        Raises:
+            AssertionError if `_animal_diet_sufficiency` does not match results
+                of the beta rangeland model
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.000001
+
+        # known inputs
+        aglivc = 0.426
+        aglive_1 = 0.0187
+        stdedc = 11.2257
+        stdede_1 = 0.4238
+        stocking_density = 0.1
+
+        animal_type = 4
+        reproductive_status = 0
+        SRW = 32.4
+        SFW = 2.28
+        age = 116
+        sex_int = 4
+        W_total = 18.6
+        CK1 = 0.5
+        CK2 = 0.02
+        CM1 = 0.09
+        CM2 = 0.26
+        CM3 = 0.00008
+        CM4 = 0.84
+        CM6 = 0.02
+        CM7 = 0.9
+        CM16 = 0.0026
+        CRD4 = 0.007
+        CRD5 = 0.005
+        CRD6 = 0.35
+        CRD7 = 0.1
+        Z = 0.562727
+        BC = 1.020165
+        A_foet = 0
+        A_y = 0
+        CK5 = 0.4
+        CK6 = 0.02
+        CK8 = 0.133
+        CP1 = 150
+        CP4 = 0.33
+        CP5 = 1.43
+        CP8 = 4.33
+        CP9 = 4.37
+        CP10 = 0.965
+        CP15 = 0.1
+        CL0 = 0.486
+        CL1 = 2
+        CL2 = 22
+        CL3 = 1
+        CL5 = 0.94
+        CL6 = 4.7
+        CL15 = 0.045
+        CA1 = 0.05
+        CA2 = 0.85
+        CA3 = 5.5
+        CA4 = 0.178
+        CA6 = 1
+        CA7 = 0.6
+        CW1 = 24
+        CW2 = 0.004
+        CW3 = 0.7
+        CW5 = 0.25
+        CW6 = 0.072
+        CW7 = 1.35
+        CW8 = 0.016
+        CW9 = 1
+        CW12 = 0.025
+
+        digestibility_slope = 1.5349
+        digestibility_intercept = 0.4147
+        current_month = 4
+
+        flgrem = 0.000643
+        fdgrem = 0.002561
+
+        # raster-based inputs
+        sv_reg = {
+            'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc.tif'),
+            'aglive_1_1_path': os.path.join(self.workspace_dir, 'aglive.tif'),
+            'stdedc_1_path': os.path.join(self.workspace_dir, 'stdedc.tif'),
+            'stdede_1_1_path': os.path.join(self.workspace_dir, 'stdede.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['aglive_1_1_path'], aglive_1)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        create_constant_raster(sv_reg['stdede_1_1_path'], stdede_1)
+
+        pft_id_set = [1]
+        aligned_inputs = {
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'animal_index': os.path.join(self.workspace_dir, 'animal.tif'),
+        }
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        create_constant_raster(aligned_inputs['animal_index'], 1)
+        animal_trait_table = {
+            1: {
+                'type_int': animal_type,
+                'reproductive_status_int': reproductive_status,
+                'SRW_modified': SRW,
+                'sfw': SFW,
+                'age': age,
+                'sex_int': sex_int,
+                'W_total': W_total,
+                'CK1': CK1,
+                'CK2': CK2,
+                'CM1': CM1,
+                'CM2': CM2,
+                'CM3': CM3,
+                'CM4': CM4,
+                'CM6': CM6,
+                'CM7': CM7,
+                'CM16': CM16,
+                'CRD4': CRD4,
+                'CRD5': CRD5,
+                'CRD6': CRD6,
+                'CRD7': CRD7,
+                'Z': Z,
+                'BC': BC,
+                'A_foet': A_foet,
+                'A_y': A_y,
+                'CK5': CK5,
+                'CK6': CK6,
+                'CK8': CK8,
+                'CP1': CP1,
+                'CP4': CP4,
+                'CP5': CP5,
+                'CP8': CP8,
+                'CP9': CP9,
+                'CP10': CP10,
+                'CP15': CP15,
+                'CL0': CL0,
+                'CL1': CL1,
+                'CL2': CL2,
+                'CL3': CL3,
+                'CL5': CL5,
+                'CL6': CL6,
+                'CL15': CL15,
+                'CA1': CA1,
+                'CA2': CA2,
+                'CA3': CA3,
+                'CA4': CA4,
+                'CA6': CA6,
+                'CA7': CA7,
+                'CW1': CW1,
+                'CW2': CW2,
+                'CW3': CW3,
+                'CW5': CW5,
+                'CW6': CW6,
+                'CW7': CW7,
+                'CW8': CW8,
+                'CW9': CW9,
+                'CW12': CW12,
+            }
+        }
+        veg_trait_table = {
+            1: {
+                'digestibility_intercept': digestibility_intercept,
+                'digestibility_slope': digestibility_slope,
+            }
+        }
+        month_reg = {
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
+            'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
+            'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
+            'diet_sufficiency': os.path.join(
+                self.workspace_dir, 'diet_sufficiency.tif')
+        }
+        create_constant_raster(month_reg['animal_density'], stocking_density)
+        create_constant_raster(month_reg['flgrem_1'], flgrem)
+        create_constant_raster(month_reg['fdgrem_1'], fdgrem)
+
+        # non-breeding goat
+        diet_sufficiency = 0.4476615
+
+        forage._animal_diet_sufficiency(
+            sv_reg, pft_id_set, aligned_inputs, animal_trait_table,
+            veg_trait_table, current_month, month_reg)
+
+        self.assert_all_values_in_raster_within_range(
+            month_reg['diet_sufficiency'], diet_sufficiency - tolerance,
+            diet_sufficiency + tolerance, _TARGET_NODATA)
