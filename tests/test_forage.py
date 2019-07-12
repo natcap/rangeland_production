@@ -1020,10 +1020,10 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 1,
+            'n_months': 1,  # 22,
             'aoi_path': os.path.join(
-                SAMPLE_DATA, 'aoi_small.shp'),
-            'management_threshold': 300,
+                SAMPLE_DATA, 'soums_monitoring_area_diss.shp'),
+            'management_threshold': 50,
             'proportion_legume_path': os.path.join(
                 SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
@@ -1042,9 +1042,9 @@ class foragetests(unittest.TestCase):
             'min_temp_path_pattern': os.path.join(
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmin_<month>.tif'),
             'max_temp_path_pattern': os.path.join(
-                SAMPLE_DATA, 'temp', 'wc2.0_30s_tmax_<month>.tif'),
+                SAMPLE_DATA, 'temp', 'wcs2.0_30s_tmax_<month>.tif'),
             'monthly_vi_path_pattern': os.path.join(
-                SAMPLE_DATA, 'ndvi', 'ndvi_<year>_<month>.tif'),
+                SAMPLE_DATA, 'NDVI', 'ndvi_<year>_<month>.tif'),
             'site_param_table': os.path.join(
                 SAMPLE_DATA, 'site_parameters.csv'),
             'site_param_spatial_index_path': os.path.join(
@@ -1055,9 +1055,11 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_grazing_areas_path': os.path.join(
-                SAMPLE_DATA, 'animal_mgmt_layer_WGS1984.shp'),
-            'initial_conditions_dir': os.path.join(
-                SAMPLE_DATA, 'initialization_data'),
+                SAMPLE_DATA, 'sfu_per_soum.shp'),
+            'site_initial_table': os.path.join(
+                SAMPLE_DATA, 'site_initial_table.csv'),
+            'pft_initial_table': os.path.join(
+                SAMPLE_DATA, 'pft_initial_table.csv'),
         }
         return args
 
@@ -1129,8 +1131,7 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
-    # TODO COMMENT ME OUT
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -1140,6 +1141,7 @@ class foragetests(unittest.TestCase):
                 "Sample input directory not found at %s" % SAMPLE_DATA)
 
         args = foragetests.generate_base_args(self.workspace_dir)
+        from nose.tools import set_trace; set_trace()
         forage.execute(args)
 
     def test_shortwave_radiation(self):

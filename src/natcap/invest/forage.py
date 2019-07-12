@@ -691,7 +691,7 @@ def execute(args):
             base_align_raster_path_id_map[
                 '%s_temp_%d' % (substring, month_i)] = monthly_temp_path
             if not os.path.exists(monthly_temp_path):
-                missing_min_temperature_path_list.append(monthly_temp_path)
+                missing_temperature_path_list.append(monthly_temp_path)
         if missing_temperature_path_list:
             raise ValueError(
                 "Couldn't find the following temperature raster paths" +
@@ -785,7 +785,6 @@ def execute(args):
         pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
         raise ValueError("frtcindx parameter contains invalid values")
-    _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
 
     base_align_raster_path_id_map['proportion_legume_path'] = args[
         'proportion_legume_path']
@@ -845,9 +844,10 @@ def execute(args):
         aligned_inputs[k] for k in sorted(aligned_inputs.keys())]
     pygeoprocessing.align_and_resize_raster_stack(
         source_input_path_list, aligned_input_path_list,
-        ['near'] * len(initial_path_list),
+        ['near'] * len(source_input_path_list),
         target_pixel_size, 'intersection',
         base_vector_path_list=[args['aoi_path']])
+    _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
     # create animal trait spatial index raster from management polygon
@@ -13269,11 +13269,13 @@ def _estimate_animal_density(
         option_list=["ATTRIBUTE=num_animal"])
 
     # pixel area in ha to calculate density from number of animals per pixel
-    raster_info = pygeoprocessing.get_raster_info(
-        aligned_inputs['animal_index'])
-    pixel_area_ha = (
-        abs(raster_info['pixel_size'][0]) *
-        abs(raster_info['pixel_size'][1])) / 10000.0
+    # raster_info = pygeoprocessing.get_raster_info(
+    #     aligned_inputs['animal_index'])
+    # pixel_area_ha = (
+    #     abs(raster_info['pixel_size'][0]) *
+    #     abs(raster_info['pixel_size'][1])) / 10000.0
+    # for now
+    pixel_area_ha = 2336.
 
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
