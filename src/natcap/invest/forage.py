@@ -1374,6 +1374,100 @@ def weighted_state_variable_sum(
     shutil.rmtree(temp_dir)
 
 
+def initial_conditions_from_tables(
+        aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
+        pft_initial_conditions_table):
+    """Generate initial state variable registry from initial conditions tables.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each plant
+            functional type
+        sv_dir (string): path to directory where initial state variable rasters
+            should be stored
+        pft_id_set (set): set of integers identifying plant functional types
+        site_initial_conditions_table (dict): map of site spatial index to
+            dictionaries that contain initial values for site-level state
+            variables
+        pft_initial_conditions_table (dict): map of plant functional type index
+            to dictionaries that contain initial values for plant functional
+            type-level state variables
+
+    Returns:
+        initial_sv_reg, map of key, path pairs giving paths to initial state
+            variable rasters
+
+    """
+    def full_masked(pft_cover, fill_val):
+        """Create a constant raster masked by pft fractional cover.
+
+        Parameters:
+            pft_cover (numpy.ndarray): input, fractional cover of the plant
+                functional type
+            fill_val (float): constant value with which to fill raster in areas
+                where fractional cover > 0
+
+        Returns:
+            full_masked, a raster containing `fill_val` in areas where
+                `pft_cover` > 0
+
+        """
+        valid_mask = (
+            (~numpy.isclose(pft_cover, _SV_NODATA)) &
+            (pft_cover > 0))
+        full_masked = numpy.empty(pft_cover.shape, dtype=numpy.float32)
+        full_masked[:] = _SV_NODATA
+        full_masked[valid_mask] = fill_val
+        return full_masked
+
+    initial_sv_reg = {}
+    # site-level state variables
+    # check for missing state variable values
+    required_site_state_var = set(
+        [sv_key[:-5] for sv_key in _SITE_STATE_VARIABLE_FILES.keys()])
+    for site_code in site_initial_conditions_table.keys():
+        missing_site_state_var = required_site_state_var.difference(
+            site_initial_conditions_table[site_code].keys())
+        if missing_site_state_var:
+            raise ValueError(
+                "The following state variables were not found in the site " +
+                "initial conditions table: \n\t" + "\n\t".join(
+                    missing_site_state_var))
+    for sv_key, basename in _SITE_STATE_VARIABLE_FILES.items():
+        state_var = sv_key[:-5]
+        site_to_val = dict(
+            [(site_code, float(table[state_var])) for (
+                site_code, table) in
+                site_initial_conditions_table.items()])
+        target_path = os.path.join(sv_dir, basename)
+        initial_sv_reg[sv_key] = target_path
+        pygeoprocessing.reclassify_raster(
+            (aligned_inputs['site_index'], 1), site_to_val, target_path,
+            gdal.GDT_Float32, _SV_NODATA)
+
+    # PFT-level state variables
+    for pft_i in pft_id_set:
+        # check for missing values
+        missing_pft_state_var = set(_PFT_STATE_VARIABLES).difference(
+            pft_initial_conditions_table[pft_i].keys())
+        if missing_pft_state_var:
+            raise ValueError(
+                "The following state variables were not found in the plant " +
+                "functional type initial conditions table: \n\t" + "\n\t".join(
+                    missing_pft_state_var))
+        for state_var in _PFT_STATE_VARIABLES:
+            fill_val = pft_initial_conditions_table[pft_i][state_var]
+            pft_cover_path = aligned_inputs['pft_{}'.format(pft_i)]
+            target_path = os.path.join(
+                sv_dir, '{}_{}.tif'.format(state_var, pft_i))
+            sv_key = '{}_{}_path'.format(state_var, pft_i)
+            initial_sv_reg[sv_key] = target_path
+            pygeoprocessing.raster_calculator(
+                [(pft_cover_path, 1), (fill_val, 'raw')],
+                full_masked, target_path, gdal.GDT_Float32, _SV_NODATA)
+    return initial_sv_reg
+
+
 def _calc_ompc(
         som1c_2_path, som2c_2_path, som3c_path, bulkd_path, edepth_path,
         ompc_path):

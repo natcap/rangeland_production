@@ -1129,7 +1129,8 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
+    # TODO COMMENT ME OUT
     def test_model_runs(self):
         """Test forage model."""
         from natcap.invest import forage
@@ -10727,3 +10728,284 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             month_reg['animal_density'], animals_per_ha - tolerance,
             animals_per_ha + tolerance, _TARGET_NODATA)
+
+    def test_initial_conditions_from_tables(self):
+        """Test `initial_conditions_from_tables`.
+
+        Use `initial_conditions_from_tables` to generate the initial state
+        variable registry from initial conditions tables.
+
+        Raises:
+            ??
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+
+        # known inputs
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        sv_dir = self.workspace_dir
+        pft_id_set = [1]
+
+        site_initial_conditions_table = {
+            1: {
+                'metabc_1': 1.2,
+                'metabc_2': 1.2,
+                'som1c_1': 1.2,
+                'som1c_2': 1.2,
+                'som2c_1': 1.2,
+                'som2c_2': 1.2,
+                'som3c': 1.2,
+                'strucc_1': 1.2,
+                'strucc_2': 1.2,
+                'strlig_1': 1.2,
+                'strlig_2': 1.2,
+                'metabe_1_1': 1.2,
+                'metabe_2_1': 1.2,
+                'som1e_1_1': 1.2,
+                'som1e_2_1': 1.2,
+                'som2e_1_1': 1.2,
+                'som2e_2_1': 1.2,
+                'som3e_1': 1.2,
+                'struce_1_1': 1.2,
+                'struce_2_1': 1.2,
+                'metabe_1_2': 1.2,
+                'metabe_2_2': 1.2,
+                'plabil': 1.2,
+                'secndy_2': 1.2,
+                'parent_2': 1.2,
+                'occlud': 1.2,
+                'som1e_1_2': 1.2,
+                'som1e_2_2': 1.2,
+                'som2e_1_2': 1.2,
+                'som2e_2_2': 1.2,
+                'som3e_2': 1.2,
+                'struce_1_2': 1.2,
+                'struce_2_2': 1.2,
+                'asmos_1': 1.2,
+                'asmos_2': 1.2,
+                'asmos_3': 1.2,
+                'asmos_4': 1.2,
+                'asmos_5': 1.2,
+                'asmos_6': 1.2,
+                'asmos_7': 1.2,
+                'asmos_8': 1.2,
+                'asmos_9': 1.2,
+                'avh2o_3': 1.2,
+                'minerl_1_1': 1.2,
+                'minerl_2_1': 1.2,
+                'minerl_3_1': 1.2,
+                'minerl_4_1': 1.2,
+                'minerl_5_1': 1.2,
+                'minerl_6_1': 1.2,
+                'minerl_7_1': 1.2,
+                'minerl_8_1': 1.2,
+                'minerl_9_1': 1.2,
+                'minerl_10_1': 1.2,
+                'minerl_1_2': 1.2,
+                'minerl_2_2': 1.2,
+                'minerl_3_2': 1.2,
+                'minerl_4_2': 1.2,
+                'minerl_5_2': 1.2,
+                'minerl_6_2': 1.2,
+                'minerl_7_2': 1.2,
+                'minerl_8_2': 1.2,
+                'minerl_9_2': 1.2,
+                'minerl_10_2': 1.2,
+                'snow': 1.2,
+                'snlq': 1.2,
+            },
+        }
+        pft_initial_conditions_table = {
+            1: {
+                'aglivc': 1.2,
+                'bglivc': 1.2,
+                'stdedc': 1.2,
+                'aglive_1': 1.2,
+                'bglive_1': 1.2,
+                'stdede_1': 1.2,
+                'aglive_2': 1.2,
+                'bglive_2': 1.2,
+                'stdede_2': 1.2,
+                'avh2o_1': 1.2,
+                'crpstg_1': 1.2,
+                'crpstg_2': 1.2,
+            },
+        }
+
+        # complete inputs
+        initial_sv_reg = forage.initial_conditions_from_tables(
+            aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
+            pft_initial_conditions_table)
+
+        # site state variable missing from initial conditions table
+        site_initial_conditions_table = {
+            1: {
+                'metabc_1': 1.2,
+                'metabc_2': 1.2,
+                'som1c_1': 1.2,
+                'som1c_2': 1.2,
+                'som2c_1': 1.2,
+                'som2c_2': 1.2,
+                'som3c': 1.2,
+                'strucc_1': 1.2,
+                'strucc_2': 1.2,
+                'strlig_1': 1.2,
+                'strlig_2': 1.2,
+                'metabe_1_1': 1.2,
+                'metabe_2_1': 1.2,
+                'som1e_1_1': 1.2,
+                'som1e_2_1': 1.2,
+                'som2e_1_1': 1.2,
+                'som2e_2_1': 1.2,
+                'som3e_1': 1.2,
+                'struce_1_1': 1.2,
+                'struce_2_1': 1.2,
+                'metabe_1_2': 1.2,
+                'metabe_2_2': 1.2,
+                'plabil': 1.2,
+                'secndy_2': 1.2,
+                'parent_2': 1.2,
+                'occlud': 1.2,
+                'som1e_1_2': 1.2,
+                'som1e_2_2': 1.2,
+                'som2e_1_2': 1.2,
+                'som2e_2_2': 1.2,
+                'som3e_2': 1.2,
+                'struce_1_2': 1.2,
+                'struce_2_2': 1.2,
+                'asmos_2': 1.2,
+                'asmos_3': 1.2,
+                'asmos_4': 1.2,
+                'asmos_5': 1.2,
+                'asmos_6': 1.2,
+                'asmos_7': 1.2,
+                'asmos_8': 1.2,
+                'asmos_9': 1.2,
+                'avh2o_3': 1.2,
+                'minerl_2_1': 1.2,
+                'minerl_3_1': 1.2,
+                'minerl_4_1': 1.2,
+                'minerl_5_1': 1.2,
+                'minerl_6_1': 1.2,
+                'minerl_7_1': 1.2,
+                'minerl_8_1': 1.2,
+                'minerl_9_1': 1.2,
+                'minerl_10_1': 1.2,
+                'minerl_1_2': 1.2,
+                'minerl_2_2': 1.2,
+                'minerl_3_2': 1.2,
+                'minerl_4_2': 1.2,
+                'minerl_5_2': 1.2,
+                'minerl_6_2': 1.2,
+                'minerl_7_2': 1.2,
+                'minerl_8_2': 1.2,
+                'minerl_9_2': 1.2,
+                'minerl_10_2': 1.2,
+                'snlq': 1.2,
+            },
+        }
+
+        # asmos_1, minerl_1_1, snow missing
+        with self.assertRaises(ValueError):
+            initial_sv_reg = forage.initial_conditions_from_tables(
+                aligned_inputs, sv_dir, pft_id_set,
+                site_initial_conditions_table, pft_initial_conditions_table)
+
+        # pft state variable missing from initial conditions table
+        site_initial_conditions_table = {
+            1: {
+                'metabc_1': 1.2,
+                'metabc_2': 1.2,
+                'som1c_1': 1.2,
+                'som1c_2': 1.2,
+                'som2c_1': 1.2,
+                'som2c_2': 1.2,
+                'som3c': 1.2,
+                'strucc_1': 1.2,
+                'strucc_2': 1.2,
+                'strlig_1': 1.2,
+                'strlig_2': 1.2,
+                'metabe_1_1': 1.2,
+                'metabe_2_1': 1.2,
+                'som1e_1_1': 1.2,
+                'som1e_2_1': 1.2,
+                'som2e_1_1': 1.2,
+                'som2e_2_1': 1.2,
+                'som3e_1': 1.2,
+                'struce_1_1': 1.2,
+                'struce_2_1': 1.2,
+                'metabe_1_2': 1.2,
+                'metabe_2_2': 1.2,
+                'plabil': 1.2,
+                'secndy_2': 1.2,
+                'parent_2': 1.2,
+                'occlud': 1.2,
+                'som1e_1_2': 1.2,
+                'som1e_2_2': 1.2,
+                'som2e_1_2': 1.2,
+                'som2e_2_2': 1.2,
+                'som3e_2': 1.2,
+                'struce_1_2': 1.2,
+                'struce_2_2': 1.2,
+                'asmos_1': 1.2,
+                'asmos_2': 1.2,
+                'asmos_3': 1.2,
+                'asmos_4': 1.2,
+                'asmos_5': 1.2,
+                'asmos_6': 1.2,
+                'asmos_7': 1.2,
+                'asmos_8': 1.2,
+                'asmos_9': 1.2,
+                'avh2o_3': 1.2,
+                'minerl_1_1': 1.2,
+                'minerl_2_1': 1.2,
+                'minerl_3_1': 1.2,
+                'minerl_4_1': 1.2,
+                'minerl_5_1': 1.2,
+                'minerl_6_1': 1.2,
+                'minerl_7_1': 1.2,
+                'minerl_8_1': 1.2,
+                'minerl_9_1': 1.2,
+                'minerl_10_1': 1.2,
+                'minerl_1_2': 1.2,
+                'minerl_2_2': 1.2,
+                'minerl_3_2': 1.2,
+                'minerl_4_2': 1.2,
+                'minerl_5_2': 1.2,
+                'minerl_6_2': 1.2,
+                'minerl_7_2': 1.2,
+                'minerl_8_2': 1.2,
+                'minerl_9_2': 1.2,
+                'minerl_10_2': 1.2,
+                'snow': 1.2,
+                'snlq': 1.2,
+            },
+        }
+        pft_initial_conditions_table = {
+            1: {
+                'aglivc': 1.2,
+                'bglivc': 1.2,
+                'stdedc': 1.2,
+                'aglive_1': 1.2,
+                'stdede_1': 1.2,
+                'aglive_2': 1.2,
+                'bglive_2': 1.2,
+                'stdede_2': 1.2,
+                'crpstg_1': 1.2,
+                'crpstg_2': 1.2,
+            },
+        }
+
+        # should list bglive_1 and avh2o_1 as missing
+        with self.assertRaises(ValueError):
+            initial_sv_reg = forage.initial_conditions_from_tables(
+                aligned_inputs, sv_dir, pft_id_set,
+                site_initial_conditions_table, pft_initial_conditions_table)
