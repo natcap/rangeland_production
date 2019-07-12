@@ -11009,3 +11009,48 @@ class foragetests(unittest.TestCase):
             initial_sv_reg = forage.initial_conditions_from_tables(
                 aligned_inputs, sv_dir, pft_id_set,
                 site_initial_conditions_table, pft_initial_conditions_table)
+
+    def test_check_pft_fractional_cover_sum(self):
+        """Test `_check_pft_fractional_cover_sum`.
+
+        Use `_check_pft_fractional_cover_sum` to check the sum of fractional
+        cover across plant functional types. Ensure that
+        `_check_pft_fractional_cover_sum` raises a ValueError when the sum of
+        fractional cover across plant functional types exceeds 1.
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+
+        # valid inputs, single plant functional type
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        pft_id_set = [1]
+
+        forage._check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
+
+        # valid inputs, multiple plant functional types
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'pft_4': os.path.join(self.workspace_dir, 'pft_4.tif'),
+            'pft_5': os.path.join(self.workspace_dir, 'pft_5.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 0.3)
+        create_constant_raster(aligned_inputs['pft_4'], 0.2)
+        create_constant_raster(aligned_inputs['pft_5'], 0.497)
+        pft_id_set = [1, 4, 5]
+
+        forage._check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
+
+        # invalid inputs, sum of fractional cover exceeds 1
+        create_constant_raster(aligned_inputs['pft_4'], 0.3)
+        with self.assertRaises(ValueError):
+            forage._check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)

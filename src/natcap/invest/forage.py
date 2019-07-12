@@ -604,17 +604,16 @@ def execute(args):
             the values in the "animal_id" column of the animal trait csv, and
             a field named "num_animal" giving the number of animals grazing
             inside each polygon feature.
-        args['initial_conditions_dir'] (string): path to directory
-            containing initial conditions. This directory must
-            contain a series of rasters with initial values for each PFT and
-            for the site.
-                Required rasters for each PFT:
-                    initial variables that are a property of PFT in the table
-                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
-                    e.g., aglivc_<PFT>.tif
-                Required for the site:
-                    initial variables that are a property of site in the table
-                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['site_initial_table'] (string): path to table containing initial
+            conditions for each site state variable. This table must contain
+            a value for each site code and each state variable listed in the
+            following table:
+            https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['pft_initial_table'] (string): path to table containing initial
+            conditions for each plant functional type state variable. This
+            table must contain a value for each plant functional type index and
+            each state variable listed in the following table:
+            https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 
     Returns:
         None.
@@ -711,7 +710,8 @@ def execute(args):
     base_align_raster_path_id_map['bulk_d_path'] = args['bulk_density_path']
     base_align_raster_path_id_map['ph_path'] = args['ph_path']
 
-    # make sure site parameters exist for each site type identifier
+    # make sure site initial conditions and parameters exist for each site
+    # identifier
     base_align_raster_path_id_map['site_index'] = (
         args['site_param_spatial_index_path'])
     n_bands = pygeoprocessing.get_raster_info(
@@ -741,8 +741,17 @@ def execute(args):
         raise ValueError(
             "Couldn't find parameter values for the following site " +
             "indices: %s\n\t" + ", ".join(missing_site_index_list))
+    site_initial_conditions_table = utils.build_lookup_from_csv(
+        args['site_initial_table'], 'site')
+    missing_site_index_list = list(
+        site_index_set.difference(site_initial_conditions_table.keys()))
+    if missing_site_index_list:
+        raise ValueError(
+            "Couldn't find initial conditions values for the following site " +
+            "indices: %s\n\t" + ", ".join(missing_site_index_list))
 
-    # make sure veg traits exist for each pft raster
+    # make sure plant functional type initial conditiosn and parameters exist
+    # for each pft raster
     pft_dir = os.path.dirname(args['veg_spatial_composition_path_pattern'])
     pft_basename = os.path.basename(
         args['veg_spatial_composition_path_pattern'])
@@ -764,10 +773,19 @@ def execute(args):
         raise ValueError(
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
+    pft_initial_conditions_table = utils.build_lookup_from_csv(
+        args['pft_initial_table'], 'PFT')
+    missing_pft_index_list = pft_id_set.difference(
+        pft_initial_conditions_table.keys())
+    if missing_pft_index_list:
+        raise ValueError(
+            "Couldn't find initial condition values for the following plant "
+            "functional types: %s\n\t" + ", ".join(missing_pft_index_list))
     frtcindx_set = set([
         pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
         raise ValueError("frtcindx parameter contains invalid values")
+    _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
 
     base_align_raster_path_id_map['proportion_legume_path'] = args[
         'proportion_legume_path']
@@ -825,70 +843,12 @@ def execute(args):
             base_align_raster_path_id_map.keys())]
     aligned_input_path_list = [
         aligned_inputs[k] for k in sorted(aligned_inputs.keys())]
-
-    file_suffix = utils.make_suffix_string(args, 'results_suffix')
-
-    # use initial conditions to initialize all state variables
-    LOGGER.info(
-        "setting initial conditions from this directory: %s",
-        args['initial_conditions_dir'])
-
-    # check that all necessary state variables are supplied
-    missing_initial_values = []
-    # set _SV_NODATA from initial rasters
-    state_var_nodata = set([])
-    # align initial state variables to resampled inputs
-    resample_initial_path_map = {}
-    for sv in _SITE_STATE_VARIABLE_FILES.keys():
-        sv_path = os.path.join(
-            args['initial_conditions_dir'],
-            _SITE_STATE_VARIABLE_FILES[sv])
-        state_var_nodata.update(
-            set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
-        resample_initial_path_map[sv] = sv_path
-        if not os.path.exists(sv_path):
-            missing_initial_values.append(sv_path)
-    for pft_i in pft_id_set:
-        for sv in _PFT_STATE_VARIABLES:
-            sv_key = '{}_{}_path'.format(sv, pft_i)
-            sv_path = os.path.join(
-                args['initial_conditions_dir'],
-                '{}_{}.tif'.format(sv, pft_i))
-            state_var_nodata.update(
-                set([pygeoprocessing.get_raster_info(sv_path)['nodata']
-                    [0]]))
-            resample_initial_path_map[sv_key] = sv_path
-            if not os.path.exists(sv_path):
-                missing_initial_values.append(sv_path)
-    if missing_initial_values:
-        raise ValueError(
-            "Couldn't find the following required initial values: " +
-            "\n\t".join(missing_initial_values))
-    if len(state_var_nodata) > 1:
-        raise ValueError(
-            "Initial state variable rasters contain >1 nodata value")
-    _SV_NODATA = list(state_var_nodata)[0]
-
-    # align and resample initialization rasters with inputs
-    sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
-    os.makedirs(sv_dir)
-    aligned_initial_path_map = dict(
-        [(key, os.path.join(sv_dir, os.path.basename(path)))
-            for key, path in resample_initial_path_map.items()])
-    initial_path_list = (
-        [resample_initial_path_map[k] for k in
-            sorted(resample_initial_path_map.keys())] +
-        source_input_path_list)
-    aligned_initial_path_list = (
-        [aligned_initial_path_map[k] for k in
-            sorted(aligned_initial_path_map.keys())] +
-        aligned_input_path_list)
     pygeoprocessing.align_and_resize_raster_stack(
-        initial_path_list, aligned_initial_path_list,
+        source_input_path_list, aligned_input_path_list,
         ['near'] * len(initial_path_list),
         target_pixel_size, 'intersection',
         base_vector_path_list=[args['aoi_path']])
-    sv_reg = aligned_initial_path_map
+    file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
     # create animal trait spatial index raster from management polygon
     aligned_inputs['animal_index'] = os.path.join(
@@ -901,6 +861,12 @@ def execute(args):
         option_list=["ATTRIBUTE=animal_id"])
 
     # Initialization
+    sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
+    os.makedirs(sv_dir)
+    sv_reg = initial_conditions_from_tables(
+        aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
+        pft_initial_conditions_table)
+
     # calculate persistent intermediate parameters that do not change during
     # the simulation
     persist_param_dir = os.path.join(
@@ -1374,6 +1340,53 @@ def weighted_state_variable_sum(
     shutil.rmtree(temp_dir)
 
 
+def _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set):
+    """Check the sum of fractional cover across plant functional types.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each plant
+            functional type
+        pft_id_set (set): set of integers identifying plant functional types
+
+    Raises:
+        ValueError if the pixel-wise sum of fractional cover values across
+            plant functional types exceeds 1
+
+    Returns:
+        None
+
+    """
+    with tempfile.NamedTemporaryFile(
+            prefix='cover_sum', dir=PROCESSING_DIR) as cover_sum_temp_file:
+        cover_sum_path = cover_sum_temp_file.name
+    with tempfile.NamedTemporaryFile(
+            prefix='operand_temp', dir=PROCESSING_DIR) as operand_temp_file:
+        operand_temp_path = operand_temp_file.name
+
+    # initialize sum to zero
+    pygeoprocessing.new_raster_from_base(
+        aligned_inputs['site_index'], cover_sum_path, gdal.GDT_Float32,
+        [_TARGET_NODATA], fill_value_list=[0])
+    for pft_i in pft_id_set:
+        shutil.copyfile(cover_sum_path, operand_temp_path)
+        pft_nodata = pygeoprocessing.get_raster_info(
+            aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
+        raster_sum(
+            aligned_inputs['pft_{}'.format(pft_i)], pft_nodata,
+            operand_temp_path, _TARGET_NODATA,
+            cover_sum_path, _TARGET_NODATA)
+    # get maximum sum of fractional cover
+    max_cover = 0.
+    for offset_map, raster_block in pygeoprocessing.iterblocks(
+            (cover_sum_path, 1)):
+        valid_mask = (raster_block != _TARGET_NODATA)
+        max_cover = max(max_cover, numpy.amax(raster_block[valid_mask]))
+    if max_cover > 1:
+        raise ValueError(
+            "Fractional cover across plant functional types exceeds 1")
+
+
 def initial_conditions_from_tables(
         aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
         pft_initial_conditions_table):
@@ -1381,8 +1394,8 @@ def initial_conditions_from_tables(
 
     Parameters:
         aligned_inputs (dict): map of key, path pairs indicating paths
-            to aligned model inputs, including fractional cover of each plant
-            functional type
+            to aligned model inputs, including site spatial index raster and
+            fractional cover of each plant functional type
         sv_dir (string): path to directory where initial state variable rasters
             should be stored
         pft_id_set (set): set of integers identifying plant functional types
