@@ -1043,6 +1043,8 @@ class foragetests(unittest.TestCase):
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmin_<month>.tif'),
             'max_temp_path_pattern': os.path.join(
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmax_<month>.tif'),
+            'monthly_vi_path_pattern': os.path.join(
+                SAMPLE_DATA, 'ndvi', 'ndvi_<year>_<month>.tif'),
             'site_param_table': os.path.join(
                 SAMPLE_DATA, 'site_parameters.csv'),
             'site_param_spatial_index_path': os.path.join(
@@ -1052,7 +1054,7 @@ class foragetests(unittest.TestCase):
                 SAMPLE_DATA, 'pft<PFT>.tif'),
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
-            'animal_mgmt_layer_path': os.path.join(
+            'animal_grazing_areas_path': os.path.join(
                 SAMPLE_DATA, 'animal_mgmt_layer_WGS1984.shp'),
             'initial_conditions_dir': os.path.join(
                 SAMPLE_DATA, 'initialization_data'),
@@ -10657,3 +10659,71 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             month_reg['diet_sufficiency'], diet_sufficiency - tolerance,
             diet_sufficiency + tolerance, _TARGET_NODATA)
+
+    def test_estimate_animal_density(self):
+        """Test `_estimate_animal_density`.
+
+        Use the function `_estimate_animal_density` to calculate animal density
+        in areas grazed by animals.  Ensure that estimated animal density
+        matches values calculated by hand.
+
+        Raises:
+            AssertionError if animal density values do not match values
+                calculated by hand
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+        tolerance = 0.000001
+
+        # known inputs
+        aglivc = 0.6
+        stdedc = 0.6
+        EO_index = 2.
+
+        month_index = 1
+        pft_id_set = [1]
+        animal_mgmt_layer_path = TEST_AOI
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'EO_index_1': os.path.join(self.workspace_dir, 'EO_index.tif'),
+            'animal_index': os.path.join(
+                self.workspace_dir, 'animal_index.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        create_constant_raster(aligned_inputs['EO_index_1'], EO_index)
+        pygeoprocessing.new_raster_from_base(
+            aligned_inputs['site_index'], aligned_inputs['animal_index'],
+            gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
+        pygeoprocessing.rasterize(
+            animal_mgmt_layer_path, aligned_inputs['animal_index'],
+            option_list=["ATTRIBUTE=animal_id"])
+
+        site_param_table = {
+            1: {
+                'eo_biomass_intercept': 0,
+                'eo_biomass_slope': 1,
+            }
+        }
+        sv_reg = {
+            'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc_1.tif'),
+            'stdedc_1_path': os.path.join(self.workspace_dir, 'stdedc_1.tif'),
+        }
+        create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
+        create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        month_reg = {
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
+        }
+
+        animals_per_ha = 0.00011449
+        forage._estimate_animal_density(
+            aligned_inputs, month_index, pft_id_set, site_param_table,
+            animal_mgmt_layer_path, sv_reg, month_reg)
+        self.assert_all_values_in_raster_within_range(
+            month_reg['animal_density'], animals_per_ha - tolerance,
+            animals_per_ha + tolerance, _TARGET_NODATA)
