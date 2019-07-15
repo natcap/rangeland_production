@@ -13096,7 +13096,7 @@ def _estimate_animal_density(
         """Get pixel area in ha from dataset in geographic coordinates.
 
         Calculate the approximate area in hectares of pixels in `raster_path`,
-        assuming that one degree of longitude equals 111139 meters. Use the
+        assuming that one degree of latitude equals 111139 meters. Use the
         average latitude over the bounding box of `raster_path` to estimate the
         horizontal pixel length.
 
