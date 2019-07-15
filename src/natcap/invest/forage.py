@@ -3598,7 +3598,8 @@ def calc_provisional_fracrc(
     """
     valid_mask = (
         (annual_precip != _TARGET_NODATA) &
-        (frtcindx != _IC_NODATA))
+        (frtcindx != _IC_NODATA) &
+        (bgppa != _IC_NODATA))
     rtsh = numpy.empty(annual_precip.shape, dtype=numpy.float32)
     rtsh[:] = _TARGET_NODATA
     rtsh[valid_mask] = (
@@ -5722,8 +5723,9 @@ def esched(return_type):
             anps[valid_mask] * (cflow[valid_mask] / tca[valid_mask]))
 
         immobil_ratio = numpy.zeros(cflow.shape)
-        immobil_ratio[valid_mask] = (
-            cflow[valid_mask] / outofa[valid_mask])
+        nonzero_mask = ((outofa > 0) & valid_mask)
+        immobil_ratio[nonzero_mask] = (
+            cflow[nonzero_mask] / outofa[nonzero_mask])
 
         immflo = numpy.zeros(cflow.shape)
         immflo[valid_mask] = (
@@ -6787,7 +6789,7 @@ def update_aminrl(
             (~numpy.isclose(aminrl_1_prev, _SV_NODATA)) &
             (~numpy.isclose(minerl_1_1, _SV_NODATA)))
         aminrl_1 = numpy.empty(aminrl_1_prev.shape, dtype=numpy.float32)
-        aminrl_1[:] = _IC_NODATA
+        aminrl_1[:] = _SV_NODATA
         aminrl_1[valid_mask] = (
             aminrl_1_prev[valid_mask] + minerl_1_1[valid_mask] / 2.)
         return aminrl_1
@@ -6814,7 +6816,7 @@ def update_aminrl(
             (~numpy.isclose(minerl_1_2, _SV_NODATA)) &
             (fsol != _TARGET_NODATA))
         aminrl_2 = numpy.empty(aminrl_2_prev.shape, dtype=numpy.float32)
-        aminrl_2[:] = _IC_NODATA
+        aminrl_2[:] = _SV_NODATA
         aminrl_2[valid_mask] = (
             aminrl_2_prev[valid_mask] +
             (minerl_1_2[valid_mask] * fsol[valid_mask]) / 2.)
@@ -6827,13 +6829,13 @@ def update_aminrl(
     shutil.copyfile(aminrl_1_path, aminrl_prev_path)
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [aminrl_prev_path, minerl_1_1_path]],
-        update_aminrl_1, aminrl_1_path, gdal.GDT_Float32, _TARGET_NODATA)
+        update_aminrl_1, aminrl_1_path, gdal.GDT_Float32, _SV_NODATA)
 
     shutil.copyfile(aminrl_2_path, aminrl_prev_path)
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             aminrl_prev_path, minerl_1_2_path, fsol_path]],
-        update_aminrl_2, aminrl_2_path, gdal.GDT_Float32, _TARGET_NODATA)
+        update_aminrl_2, aminrl_2_path, gdal.GDT_Float32, _SV_NODATA)
 
 
 def sum_biomass(
@@ -6939,6 +6941,7 @@ def _decomposition(
         valid_mask = (
             (~numpy.isclose(precip, precip_nodata)) &
             (annual_precip != _TARGET_NODATA) &
+            (annual_precip > 0) &
             (baseNdep != _TARGET_NODATA) &
             (epnfs_2 != _IC_NODATA))
         wdfxm = numpy.zeros(precip.shape, dtype=numpy.float32)
@@ -9904,6 +9907,7 @@ def calc_nutrient_limitation(return_type):
         maxNfix[valid_mask] = snfxmx_1[valid_mask] * potenc[valid_mask]
 
         eprodl_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        eprodl_1[:] = _TARGET_NODATA
         eprodl_1[valid_mask] = (
             eup_above_1[valid_mask] + eup_below_1[valid_mask])
         Nfix_mask = (
@@ -11165,7 +11169,11 @@ def calc_pasture_height(sv_reg, aligned_inputs, pft_id_set, processing_dir):
             square_list.append(r ** 2)
         numerator = (numpy.sum(biomass_array_list, axis=0)) ** 2
         denominator = numpy.sum(square_list, axis=0)
-        scale_term = (numerator / denominator) * 0.003
+        nonzero_mask = (denominator > 0)
+        scale_term = numpy.empty(denominator.shape, dtype=numpy.float32)
+        scale_term[:] = _TARGET_NODATA
+        scale_term[nonzero_mask] = (
+            (numerator[nonzero_mask] / denominator[nonzero_mask]) * 0.003)
         return scale_term
 
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
@@ -11961,6 +11969,7 @@ def calc_max_fraction_removed(total_weighted_C, management_threshold):
     """
     valid_mask = (
         (total_weighted_C != _TARGET_NODATA) &
+        (total_weighted_C > 0) &
         (management_threshold != _TARGET_NODATA))
     # convert total weighted C to biomass in kg/ha
     total_biomass_kgha = total_weighted_C * 2.5 * 10
@@ -12068,7 +12077,9 @@ def _calc_grazing_offtake(
             (CR13 != _IC_NODATA))
 
         # calculate weighted biomass in kg/ha from C state variable in g/m2
-        biomass = cstatv * 2.5 * 10 * pft_cover
+        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
+        biomass[valid_mask] = (
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
         relative_time = numpy.empty(cstatv.shape, dtype=numpy.float32)
         relative_time[:] = _TARGET_NODATA
         relative_time[valid_mask] = (
@@ -12222,7 +12233,9 @@ def _calc_grazing_offtake(
             (daily_intake != _TARGET_NODATA) &
             (animal_density != _TARGET_NODATA) &
             (max_fgrem != _TARGET_NODATA))
-        biomass = cstatv * 2.5 * 10 * pft_cover
+        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
+        biomass[valid_mask] = (
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
         # calculate forage demand as percentage of available biomass
         demand = numpy.zeros(cstatv.shape, dtype=numpy.float32)
         demand[valid_mask] = (
@@ -12760,7 +12773,9 @@ def _animal_diet_sufficiency(
             (~numpy.isclose(pft_cover, pft_nodata)) &
             (animal_density != _TARGET_NODATA) &
             (fgrem != _TARGET_NODATA))
-        biomass = cstatv * 2.5 * 10 * pft_cover
+        biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
+        biomass[valid_mask] = (
+            cstatv[valid_mask] * 2.5 * 10 * pft_cover[valid_mask])
         # calculate forage intake from percentage of available biomass
         daily_intake = numpy.empty(cstatv.shape, dtype=numpy.float32)
         daily_intake[:] = _TARGET_NODATA

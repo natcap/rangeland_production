@@ -1141,7 +1141,6 @@ class foragetests(unittest.TestCase):
                 "Sample input directory not found at %s" % SAMPLE_DATA)
 
         args = foragetests.generate_base_args(self.workspace_dir)
-        from nose.tools import set_trace; set_trace()
         forage.execute(args)
 
     def test_shortwave_radiation(self):
