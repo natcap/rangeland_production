@@ -13199,6 +13199,31 @@ def _estimate_animal_density(
             biomass_potential[valid_mask] - biomass_obs[valid_mask])
         return biomass_diff
 
+    def get_pixel_area_ha(raster_path):
+        """Get pixel area in ha from dataset in geographic coordinates.
+
+        Calculate the approximate area in hectares of pixels in `raster_path`,
+        assuming that one degree of latitude equals 111139 meters. Use the
+        average latitude over the bounding box of `raster_path` to estimate the
+        horizontal pixel length.
+
+        Parameters:
+            raster_path (string): path to a raster dataset in geographic
+                coordinates
+
+        Returns:
+            pixel_area_ha (float): approximate pixel area in hectares
+        """
+        raster_info = pygeoprocessing.get_raster_info(raster_path)
+        bounding_box = raster_info['bounding_box']
+        average_latitude = (bounding_box[1] + bounding_box[3]) / 2.
+        pixel_y_length_m = abs(raster_info['pixel_size'][1]) * 111139.
+        pixel_x_length_m = abs(
+            raster_info['pixel_size'][0]) * numpy.cos(
+            numpy.radians(average_latitude)) * 111139.
+        pixel_area_ha = (pixel_y_length_m * pixel_x_length_m) / 10000.0
+        return pixel_area_ha
+
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in [
@@ -13268,15 +13293,10 @@ def _estimate_animal_density(
         animal_grazing_areas_path, temp_val_dict['total_animals'],
         option_list=["ATTRIBUTE=num_animal"])
 
-    # pixel area in ha to calculate density from number of animals per pixel
-    # raster_info = pygeoprocessing.get_raster_info(
-    #     aligned_inputs['animal_index'])
-    # pixel_area_ha = (
-    #     abs(raster_info['pixel_size'][0]) *
-    #     abs(raster_info['pixel_size'][1])) / 10000.0
+    # calculate animals per ha from animals per pixel
+    pixel_area_ha = get_pixel_area_ha(aligned_inputs['animal_index'])
     # for now
     pixel_area_ha = 2336.
-
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             temp_val_dict['biomass_diff'], temp_val_dict['sum_biomass_diff'],
