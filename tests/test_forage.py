@@ -10720,7 +10720,7 @@ class foragetests(unittest.TestCase):
                 self.workspace_dir, 'animal_density.tif'),
         }
 
-        animals_per_ha = 1000000
+        animals_per_ha = 0.00011449
         forage._estimate_animal_density(
             aligned_inputs, month_index, pft_id_set, site_param_table,
             animal_mgmt_layer_path, sv_reg, month_reg)
