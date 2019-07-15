@@ -13295,8 +13295,6 @@ def _estimate_animal_density(
 
     # calculate animals per ha from animals per pixel
     pixel_area_ha = get_pixel_area_ha(aligned_inputs['animal_index'])
-    # for now
-    pixel_area_ha = 2336.
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
             temp_val_dict['biomass_diff'], temp_val_dict['sum_biomass_diff'],
