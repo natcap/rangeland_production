@@ -929,6 +929,10 @@ def execute(args):
     for val in _SITE_INTERMEDIATE_VALUES:
         month_reg[val] = os.path.join(month_temp_dir, '{}.tif'.format(val))
 
+    output_dir = os.path.join(args['workspace_dir'], "output")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     # Main simulation loop
     # for each step in the simulation
     for month_index in xrange(n_months):
@@ -939,7 +943,7 @@ def execute(args):
                 pft_id_set, year_reg)
 
         current_month = (starting_month + month_index - 1) % 12 + 1
-        year = starting_year + (starting_month + month_index - 1) // 12
+        current_year = starting_year + (starting_month + month_index - 1) // 12
 
         # make new folders for state variables during this step
         sv_dir = os.path.join(
@@ -1018,6 +1022,10 @@ def execute(args):
         _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg)
 
         _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
+
+        _write_monthly_outputs(
+            aligned_inputs, sv_reg, month_reg, pft_id_set, current_year,
+            current_month, output_dir)
 
 
 def raster_multiplication(
@@ -5544,6 +5552,11 @@ def _soil_water(
                 temp_val_dict['awwt_{}'.format(lyr)], temp_val_dict['tot2']]],
             remove_transpiration('asmos'), sv_reg['asmos_{}_path'.format(lyr)],
             gdal.GDT_Float32, _TARGET_NODATA)
+    # no transpiration is removed from layers not accessible by plants
+    for lyr in xrange(nlaypg_max + 1, nlayer_max + 1):
+        shutil.copyfile(
+            temp_val_dict['asmos_interim_{}'.format(lyr)],
+            sv_reg['asmos_{}_path'.format(lyr)])
 
     # relative water content of soil layer 1
     pygeoprocessing.raster_calculator(
@@ -5600,7 +5613,7 @@ def _soil_water(
         _SV_NODATA, nodata_remove=False)
 
     # set correct nodata value for all revised asmos rasters
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in xrange(1, nlayer_max + 1):
         reclassify_nodata(sv_reg['asmos_{}_path'.format(lyr)], _SV_NODATA)
 
     # clean up temporary files
@@ -9904,6 +9917,7 @@ def calc_nutrient_limitation(return_type):
 
         # Calculate N fixation that occurs to subsidize needed N supply
         maxNfix = numpy.empty(potenc.shape, dtype=numpy.float32)
+        maxNfix[:] = _TARGET_NODATA
         maxNfix[valid_mask] = snfxmx_1[valid_mask] * potenc[valid_mask]
 
         eprodl_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
@@ -13039,6 +13053,36 @@ def add_shp_id_field(base_vector_path, target_vector_path):
     target_layer = None
 
 
+def sum_c_to_biomass(sum_aglivc, sum_stdedc):
+    """Calculate total aboveground biomass from carbon.
+
+    Biomass in kg/ha is calculated from the state variables representing
+    grams of carbon per square meter, entailing two conversion steps:
+    multiply by 2.5 to get biomass, and multiply by 10 to get kg/ha from
+    g/m2.
+
+    Parameters:
+        sum_aglivc (numpy.ndarray): derived, sum of carbon in aboveground live
+            biomass across plant functional types weighted by cover of each
+            plant functional type
+        sum_stdedc (numpy.ndarray): derived, sum of carbon in aboveground
+            standing dead biomass across plant functional types weighted by
+            cover of each plant functional type
+
+    Returns:
+        total_biomass, kg of biomass per ha
+
+    """
+    valid_mask = (
+        (sum_aglivc != _TARGET_NODATA) &
+        (sum_stdedc != _TARGET_NODATA))
+    total_biomass = numpy.empty(sum_aglivc.shape, dtype=numpy.float32)
+    total_biomass[:] = _TARGET_NODATA
+    total_biomass[valid_mask] = (
+        (sum_aglivc[valid_mask] + sum_stdedc[valid_mask]) * 2.5 * 10)
+    return total_biomass
+
+
 def _estimate_animal_density(
         aligned_inputs, month_index, pft_id_set, site_param_table,
         animal_grazing_areas_path, sv_reg, month_reg):
@@ -13133,35 +13177,6 @@ def _estimate_animal_density(
             None
 
         """
-        def sum_c_to_biomass(sum_aglivc, sum_stdedc):
-            """Calculate total aboveground biomass from carbon.
-
-            Biomass in kg/ha is calculated from the state variables
-            representing grams of carbon per square meter, entailing two
-            conversion steps: multiply by 2.5 to get biomass, and multiply by
-            10 to get kg/ha from g/m2.
-
-            Parameters:
-                sum_aglivc (numpy.ndarray): derived, sum of carbon in
-                    aboveground live biomass across plant functional types
-                    weighted by cover of each plant functional type
-                sum_stdedc (numpy.ndarray): derived, sum of carbon in
-                    aboveground standing dead biomass across plant functional
-                    types weighted by cover of each plant functional type
-
-            Returns:
-                total_biomass, kg of biomass per ha
-
-            """
-            valid_mask = (
-                (sum_aglivc != _TARGET_NODATA) &
-                (sum_stdedc != _TARGET_NODATA))
-            total_biomass = numpy.empty(sum_aglivc.shape, dtype=numpy.float32)
-            total_biomass[:] = _TARGET_NODATA
-            total_biomass[valid_mask] = (
-                (sum_aglivc[valid_mask] + sum_stdedc[valid_mask]) * 2.5 * 10)
-            return total_biomass
-
         temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
         temp_val_dict = {}
         for val in [
@@ -13319,3 +13334,76 @@ def _estimate_animal_density(
 
     # clean up temporary files
     shutil.rmtree(temp_dir)
+
+
+def _write_monthly_outputs(
+        aligned_inputs, sv_reg, month_reg, pft_id_set, current_year,
+        current_month, output_dir):
+    """Collect outputs from current state variable and monthly directories.
+
+    Collect model outputs from the ending state of the model at the current
+    time step. Write these outputs to the model output directory.
+
+    Parameters:
+        aligned_inputs (dict): map of key, path pairs indicating paths
+            to aligned model inputs, including fractional cover of each plant
+            functional type
+        sv_reg (dict): map of key, path pairs giving paths to state variables
+            for the current month, including aboveground biomass of all plant
+            functional types
+        month_reg (dict): map of key, path pairs giving paths to intermediate
+            calculated values that are shared between submodels, including
+            density of grazing animals
+        pft_id_set (set): set of integers identifying plant functional types
+        current_year (int): current year, for example 2016
+        current_month (int): current month of the year, such that
+            current_month=1 indicates January
+        output_dir (string): path to directory where outputs should be written
+
+    Side effects:
+        creates the following rasters in the output_dir directory:
+            standing_biomass_<year>_<month>.tif, total modeled biomass in
+                kg/ha after offtake by grazing animals, including live and
+                standing dead fractions of all plant functional types
+            animal_density_<year>_<month>.tif, distribution of grazing animal
+                density in animals/ha inside grazing area polygons
+            diet_sufficiency_<year>_<month>.tif, ratio of metabolizable
+                energy intake to maintenance energy requirements on pixels
+                where animals grazed
+
+    Returns:
+        None
+
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['weighted_sum_aglivc', 'weighted_sum_stdedc']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    output_val_dict = {}
+    for val in ['standing_biomass', 'animal_density', 'diet_sufficiency']:
+        output_val_dict[val] = os.path.join(
+            output_dir, '{}_{}_{}.tif'.format(
+                val, current_year, current_month))
+
+    # total weighted C in aboveground live and standing dead biomass
+    weighted_state_variable_sum(
+        'aglivc', sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_aglivc'])
+    weighted_state_variable_sum(
+        'stdedc', sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_stdedc'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['weighted_sum_aglivc'],
+            temp_val_dict['weighted_sum_stdedc']]],
+        sum_c_to_biomass, output_val_dict['standing_biomass'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # density of animals inside grazing areas
+    shutil.copyfile(
+        month_reg['animal_density'], output_val_dict['animal_density'])
+
+    # diet sufficiency
+    shutil.copyfile(
+        month_reg['diet_sufficiency'], output_val_dict['diet_sufficiency'])
