@@ -852,7 +852,7 @@ def execute(args):
 
     # create animal trait spatial index raster from management polygon
     aligned_inputs['animal_index'] = os.path.join(
-        args['workspace_dir'], 'animal_spatial_index.tif')
+        aligned_raster_dir, 'animal_spatial_index.tif')
     pygeoprocessing.new_raster_from_base(
         aligned_inputs['site_index'], aligned_inputs['animal_index'],
         gdal.GDT_Int32, [_TARGET_NODATA], fill_value_list=[_TARGET_NODATA])
@@ -1026,6 +1026,10 @@ def execute(args):
         _write_monthly_outputs(
             aligned_inputs, sv_reg, month_reg, pft_id_set, current_year,
             current_month, output_dir)
+
+    # clean up
+    os.rmtree(persist_param_dir)
+    os.rmtree(PROCESSING_DIR)
 
 
 def raster_multiplication(
@@ -1393,6 +1397,10 @@ def _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set):
     if max_cover > 1:
         raise ValueError(
             "Fractional cover across plant functional types exceeds 1")
+
+    # clean up
+    os.remove(cover_sum_path)
+    os.remove(operand_temp_path)
 
 
 def initial_conditions_from_tables(
@@ -6501,6 +6509,10 @@ def respiration(
             update_gross_mineralization, gromin_1_path,
             gdal.GDT_Float32, _TARGET_NODATA)
 
+    # clean up
+    os.remove(operand_temp_path)
+    os.remove(d_statv_temp_path)
+
 
 def nutrient_flow(
         cflow_path, cstatv_donating_path, estatv_donating_path, rcetob_path,
@@ -6588,6 +6600,10 @@ def nutrient_flow(
                 d_statv_temp_path, operand_temp_path]],
             update_gross_mineralization, gromin_path,
             gdal.GDT_Float32, _TARGET_NODATA)
+
+    # clean up
+    os.remove(operand_temp_path)
+    os.remove(d_statv_temp_path)
 
 
 def calc_c_leach(amov_2, tcflow, omlech_3, orglch):
@@ -6707,6 +6723,10 @@ def remove_leached_iel(
         d_statv_temp_path, _IC_NODATA,
         operand_temp_path, _IC_NODATA,
         d_som1e_2_iel_path, _IC_NODATA)
+
+    # clean up
+    os.remove(operand_temp_path)
+    os.remove(d_statv_temp_path)
 
 
 def calc_pflow(pstatv, rate_param, defac):
@@ -6849,6 +6869,9 @@ def update_aminrl(
         [(path, 1) for path in [
             aminrl_prev_path, minerl_1_2_path, fsol_path]],
         update_aminrl_2, aminrl_2_path, gdal.GDT_Float32, _SV_NODATA)
+
+    # clean up
+    os.remove(aminrl_prev_path)
 
 
 def sum_biomass(
@@ -10281,6 +10304,7 @@ def _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg):
     delta_agliv_dir = os.path.dirname(
         delta_agliv_dict[delta_agliv_dict.keys()[0]])
     shutil.rmtree(delta_agliv_dir)
+    os.remove(statv_temp_path)
 
 
 def calc_amount_leached(minlch, amov_lyr, frlech, minerl_lyr_iel):
