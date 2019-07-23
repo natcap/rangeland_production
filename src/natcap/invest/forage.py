@@ -846,7 +846,8 @@ def execute(args):
         source_input_path_list, aligned_input_path_list,
         ['near'] * len(source_input_path_list),
         target_pixel_size, 'intersection',
-        base_vector_path_list=[args['aoi_path']])
+        base_vector_path_list=[args['aoi_path']],
+        vector_mask_options={'mask_vector_path': args['aoi_path']})
     _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
@@ -1028,8 +1029,8 @@ def execute(args):
             current_month, output_dir)
 
     # clean up
-    os.rmtree(persist_param_dir)
-    os.rmtree(PROCESSING_DIR)
+    shutil.rmtree(persist_param_dir)
+    shutil.rmtree(PROCESSING_DIR)
 
 
 def raster_multiplication(
@@ -1108,7 +1109,9 @@ def raster_list_sum(
     """Calculate the sum per pixel across rasters in a list.
 
     Sum the rasters in `raster_list` element-wise, allowing nodata values
-    in the rasters to propagate to the result or treating nodata as zero.
+    in the rasters to propagate to the result or treating nodata as zero. If
+    nodata is treated as zero, areas where all inputs are nodata will be nodata
+    in the output.
 
     Parameters:
         raster_list (list): list of paths to rasters to sum
@@ -1130,15 +1133,21 @@ def raster_list_sum(
         """Add the rasters in raster_list without removing nodata values."""
         invalid_mask = numpy.any(
             numpy.isclose(numpy.array(raster_list), input_nodata), axis=0)
+        # suppress overflow warning just for the next line
+        numpy.seterr(over='ignore')
         sum_of_rasters = numpy.sum(raster_list, axis=0)
+        numpy.seterr(over='warn')
         sum_of_rasters[invalid_mask] = target_nodata
         return sum_of_rasters
 
     def raster_sum_op_nodata_remove(*raster_list):
         """Add the rasters in raster_list, treating nodata as zero."""
+        invalid_mask = numpy.all(
+            numpy.isclose(numpy.array(raster_list), input_nodata), axis=0)
         for r in raster_list:
             numpy.place(r, numpy.isclose(r, input_nodata), [0])
         sum_of_rasters = numpy.sum(raster_list, axis=0)
+        sum_of_rasters[invalid_mask] = target_nodata
         return sum_of_rasters
 
     if nodata_remove:
@@ -2913,15 +2922,17 @@ def _potential_production(
             (ppdf_2[valid_mask] - ppdf_1[valid_mask]))
         avg_tmp = numpy.empty(ctemp.shape, dtype=numpy.float32)
         avg_tmp[valid_mask] = (mintmp[valid_mask] + maxtmp[valid_mask]) / 2.
-        grow_mask = ((avg_tmp > 0) & valid_mask)
-        nogrow_mask = ((avg_tmp <= 0) & valid_mask)
+        grow_mask = (
+            (avg_tmp > 0) &
+            (frac > 0) &
+            valid_mask)
         potprd = numpy.empty(ctemp.shape, dtype=numpy.float32)
         potprd[:] = _TARGET_NODATA
+        potprd[valid_mask] = 0.
         potprd[grow_mask] = (numpy.exp(
             (ppdf_3[grow_mask]/ppdf_4[grow_mask]) *
             (1. - numpy.power(frac[grow_mask], ppdf_4[grow_mask]))) *
             numpy.power(frac[grow_mask], ppdf_3[grow_mask]))
-        potprd[nogrow_mask] = 0.
         return potprd
 
     def calc_h2ogef_1(
@@ -4100,14 +4111,16 @@ def grazing_effect_on_root_shoot(fracrc, flgrem, grzeff, gremb):
 
     quadratic_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
     quadratic_effect[:] = _TARGET_NODATA
-    quadratic_effect[valid_mask] = (
+    quadratic_effect[valid_mask] = numpy.maximum(
         rtsh_prior[valid_mask] + 3.05 * flgrem[valid_mask] -
-        11.78 * numpy.power(flgrem[valid_mask], 2))
+        11.78 * numpy.power(flgrem[valid_mask], 2),
+        0.01)
 
     linear_effect = numpy.empty(fracrc.shape, dtype=numpy.float32)
     linear_effect[:] = _TARGET_NODATA
-    linear_effect[valid_mask] = (
-        1. - (flgrem[valid_mask] * gremb[valid_mask]))
+    linear_effect[valid_mask] = numpy.maximum(
+        1. - (flgrem[valid_mask] * gremb[valid_mask]),
+        0.01)
 
     no_effect_mask = (valid_mask & numpy.isin(grzeff, [0, 1]))
     quadratic_mask = (valid_mask & numpy.isin(grzeff, [2, 3]))
@@ -6313,8 +6326,10 @@ def calc_respiration_mineral_flow(cflow, frac_co2, estatv, cstatv):
 
     mineral_flow = numpy.empty(cflow.shape, dtype=numpy.float32)
     mineral_flow[:] = _IC_NODATA
-    mineral_flow[valid_mask] = (
-        co2_loss[valid_mask] * estatv[valid_mask] / cstatv[valid_mask])
+    mineral_flow[valid_mask] = 0.
+    flow_mask = ((cstatv > 0) & valid_mask)
+    mineral_flow[flow_mask] = (
+        co2_loss[flow_mask] * estatv[flow_mask] / cstatv[flow_mask])
     return mineral_flow
 
 
@@ -8688,7 +8703,7 @@ def partit(
         temp_val_dict['d_statv_temp'])
     raster_sum(
         temp_val_dict['d_statv_temp'], _SV_NODATA,
-        temp_val_dict['operand_temp'], _TARGET_NODATA,
+        temp_val_dict['operand_temp'], _IC_NODATA,
         sv_reg['strlig_{}_path'.format(lyr)], _SV_NODATA)
 
     # clean up temporary files
@@ -8766,6 +8781,7 @@ def calc_root_death(
     delta_c_root_death[:] = _TARGET_NODATA
     delta_c_root_death[valid_mask] = (
         root_death_rate[valid_mask] * bglivc[valid_mask])
+
     return delta_c_root_death
 
 
@@ -8954,6 +8970,7 @@ def _death_and_partition(
             prev_sv_reg['{}c_{}_path'.format(state_variable, pft_i)],
             _SV_NODATA, temp_val_dict['delta_c'], _TARGET_NODATA,
             sv_reg['{}c_{}_path'.format(state_variable, pft_i)], _SV_NODATA)
+
         # calculate delta C weighted by % cover of this pft
         raster_multiplication(
             temp_val_dict['delta_c'], _TARGET_NODATA,
@@ -9142,7 +9159,7 @@ def _shoot_senescence(
                 gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
 
     for pft_i in pft_id_set:
-        if str(current_month) == veg_trait_table[pft_i]['senescence_month']:
+        if current_month == veg_trait_table[pft_i]['senescence_month']:
             temp_val_dict['fdeth'] = param_val_dict[
                 'fsdeth_2_{}'.format(pft_i)]
         else:
@@ -9846,7 +9863,7 @@ def calc_nutrient_limitation(return_type):
             cfrac_above[valid_mask] * maxeci_above_2[valid_mask])
 
         # N/C ratio in new production according to demand and supply
-        demand_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        demand_1 = numpy.zeros(potenc.shape, dtype=numpy.float32)
         demand_1[valid_mask] = potenc[valid_mask] * maxec_1[valid_mask]
 
         ecfor_above_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
@@ -9868,16 +9885,15 @@ def calc_nutrient_limitation(return_type):
         ecfor_below_1[sufficient_mask] = maxeci_below_1[sufficient_mask]
 
         # caculate C production limited by N supply
-        c_constrained_1 = numpy.empty(potenc.shape, dtype=numpy.float32)
-        c_constrained_1[valid_mask] = (
-            eavail_1[valid_mask] / (
-                cfrac_below[valid_mask] * ecfor_below_1[valid_mask] +
-                cfrac_above[valid_mask] * ecfor_above_1[valid_mask]))
+        c_constrained_1 = numpy.zeros(potenc.shape, dtype=numpy.float32)
+        c_constrained_1[nonzero_mask] = (
+            eavail_1[nonzero_mask] / (
+                cfrac_below[nonzero_mask] * ecfor_below_1[nonzero_mask] +
+                cfrac_above[nonzero_mask] * ecfor_above_1[nonzero_mask]))
 
         # P/C ratio in new production according to demand and supply
-        demand_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
+        demand_2 = numpy.zeros(potenc.shape, dtype=numpy.float32)
         demand_2[valid_mask] = potenc[valid_mask] * maxec_2[valid_mask]
-
         ecfor_above_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
         ecfor_below_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
         nonzero_mask = ((demand_2 > 0) & valid_mask)
@@ -9897,11 +9913,11 @@ def calc_nutrient_limitation(return_type):
         ecfor_below_2[sufficient_mask] = maxeci_below_2[sufficient_mask]
 
         # caculate C production limited by P supply
-        c_constrained_2 = numpy.empty(potenc.shape, dtype=numpy.float32)
-        c_constrained_2[valid_mask] = (
-            eavail_2[valid_mask] / (
-                cfrac_below[valid_mask] * ecfor_below_2[valid_mask] +
-                cfrac_above[valid_mask] * ecfor_above_2[valid_mask]))
+        c_constrained_2 = numpy.zeros(potenc.shape, dtype=numpy.float32)
+        c_constrained_2[nonzero_mask] = (
+            eavail_2[nonzero_mask] / (
+                cfrac_below[nonzero_mask] * ecfor_below_2[nonzero_mask] +
+                cfrac_above[nonzero_mask] * ecfor_above_2[nonzero_mask]))
 
         # C production limited by both N and P
         cprodl = numpy.empty(potenc.shape, dtype=numpy.float32)
@@ -10072,7 +10088,7 @@ def _new_growth(
                 gdal.GDT_Float32, [_IC_NODATA], fill_value_list=[fill_val])
 
     for pft_i in pft_id_set:
-        if str(current_month) != veg_trait_table[pft_i]['senescence_month']:
+        if current_month != veg_trait_table[pft_i]['senescence_month']:
             # calculate available nutrients for all pfts prior to
             # performing uptake
             for iel in [1, 2]:
@@ -10081,7 +10097,7 @@ def _new_growth(
                     temp_val_dict['availm_{}_{}'.format(iel, pft_i)])
     for pft_i in pft_id_set:
         # growth only occurs in months when senescence not scheduled
-        if str(current_month) != veg_trait_table[pft_i]['senescence_month']:
+        if current_month != veg_trait_table[pft_i]['senescence_month']:
             # calculate available nutrients
             for iel in [1, 2]:
                 # eavail_iel, available nutrient
@@ -11721,6 +11737,7 @@ def calc_energy_maintenance(
         (weight != _TARGET_NODATA) &
         (energy_intake != _TARGET_NODATA) &
         (total_intake != _TARGET_NODATA) &
+        (total_intake > 0) &
         (total_digestibility != _TARGET_NODATA) &
         (CK1 != _IC_NODATA) &
         (CK2 != _IC_NODATA) &
@@ -12810,6 +12827,7 @@ def _animal_diet_sufficiency(
             (~numpy.isclose(cstatv, _SV_NODATA)) &
             (~numpy.isclose(pft_cover, pft_nodata)) &
             (animal_density != _TARGET_NODATA) &
+            (animal_density > 0) &
             (fgrem != _TARGET_NODATA))
         biomass = numpy.zeros(cstatv.shape, dtype=numpy.float32)
         biomass[valid_mask] = (
@@ -13056,6 +13074,8 @@ def add_shp_id_field(base_vector_path, target_vector_path):
         field_name = original_field.GetName()
         target_field = ogr.FieldDefn(
             field_name, original_field.GetType())
+        target_field.SetWidth(24)
+        target_field.SetPrecision(11)
         target_layer.CreateField(target_field)
 
     # copy all features from original vector to modified vector

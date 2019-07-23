@@ -1020,10 +1020,10 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 1,  # 22,
+            'n_months': 22,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'soums_monitoring_area_diss.shp'),
-            'management_threshold': 50,
+            'management_threshold': 2000,
             'proportion_legume_path': os.path.join(
                 SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
@@ -7466,7 +7466,7 @@ class foragetests(unittest.TestCase):
             delta_c_standing_dead_ar, delta_c_standing_dead - tolerance,
             delta_c_standing_dead + tolerance, _TARGET_NODATA)
 
-    def calc_calc_root_death(self):
+    def test_calc_root_death(self):
         """Test `calc_root_death`.
 
         Use the function `calc_root_death` to calculate the change in bglivc
@@ -7482,7 +7482,7 @@ class foragetests(unittest.TestCase):
 
         """
         from natcap.invest import forage
-        tolerance = 0.00001
+        tolerance = 0.0001
         array_shape = (10, 10)
 
         # known values, temperature sufficient for death
@@ -7510,7 +7510,7 @@ class foragetests(unittest.TestCase):
             delta_c_root_death_ar, delta_c_root_death - tolerance,
             delta_c_root_death + tolerance, _TARGET_NODATA)
 
-        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(average_temperature_ar, _IC_NODATA)
         insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
         insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
         insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
@@ -7550,7 +7550,6 @@ class foragetests(unittest.TestCase):
             delta_c_root_death + tolerance, _TARGET_NODATA)
 
         insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
-        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
         insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
         insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
         insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
@@ -7588,8 +7587,7 @@ class foragetests(unittest.TestCase):
             delta_c_root_death_ar, delta_c_root_death - tolerance,
             delta_c_root_death + tolerance, _TARGET_NODATA)
 
-        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
-        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(average_temperature_ar, _IC_NODATA)
         insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
         insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
         insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
@@ -7687,7 +7685,7 @@ class foragetests(unittest.TestCase):
         current_month = 1
         veg_trait_table = {
             1: {
-                'senescence_month': '1',
+                'senescence_month': 1,
                 'fsdeth_1': 0.2,
                 'fsdeth_2': 0.75,
                 'fsdeth_3': 0.2,
@@ -7697,7 +7695,7 @@ class foragetests(unittest.TestCase):
                 'crprtf_2': 0,
             },
             2: {
-                'senescence_month': '4',
+                'senescence_month': 4,
                 'fsdeth_1': 0.1,
                 'fsdeth_2': 0.8,
                 'fsdeth_3': 0.17,
@@ -8526,12 +8524,12 @@ class foragetests(unittest.TestCase):
         veg_trait_table = {
             1: {
                 'snfxmx_1': 0.03,
-                'senescence_month': '3',
+                'senescence_month': 3,
                 'nlaypg': 5,
             },
             2: {
                 'snfxmx_1': 0.004,
-                'senescence_month': '5',
+                'senescence_month': 5,
                 'nlaypg': 3,
             }
         }
