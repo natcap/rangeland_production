@@ -1020,10 +1020,10 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 1,
+            'n_months': 22,
             'aoi_path': os.path.join(
-                SAMPLE_DATA, 'aoi_small.shp'),
-            'management_threshold': 300,
+                SAMPLE_DATA, 'soums_monitoring_area_diss.shp'),
+            'management_threshold': 2000,
             'proportion_legume_path': os.path.join(
                 SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
@@ -1042,9 +1042,9 @@ class foragetests(unittest.TestCase):
             'min_temp_path_pattern': os.path.join(
                 SAMPLE_DATA, 'temp', 'wc2.0_30s_tmin_<month>.tif'),
             'max_temp_path_pattern': os.path.join(
-                SAMPLE_DATA, 'temp', 'wc2.0_30s_tmax_<month>.tif'),
+                SAMPLE_DATA, 'temp', 'wcs2.0_30s_tmax_<month>.tif'),
             'monthly_vi_path_pattern': os.path.join(
-                SAMPLE_DATA, 'ndvi', 'ndvi_<year>_<month>.tif'),
+                SAMPLE_DATA, 'NDVI', 'ndvi_<year>_<month>.tif'),
             'site_param_table': os.path.join(
                 SAMPLE_DATA, 'site_parameters.csv'),
             'site_param_spatial_index_path': os.path.join(
@@ -1055,9 +1055,11 @@ class foragetests(unittest.TestCase):
             'animal_trait_path': os.path.join(
                 SAMPLE_DATA, 'animal_trait_table.csv'),
             'animal_grazing_areas_path': os.path.join(
-                SAMPLE_DATA, 'animal_mgmt_layer_WGS1984.shp'),
-            'initial_conditions_dir': os.path.join(
-                SAMPLE_DATA, 'initialization_data'),
+                SAMPLE_DATA, 'sfu_per_soum.shp'),
+            'site_initial_table': os.path.join(
+                SAMPLE_DATA, 'site_initial_table.csv'),
+            'pft_initial_table': os.path.join(
+                SAMPLE_DATA, 'pft_initial_table.csv'),
         }
         return args
 
@@ -7464,7 +7466,7 @@ class foragetests(unittest.TestCase):
             delta_c_standing_dead_ar, delta_c_standing_dead - tolerance,
             delta_c_standing_dead + tolerance, _TARGET_NODATA)
 
-    def calc_calc_root_death(self):
+    def test_calc_root_death(self):
         """Test `calc_root_death`.
 
         Use the function `calc_root_death` to calculate the change in bglivc
@@ -7480,7 +7482,7 @@ class foragetests(unittest.TestCase):
 
         """
         from natcap.invest import forage
-        tolerance = 0.00001
+        tolerance = 0.0001
         array_shape = (10, 10)
 
         # known values, temperature sufficient for death
@@ -7508,7 +7510,7 @@ class foragetests(unittest.TestCase):
             delta_c_root_death_ar, delta_c_root_death - tolerance,
             delta_c_root_death + tolerance, _TARGET_NODATA)
 
-        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
+        insert_nodata_values_into_array(average_temperature_ar, _IC_NODATA)
         insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
         insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
         insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
@@ -7548,7 +7550,6 @@ class foragetests(unittest.TestCase):
             delta_c_root_death + tolerance, _TARGET_NODATA)
 
         insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
-        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
         insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
         insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
         insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
@@ -7586,8 +7587,7 @@ class foragetests(unittest.TestCase):
             delta_c_root_death_ar, delta_c_root_death - tolerance,
             delta_c_root_death + tolerance, _TARGET_NODATA)
 
-        insert_nodata_values_into_array(average_temperature_ar, _TARGET_NODATA)
-        insert_nodata_values_into_array(rtdtmp_ar, _IC_NODATA)
+        insert_nodata_values_into_array(average_temperature_ar, _IC_NODATA)
         insert_nodata_values_into_array(rdr_ar, _IC_NODATA)
         insert_nodata_values_into_array(avh2o_1_ar, _SV_NODATA)
         insert_nodata_values_into_array(deck5_ar, _IC_NODATA)
@@ -7685,7 +7685,7 @@ class foragetests(unittest.TestCase):
         current_month = 1
         veg_trait_table = {
             1: {
-                'senescence_month': '1',
+                'senescence_month': 1,
                 'fsdeth_1': 0.2,
                 'fsdeth_2': 0.75,
                 'fsdeth_3': 0.2,
@@ -7695,7 +7695,7 @@ class foragetests(unittest.TestCase):
                 'crprtf_2': 0,
             },
             2: {
-                'senescence_month': '4',
+                'senescence_month': 4,
                 'fsdeth_1': 0.1,
                 'fsdeth_2': 0.8,
                 'fsdeth_3': 0.17,
@@ -8524,12 +8524,12 @@ class foragetests(unittest.TestCase):
         veg_trait_table = {
             1: {
                 'snfxmx_1': 0.03,
-                'senescence_month': '3',
+                'senescence_month': 3,
                 'nlaypg': 5,
             },
             2: {
                 'snfxmx_1': 0.004,
-                'senescence_month': '5',
+                'senescence_month': 5,
                 'nlaypg': 3,
             }
         }
@@ -10727,3 +10727,334 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             month_reg['animal_density'], animals_per_ha - tolerance,
             animals_per_ha + tolerance, _TARGET_NODATA)
+
+    def test_initial_conditions_from_tables(self):
+        """Test `initial_conditions_from_tables`.
+
+        Use `initial_conditions_from_tables` to generate the initial state
+        variable registry from initial conditions tables.
+
+        Raises:
+            AssertionError if `initial_conditions_from_tables` does not raise
+                ValueError with incomplete initial conditions tables
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+
+        # known inputs
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        sv_dir = self.workspace_dir
+        pft_id_set = [1]
+
+        site_initial_conditions_table = {
+            1: {
+                'metabc_1': 1.2,
+                'metabc_2': 1.2,
+                'som1c_1': 1.2,
+                'som1c_2': 1.2,
+                'som2c_1': 1.2,
+                'som2c_2': 1.2,
+                'som3c': 1.2,
+                'strucc_1': 1.2,
+                'strucc_2': 1.2,
+                'strlig_1': 1.2,
+                'strlig_2': 1.2,
+                'metabe_1_1': 1.2,
+                'metabe_2_1': 1.2,
+                'som1e_1_1': 1.2,
+                'som1e_2_1': 1.2,
+                'som2e_1_1': 1.2,
+                'som2e_2_1': 1.2,
+                'som3e_1': 1.2,
+                'struce_1_1': 1.2,
+                'struce_2_1': 1.2,
+                'metabe_1_2': 1.2,
+                'metabe_2_2': 1.2,
+                'plabil': 1.2,
+                'secndy_2': 1.2,
+                'parent_2': 1.2,
+                'occlud': 1.2,
+                'som1e_1_2': 1.2,
+                'som1e_2_2': 1.2,
+                'som2e_1_2': 1.2,
+                'som2e_2_2': 1.2,
+                'som3e_2': 1.2,
+                'struce_1_2': 1.2,
+                'struce_2_2': 1.2,
+                'asmos_1': 1.2,
+                'asmos_2': 1.2,
+                'asmos_3': 1.2,
+                'asmos_4': 1.2,
+                'asmos_5': 1.2,
+                'asmos_6': 1.2,
+                'asmos_7': 1.2,
+                'asmos_8': 1.2,
+                'asmos_9': 1.2,
+                'avh2o_3': 1.2,
+                'minerl_1_1': 1.2,
+                'minerl_2_1': 1.2,
+                'minerl_3_1': 1.2,
+                'minerl_4_1': 1.2,
+                'minerl_5_1': 1.2,
+                'minerl_6_1': 1.2,
+                'minerl_7_1': 1.2,
+                'minerl_8_1': 1.2,
+                'minerl_9_1': 1.2,
+                'minerl_10_1': 1.2,
+                'minerl_1_2': 1.2,
+                'minerl_2_2': 1.2,
+                'minerl_3_2': 1.2,
+                'minerl_4_2': 1.2,
+                'minerl_5_2': 1.2,
+                'minerl_6_2': 1.2,
+                'minerl_7_2': 1.2,
+                'minerl_8_2': 1.2,
+                'minerl_9_2': 1.2,
+                'minerl_10_2': 1.2,
+                'snow': 1.2,
+                'snlq': 1.2,
+            },
+        }
+        pft_initial_conditions_table = {
+            1: {
+                'aglivc': 1.2,
+                'bglivc': 1.2,
+                'stdedc': 1.2,
+                'aglive_1': 1.2,
+                'bglive_1': 1.2,
+                'stdede_1': 1.2,
+                'aglive_2': 1.2,
+                'bglive_2': 1.2,
+                'stdede_2': 1.2,
+                'avh2o_1': 1.2,
+                'crpstg_1': 1.2,
+                'crpstg_2': 1.2,
+            },
+        }
+
+        # complete inputs
+        initial_sv_reg = forage.initial_conditions_from_tables(
+            aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
+            pft_initial_conditions_table)
+
+        # site state variable missing from initial conditions table
+        site_initial_conditions_table = {
+            1: {
+                'metabc_1': 1.2,
+                'metabc_2': 1.2,
+                'som1c_1': 1.2,
+                'som1c_2': 1.2,
+                'som2c_1': 1.2,
+                'som2c_2': 1.2,
+                'som3c': 1.2,
+                'strucc_1': 1.2,
+                'strucc_2': 1.2,
+                'strlig_1': 1.2,
+                'strlig_2': 1.2,
+                'metabe_1_1': 1.2,
+                'metabe_2_1': 1.2,
+                'som1e_1_1': 1.2,
+                'som1e_2_1': 1.2,
+                'som2e_1_1': 1.2,
+                'som2e_2_1': 1.2,
+                'som3e_1': 1.2,
+                'struce_1_1': 1.2,
+                'struce_2_1': 1.2,
+                'metabe_1_2': 1.2,
+                'metabe_2_2': 1.2,
+                'plabil': 1.2,
+                'secndy_2': 1.2,
+                'parent_2': 1.2,
+                'occlud': 1.2,
+                'som1e_1_2': 1.2,
+                'som1e_2_2': 1.2,
+                'som2e_1_2': 1.2,
+                'som2e_2_2': 1.2,
+                'som3e_2': 1.2,
+                'struce_1_2': 1.2,
+                'struce_2_2': 1.2,
+                'asmos_2': 1.2,
+                'asmos_3': 1.2,
+                'asmos_4': 1.2,
+                'asmos_5': 1.2,
+                'asmos_6': 1.2,
+                'asmos_7': 1.2,
+                'asmos_8': 1.2,
+                'asmos_9': 1.2,
+                'avh2o_3': 1.2,
+                'minerl_2_1': 1.2,
+                'minerl_3_1': 1.2,
+                'minerl_4_1': 1.2,
+                'minerl_5_1': 1.2,
+                'minerl_6_1': 1.2,
+                'minerl_7_1': 1.2,
+                'minerl_8_1': 1.2,
+                'minerl_9_1': 1.2,
+                'minerl_10_1': 1.2,
+                'minerl_1_2': 1.2,
+                'minerl_2_2': 1.2,
+                'minerl_3_2': 1.2,
+                'minerl_4_2': 1.2,
+                'minerl_5_2': 1.2,
+                'minerl_6_2': 1.2,
+                'minerl_7_2': 1.2,
+                'minerl_8_2': 1.2,
+                'minerl_9_2': 1.2,
+                'minerl_10_2': 1.2,
+                'snlq': 1.2,
+            },
+        }
+
+        # asmos_1, minerl_1_1, snow missing
+        with self.assertRaises(ValueError):
+            initial_sv_reg = forage.initial_conditions_from_tables(
+                aligned_inputs, sv_dir, pft_id_set,
+                site_initial_conditions_table, pft_initial_conditions_table)
+
+        # pft state variable missing from initial conditions table
+        site_initial_conditions_table = {
+            1: {
+                'metabc_1': 1.2,
+                'metabc_2': 1.2,
+                'som1c_1': 1.2,
+                'som1c_2': 1.2,
+                'som2c_1': 1.2,
+                'som2c_2': 1.2,
+                'som3c': 1.2,
+                'strucc_1': 1.2,
+                'strucc_2': 1.2,
+                'strlig_1': 1.2,
+                'strlig_2': 1.2,
+                'metabe_1_1': 1.2,
+                'metabe_2_1': 1.2,
+                'som1e_1_1': 1.2,
+                'som1e_2_1': 1.2,
+                'som2e_1_1': 1.2,
+                'som2e_2_1': 1.2,
+                'som3e_1': 1.2,
+                'struce_1_1': 1.2,
+                'struce_2_1': 1.2,
+                'metabe_1_2': 1.2,
+                'metabe_2_2': 1.2,
+                'plabil': 1.2,
+                'secndy_2': 1.2,
+                'parent_2': 1.2,
+                'occlud': 1.2,
+                'som1e_1_2': 1.2,
+                'som1e_2_2': 1.2,
+                'som2e_1_2': 1.2,
+                'som2e_2_2': 1.2,
+                'som3e_2': 1.2,
+                'struce_1_2': 1.2,
+                'struce_2_2': 1.2,
+                'asmos_1': 1.2,
+                'asmos_2': 1.2,
+                'asmos_3': 1.2,
+                'asmos_4': 1.2,
+                'asmos_5': 1.2,
+                'asmos_6': 1.2,
+                'asmos_7': 1.2,
+                'asmos_8': 1.2,
+                'asmos_9': 1.2,
+                'avh2o_3': 1.2,
+                'minerl_1_1': 1.2,
+                'minerl_2_1': 1.2,
+                'minerl_3_1': 1.2,
+                'minerl_4_1': 1.2,
+                'minerl_5_1': 1.2,
+                'minerl_6_1': 1.2,
+                'minerl_7_1': 1.2,
+                'minerl_8_1': 1.2,
+                'minerl_9_1': 1.2,
+                'minerl_10_1': 1.2,
+                'minerl_1_2': 1.2,
+                'minerl_2_2': 1.2,
+                'minerl_3_2': 1.2,
+                'minerl_4_2': 1.2,
+                'minerl_5_2': 1.2,
+                'minerl_6_2': 1.2,
+                'minerl_7_2': 1.2,
+                'minerl_8_2': 1.2,
+                'minerl_9_2': 1.2,
+                'minerl_10_2': 1.2,
+                'snow': 1.2,
+                'snlq': 1.2,
+            },
+        }
+        pft_initial_conditions_table = {
+            1: {
+                'aglivc': 1.2,
+                'bglivc': 1.2,
+                'stdedc': 1.2,
+                'aglive_1': 1.2,
+                'stdede_1': 1.2,
+                'aglive_2': 1.2,
+                'bglive_2': 1.2,
+                'stdede_2': 1.2,
+                'crpstg_1': 1.2,
+                'crpstg_2': 1.2,
+            },
+        }
+
+        # should list bglive_1 and avh2o_1 as missing
+        with self.assertRaises(ValueError):
+            initial_sv_reg = forage.initial_conditions_from_tables(
+                aligned_inputs, sv_dir, pft_id_set,
+                site_initial_conditions_table, pft_initial_conditions_table)
+
+    def test_check_pft_fractional_cover_sum(self):
+        """Test `_check_pft_fractional_cover_sum`.
+
+        Use `_check_pft_fractional_cover_sum` to check the sum of fractional
+        cover across plant functional types. Ensure that
+        `_check_pft_fractional_cover_sum` raises a ValueError when the sum of
+        fractional cover across plant functional types exceeds 1.
+
+        Raises:
+            AssertionError if `_check_pft_fractional_cover_sum` does not raise
+                ValueError with invalid inputs
+
+        Returns:
+            None
+
+        """
+        from natcap.invest import forage
+
+        # valid inputs, single plant functional type
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 1)
+        pft_id_set = [1]
+
+        forage._check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
+
+        # valid inputs, multiple plant functional types
+        aligned_inputs = {
+            'site_index': os.path.join(self.workspace_dir, 'site.tif'),
+            'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
+            'pft_4': os.path.join(self.workspace_dir, 'pft_4.tif'),
+            'pft_5': os.path.join(self.workspace_dir, 'pft_5.tif'),
+        }
+        create_constant_raster(aligned_inputs['site_index'], 1)
+        create_constant_raster(aligned_inputs['pft_1'], 0.3)
+        create_constant_raster(aligned_inputs['pft_4'], 0.2)
+        create_constant_raster(aligned_inputs['pft_5'], 0.497)
+        pft_id_set = [1, 4, 5]
+
+        forage._check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
+
+        # invalid inputs, sum of fractional cover exceeds 1
+        create_constant_raster(aligned_inputs['pft_4'], 0.3)
+        with self.assertRaises(ValueError):
+            forage._check_pft_fractional_cover_sum(aligned_inputs, pft_id_set)
