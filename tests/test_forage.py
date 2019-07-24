@@ -10735,7 +10735,8 @@ class foragetests(unittest.TestCase):
         variable registry from initial conditions tables.
 
         Raises:
-            ??
+            AssertionError if `initial_conditions_from_tables` does not raise
+                ValueError with incomplete initial conditions tables
 
         Returns:
             None
@@ -11016,6 +11017,10 @@ class foragetests(unittest.TestCase):
         cover across plant functional types. Ensure that
         `_check_pft_fractional_cover_sum` raises a ValueError when the sum of
         fractional cover across plant functional types exceeds 1.
+
+        Raises:
+            AssertionError if `_check_pft_fractional_cover_sum` does not raise
+                ValueError with invalid inputs
 
         Returns:
             None
