@@ -1133,10 +1133,9 @@ def raster_list_sum(
         """Add the rasters in raster_list without removing nodata values."""
         invalid_mask = numpy.any(
             numpy.isclose(numpy.array(raster_list), input_nodata), axis=0)
-        # suppress overflow warning just for the next line
-        numpy.seterr(over='ignore')
+        for r in raster_list:
+            numpy.place(r, numpy.isclose(r, input_nodata), [0])
         sum_of_rasters = numpy.sum(raster_list, axis=0)
-        numpy.seterr(over='warn')
         sum_of_rasters[invalid_mask] = target_nodata
         return sum_of_rasters
 
