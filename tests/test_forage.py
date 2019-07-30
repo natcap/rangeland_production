@@ -1020,10 +1020,10 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 22,
+            'n_months': 12,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'soums_monitoring_area_diss.shp'),
-            'management_threshold': 2000,
+            'management_threshold': 500,
             'proportion_legume_path': os.path.join(
                 SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
@@ -10715,6 +10715,7 @@ class foragetests(unittest.TestCase):
         }
         create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
         create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
+        obs_biomass_path = os.path.join(self.workspace_dir, 'obs_biomass.tif')
         month_reg = {
             'animal_density': os.path.join(
                 self.workspace_dir, 'animal_density.tif'),
@@ -10723,7 +10724,7 @@ class foragetests(unittest.TestCase):
         animals_per_ha = 0.00011449
         forage._estimate_animal_density(
             aligned_inputs, month_index, pft_id_set, site_param_table,
-            animal_mgmt_layer_path, sv_reg, month_reg)
+            animal_mgmt_layer_path, sv_reg, obs_biomass_path, month_reg)
         self.assert_all_values_in_raster_within_range(
             month_reg['animal_density'], animals_per_ha - tolerance,
             animals_per_ha + tolerance, _TARGET_NODATA)
