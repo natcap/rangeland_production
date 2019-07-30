@@ -4316,11 +4316,12 @@ def _root_shoot_ratio(
     # skip the rest of the function
     do_PFT = []
     for pft_i in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_i]['growth_months']:
+        # growth occurs in growth months and when senescence not scheduled
+        do_growth = (
+            current_month != veg_trait_table[pft_i]['senescence_month'] and
+            str(current_month) in veg_trait_table[pft_i]['growth_months'])
+        if do_growth:
             do_PFT.append(pft_i)
-        else:
-            month_reg['tgprod_{}'.format(pft_i)] = None
-            month_reg['rtsh_{}'.format(pft_i)] = None
     if not do_PFT:
         return
 
@@ -4382,7 +4383,7 @@ def _root_shoot_ratio(
     # surface layer
     param_val_dict['favail_2'] = os.path.join(temp_dir, 'favail_2.tif')
     _calc_favail_P(prev_sv_reg, param_val_dict)
-    for pft_i in pft_id_set:
+    for pft_i in do_PFT:
         # fracrc_p, provisional fraction of C allocated to roots
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
@@ -5412,8 +5413,11 @@ def _soil_water(
     # calculate the weighted sum of tgprod, potential production, across PFTs
     weighted_path_list = []
     for pft_i in pft_id_set:
-        target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
-        if month_reg['tgprod_{}'.format(pft_i)]:
+        do_growth = (
+            current_month != veg_trait_table[pft_i]['senescence_month'] and
+            str(current_month) in veg_trait_table[pft_i]['growth_months'])
+        if do_growth:
+            target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
             pft_nodata = pygeoprocessing.get_raster_info(
                 aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
             raster_multiplication(
@@ -10142,8 +10146,11 @@ def _new_growth(
                     veg_trait_table[pft_i], sv_reg, iel,
                     temp_val_dict['availm_{}_{}'.format(iel, pft_i)])
     for pft_i in pft_id_set:
-        # growth only occurs in months when senescence not scheduled
-        if current_month != veg_trait_table[pft_i]['senescence_month']:
+        # growth occurs in growth months and when senescence not scheduled
+        do_growth = (
+            current_month != veg_trait_table[pft_i]['senescence_month'] and
+            str(current_month) in veg_trait_table[pft_i]['growth_months'])
+        if do_growth:
             # calculate available nutrients
             for iel in [1, 2]:
                 # eavail_iel, available nutrient

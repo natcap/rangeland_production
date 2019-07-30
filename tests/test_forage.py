@@ -4942,6 +4942,8 @@ class foragetests(unittest.TestCase):
             for pft_i in pft_dict.iterkeys():
                 veg_trait_table[pft_i] = {
                     'nlaypg': pft_dict[pft_i]['nlaypg'],
+                    'senescence_month': pft_dict[pft_i]['senescence_month'],
+                    'growth_months': pft_dict[pft_i]['growth_months'],
                 }
             # previous state variables
             prev_sv_reg = {
@@ -5081,6 +5083,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 49.874,
                 'nlaypg': 5,
                 'tgprod': 371.,
+                'senescence_month': 11,
+                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             2: {
                 'cover': 0.2,
@@ -5088,6 +5092,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 31.4,
                 'nlaypg': 3,
                 'tgprod': 300.2,
+                'senescence_month': 11,
+                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             3: {
                 'cover': 0.3,
@@ -5095,6 +5101,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 17.03,
                 'nlaypg': 6,
                 'tgprod': 200.8,
+                'senescence_month': 11,
+                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
         }
         nlaypg_max = max(
@@ -5184,6 +5192,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 49.874,
                 'nlaypg': 5,
                 'tgprod': 371.,
+                'senescence_month': 11,
+                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             2: {
                 'cover': 0.2,
@@ -5191,6 +5201,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 31.4,
                 'nlaypg': 3,
                 'tgprod': 300.2,
+                'senescence_month': 11,
+                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             3: {
                 'cover': 0.3,
@@ -5198,6 +5210,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 17.03,
                 'nlaypg': 6,
                 'tgprod': 200.8,
+                'senescence_month': 11,
+                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
         }
         nlaypg_max = max(
@@ -8525,11 +8539,13 @@ class foragetests(unittest.TestCase):
             1: {
                 'snfxmx_1': 0.03,
                 'senescence_month': 3,
+                'growth_months': '1,2,3,4,5,6',
                 'nlaypg': 5,
             },
             2: {
                 'snfxmx_1': 0.004,
                 'senescence_month': 5,
+                'growth_months': '1,2,3,4,5,6',
                 'nlaypg': 3,
             }
         }
