@@ -1020,10 +1020,10 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 12,
+            'n_months': 22,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'soums_monitoring_area_diss.shp'),
-            'management_threshold': 500,
+            'management_threshold': 2000,
             'proportion_legume_path': os.path.join(
                 SAMPLE_DATA, 'prop_legume.tif'),
             'bulk_density_path': os.path.join(
@@ -4942,8 +4942,6 @@ class foragetests(unittest.TestCase):
             for pft_i in pft_dict.iterkeys():
                 veg_trait_table[pft_i] = {
                     'nlaypg': pft_dict[pft_i]['nlaypg'],
-                    'senescence_month': pft_dict[pft_i]['senescence_month'],
-                    'growth_months': pft_dict[pft_i]['growth_months'],
                 }
             # previous state variables
             prev_sv_reg = {
@@ -5083,8 +5081,6 @@ class foragetests(unittest.TestCase):
                 'stdedc': 49.874,
                 'nlaypg': 5,
                 'tgprod': 371.,
-                'senescence_month': 11,
-                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             2: {
                 'cover': 0.2,
@@ -5092,8 +5088,6 @@ class foragetests(unittest.TestCase):
                 'stdedc': 31.4,
                 'nlaypg': 3,
                 'tgprod': 300.2,
-                'senescence_month': 11,
-                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             3: {
                 'cover': 0.3,
@@ -5101,8 +5095,6 @@ class foragetests(unittest.TestCase):
                 'stdedc': 17.03,
                 'nlaypg': 6,
                 'tgprod': 200.8,
-                'senescence_month': 11,
-                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
         }
         nlaypg_max = max(
@@ -5192,8 +5184,6 @@ class foragetests(unittest.TestCase):
                 'stdedc': 49.874,
                 'nlaypg': 5,
                 'tgprod': 371.,
-                'senescence_month': 11,
-                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             2: {
                 'cover': 0.2,
@@ -5201,8 +5191,6 @@ class foragetests(unittest.TestCase):
                 'stdedc': 31.4,
                 'nlaypg': 3,
                 'tgprod': 300.2,
-                'senescence_month': 11,
-                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
             3: {
                 'cover': 0.3,
@@ -5210,8 +5198,6 @@ class foragetests(unittest.TestCase):
                 'stdedc': 17.03,
                 'nlaypg': 6,
                 'tgprod': 200.8,
-                'senescence_month': 11,
-                'growth_months': '1,2,3,4,5,6,7,8,9,10,11,12',
             },
         }
         nlaypg_max = max(
@@ -8539,13 +8525,11 @@ class foragetests(unittest.TestCase):
             1: {
                 'snfxmx_1': 0.03,
                 'senescence_month': 3,
-                'growth_months': '1,2,3,4,5,6',
                 'nlaypg': 5,
             },
             2: {
                 'snfxmx_1': 0.004,
                 'senescence_month': 5,
-                'growth_months': '1,2,3,4,5,6',
                 'nlaypg': 3,
             }
         }
@@ -10731,7 +10715,6 @@ class foragetests(unittest.TestCase):
         }
         create_constant_raster(sv_reg['aglivc_1_path'], aglivc)
         create_constant_raster(sv_reg['stdedc_1_path'], stdedc)
-        obs_biomass_path = os.path.join(self.workspace_dir, 'obs_biomass.tif')
         month_reg = {
             'animal_density': os.path.join(
                 self.workspace_dir, 'animal_density.tif'),
@@ -10740,7 +10723,7 @@ class foragetests(unittest.TestCase):
         animals_per_ha = 0.00011449
         forage._estimate_animal_density(
             aligned_inputs, month_index, pft_id_set, site_param_table,
-            animal_mgmt_layer_path, sv_reg, obs_biomass_path, month_reg)
+            animal_mgmt_layer_path, sv_reg, month_reg)
         self.assert_all_values_in_raster_within_range(
             month_reg['animal_density'], animals_per_ha - tolerance,
             animals_per_ha + tolerance, _TARGET_NODATA)
