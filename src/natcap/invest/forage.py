@@ -13155,11 +13155,15 @@ def _estimate_animal_density(
         sv_reg (dict): map of key, path pairs giving paths to state variables,
             including carbon in aboveground biomass for each plant functional
             type
+            biomass for this timestep should be saved as geotiff
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             estimated animal density
 
     Side effects:
+        creates a geotiff raster of observed biomass calculated from remotely
+            sensed vegetation index at the location indicated by
+            `obs_biomass_path`
         creates or modifies the raster indicated by month_reg['animal_density']
 
     """
@@ -13188,9 +13192,9 @@ def _estimate_animal_density(
             (EO_biomass_slope != _IC_NODATA))
         biomass_obs = numpy.empty(EO_index.shape, dtype=numpy.float32)
         biomass_obs[:] = _TARGET_NODATA
-        biomass_obs[valid_mask] = (
+        biomass_obs[valid_mask] = numpy.clip(
             EO_index[valid_mask] * EO_biomass_slope[valid_mask] +
-            EO_biomass_intercept[valid_mask])
+            EO_biomass_intercept[valid_mask], 0., None)
         return biomass_obs
 
     def calc_potential_biomass(
@@ -13213,7 +13217,7 @@ def _estimate_animal_density(
                 the result, total modeled aboveground biomass
 
         Side effects:
-            creates or modifies the raster indicated by
+            creates or modifies the geotiff raster indicated by
             `potential_biomass_path`
 
         Returns:
