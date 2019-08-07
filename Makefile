@@ -2,15 +2,15 @@
 DATA_DIR := data
 GIT_SAMPLE_DATA_REPO        := https://bitbucket.org/natcap/invest-sample-data.git
 GIT_SAMPLE_DATA_REPO_PATH   := $(DATA_DIR)/invest-sample-data
-GIT_SAMPLE_DATA_REPO_REV    := 2d615534d52e345ee7dc8bc898571c36b47dc6f1
+GIT_SAMPLE_DATA_REPO_REV    := 544b4822fe3193679723b6218f8b0618ae46f432
 
 GIT_TEST_DATA_REPO          := https://bitbucket.org/natcap/invest-test-data.git
 GIT_TEST_DATA_REPO_PATH     := $(DATA_DIR)/invest-test-data
-GIT_TEST_DATA_REPO_REV      := fd39f62d3cb69d0cd5604c3d76e4a4079b08deeb
+GIT_TEST_DATA_REPO_REV      := 687c255960157079c2190869c78be606e4836dbf
 
 HG_UG_REPO                  := https://bitbucket.org/natcap/invest.users-guide
 HG_UG_REPO_PATH             := doc/users-guide
-HG_UG_REPO_REV              := d96a8d657a85
+HG_UG_REPO_REV              := 0a6730f99679
 
 
 ENV = env
@@ -143,7 +143,7 @@ $(BUILD_DIR) $(DATA_DIR) $(DIST_DIR) $(DIST_DATA_DIR):
 test: $(GIT_TEST_DATA_REPO_PATH)
 	$(TESTRUNNER) tests
 
-test_ui:
+test_ui: $(GIT_TEST_DATA_REPO_PATH)
 	$(TESTRUNNER) ui_tests
 
 validate_sampledata: $(GIT_SAMPLE_DATA_REPO_PATH)
@@ -278,6 +278,7 @@ ZIPDIRS = Aquaculture \
 		  ScenicQuality \
 		  seasonal_water_yield \
 		  storm_impact \
+		  UrbanFloodMitigation \
 		  WaveEnergy \
 		  WindEnergy
 ZIPTARGETS = $(foreach dirname,$(ZIPDIRS),$(addprefix $(DIST_DATA_DIR)/,$(dirname).zip))
