@@ -18,6 +18,7 @@ import math
 
 import pygeoprocessing
 from natcap.invest import utils
+from natcap.invest import validation
 
 LOGGER = logging.getLogger('natcap.invest.forage')
 
@@ -13454,3 +13455,139 @@ def _write_monthly_outputs(
     # diet sufficiency
     shutil.copyfile(
         month_reg['diet_sufficiency'], output_val_dict['diet_sufficiency'])
+
+
+@validation.invest_validator
+def validate(args, limit_to=None):
+    """Validate args to ensure they conform to ``execute``'s contract.
+
+    Parameters:
+        args (dict): dictionary of key(str)/value pairs where keys and
+            values are specified in ``execute`` docstring.
+        limit_to (str): (optional) if not None indicates that validation
+            should only occur on the ``args[limit_to]`` value. The intent that
+            individual key validation could be significantly less expensive
+            than validating the entire ``args`` dictionary.
+
+    Returns:
+        list of ([invalid key_a, invalid_key_b, ...], 'warning/error message')
+            tuples. Where an entry indicates that the invalid keys caused
+            the error message in the second part of the tuple. This should
+            be an empty list if validation succeeds.
+
+    """
+    missing_key_list = []
+    no_value_list = []
+    validation_error_list = []
+
+    required_keys = [
+        'workspace_dir',
+        'n_months',
+        'starting_year',
+        'starting_month',
+        'aoi_path',
+        'management_threshold',
+        'proportion_legume_path',
+        'clay_proportion_path',
+        'silt_proportion_path',
+        'sand_proportion_path',
+        'bulk_density_path',
+        'ph_path',
+        'min_temp_path_pattern',
+        'max_temp_path_pattern',
+        'monthly_precip_path_pattern',
+        'monthly_vi_path_pattern',
+        'site_param_spatial_index_path',
+        'veg_spatial_composition_path_pattern',
+        'animal_grazing_areas_path',
+        'site_param_table',
+        'veg_trait_path',
+        'animal_trait_path',
+        'site_initial_table',
+        'pft_initial_table']
+
+    spatial_file_list = [
+        ('aoi_path', gdal.OF_VECTOR, 'vector'),
+        ('proportion_legume_path', gdal.OF_RASTER, 'raster'),
+        ('clay_proportion_path', gdal.OF_RASTER, 'raster'),
+        ('silt_proportion_path', gdal.OF_RASTER, 'raster'),
+        ('sand_proportion_path', gdal.OF_RASTER, 'raster'),
+        ('bulk_density_path', gdal.OF_RASTER, 'raster'),
+        ('ph_path', gdal.OF_RASTER, 'raster'),
+        ('site_param_spatial_index_path', gdal.OF_RASTER, 'raster'),
+        ('animal_grazing_areas_path', gdal.OF_VECTOR, 'vector')]
+
+    numeric_key_list = [
+        'n_months',
+        'starting_year',
+        'starting_month',
+        'management_threshold']
+
+    for key in required_keys:
+        if limit_to is None or limit_to == key:
+            if key not in args:
+                missing_key_list.append(key)
+            elif args[key] in ['', None]:
+                no_value_list.append(key)
+
+    if missing_key_list:
+        # if there are missing keys, we have raise KeyError to stop hard
+        raise KeyError(
+            "The following keys were expected in `args` but were missing: " +
+            ', '.join(missing_key_list))
+
+    if no_value_list:
+        validation_error_list.append(
+            (no_value_list, 'parameter has no value'))
+
+    # check that spatial input files are the correct types
+    # and are in geographic coordinates
+    with utils.capture_gdal_logging():
+        for key, filetype, filetype_string in spatial_file_list:
+            if limit_to not in (key, None):
+                continue
+
+            spatial_file = gdal.OpenEx(args[key], filetype)
+            if spatial_file is None:
+                validation_error_list.append(
+                    ([key], 'Must be a %s' % filetype_string))
+                continue
+
+            else:
+                if filetype_string == 'vector':
+                    input_proj = pygeoprocessing.get_vector_info(
+                        args[key])['projection']
+                else:
+                    input_proj = pygeoprocessing.get_raster_info(
+                        args[key])['projection']
+                input_srs = osr.SpatialReference()
+                input_srs.ImportFromWKt(input_proj)
+                if not bool(input_srs.IsGeographic()):
+                    validation_error_list.append(
+                        ([key], 'Must be in geographic coordinates'))
+
+                # check that animal grazing areas vector contains fields
+                # 'animal_id' and 'num_animal'
+                if key == 'animal_grazing_areas_path':
+                    graz_areas_layer = spatial_file.GetLayer()
+                    graz_areas_defn = graz_areas_layer.GetLayerDefn()
+                    if graz_areas_defn.GetFieldIndex('animal_id') == -1:
+                        validation_error_list.append((
+                                ['animal_grazing_areas_path'],
+                                'does not have a `animal_id` field defined.'))
+                    if graz_areas_defn.GetFieldIndex('num_animal') == -1:
+                        validation_error_list.append((
+                                ['animal_grazing_areas_path'],
+                                'does not have a `num_animal` field defined.'))
+            del spatial_file
+
+    for key in numeric_key_list:
+        if limit_to not in (key, None):
+            continue
+        try:
+            float(args[key])
+        except (ValueError, TypeError):
+            validation_error_list.append(
+                ([key], "Must be a number"))
+
+    return validation_error_list
