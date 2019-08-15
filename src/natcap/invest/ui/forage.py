@@ -4,13 +4,13 @@ from natcap.invest.ui import model, inputs
 import natcap.invest.forage
 
 
-class forage(model.InVESTModel):
+class Forage(model.InVESTModel):
     def __init__(self):
         model.InVESTModel.__init__(
             self,
             label=u'Rangeland Production',
-            target=forage.execute,
-            validator=forage.validate,
+            target=natcap.invest.forage.execute,
+            validator=natcap.invest.forage.validate,
             localdoc=u'forage.html'),
 
         self.n_months = inputs.Text(
@@ -192,7 +192,7 @@ class forage(model.InVESTModel):
             helptext=(
                 u"A GDAL-supported raster of integers giving site codes for "
                 "the area of interest. These site codes must match values in "
-                "the "site" column of the Site Parameter Table. The raster "
+                "the 'site' column of the Site Parameter Table. The raster "
                 "must contain integer values.  The raster must be in "
                 "geographic coordinates."),
             label=u'Site Spatial Index (Raster)',
@@ -311,7 +311,7 @@ class forage(model.InVESTModel):
 
     def assemble_args(self):
         args = {
-            self.workspace_dir.args_key: self.workspace_dir.value(),
+            self.workspace.args_key: self.workspace.value(),
             self.n_months.args_key: self.n_months.value(),
             self.starting_year.args_key: self.starting_year.value(),
             self.starting_month.args_key: self.starting_month.value(),
@@ -334,7 +334,8 @@ class forage(model.InVESTModel):
                 self.max_temp_path_pattern.value(),
             self.monthly_precip_path_pattern.args_key:
                 self.monthly_precip_path_pattern.value(),
-            self..args_key: self..value(),
+            self.monthly_vi_path_pattern.args_key:
+                self.monthly_vi_path_pattern.value(),
             self.site_param_spatial_index_path.args_key:
                 self.site_param_spatial_index_path.value(),
             self.veg_spatial_composition_path_pattern.args_key:
