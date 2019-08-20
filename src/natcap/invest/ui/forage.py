@@ -300,14 +300,6 @@ class Forage(model.InVESTModel):
             label=u'Initial Conditions: Plant Functional Type State Variables',
             validator=self.validator)
         self.add_input(self.pft_initial_table)
-        self.results_suffix = inputs.Text(
-            args_key=u'results_suffix',
-            helptext=(
-                u"A string that will be added to the end of the model output "
-                "files."),
-            label=u'Results Suffix',
-            validator=self.validator)
-        self.add_input(self.results_suffix)
 
     def assemble_args(self):
         args = {
@@ -347,7 +339,6 @@ class Forage(model.InVESTModel):
             self.animal_trait_path.args_key: self.animal_trait_path.value(),
             self.site_initial_table.args_key: self.site_initial_table.value(),
             self.pft_initial_table.args_key: self.pft_initial_table.value(),
-            self.results_suffix.args_key: self.results_suffix.value(),
         }
 
         return args
