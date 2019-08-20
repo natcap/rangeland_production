@@ -935,6 +935,15 @@ def execute(args):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    # provisional state variable registry contains provisional biomass in
+    #   absence of grazing
+    provisional_sv_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    provisional_sv_reg = utils.build_file_registry(
+        [(_SITE_STATE_VARIABLE_FILES, provisional_sv_dir),
+            (pft_sv_dict, provisional_sv_dir)], file_suffix)
+
+    intermediate_sv_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+
     # Main simulation loop
     # for each step in the simulation
     for month_index in xrange(n_months):
@@ -947,21 +956,8 @@ def execute(args):
         current_month = (starting_month + month_index - 1) % 12 + 1
         current_year = starting_year + (starting_month + month_index - 1) // 12
 
-        # make new folders for state variables during this step
-        sv_dir = os.path.join(
-            args['workspace_dir'], 'state_variables_m%d' % month_index)
-        utils.make_directories([sv_dir])
-
         # track state variables from previous step
         prev_sv_reg = sv_reg
-        sv_reg = utils.build_file_registry(
-            [(_SITE_STATE_VARIABLE_FILES, sv_dir),
-                (pft_sv_dict, sv_dir)], file_suffix)
-
-        # update state variables from previous month
-        LOGGER.info(
-            "Main simulation loop: month %d of %d" % (
-                month_index, n_months))
 
         for animal_id in animal_trait_table.keys():
             if animal_trait_table[animal_id]['sex'] == 'breeding_female':
@@ -972,14 +968,76 @@ def execute(args):
                 animal_trait_table[animal_id])
             animal_trait_table[animal_id] = revised_animal_trait_dict
 
+        # enforce absence of grazing as zero biomass removed
+        for pft_i in pft_id_set:
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['pft_{}'.format(pft_i)],
+                month_reg['flgrem_{}'.format(pft_i)], gdal.GDT_Float32,
+                [_TARGET_NODATA], fill_value_list=[0])
+            pygeoprocessing.new_raster_from_base(
+                aligned_inputs['pft_{}'.format(pft_i)],
+                month_reg['fdgrem_{}'.format(pft_i)], gdal.GDT_Float32,
+                [_TARGET_NODATA], fill_value_list=[0])
+
+        # populate provisional_sv_reg with provisional biomass in absence of
+        #   grazing
+        _potential_production(
+            aligned_inputs, site_param_table, current_month, month_index,
+            pft_id_set, veg_trait_table, prev_sv_reg, pp_reg, month_reg)
+        _root_shoot_ratio(
+            aligned_inputs, site_param_table, current_month, pft_id_set,
+            veg_trait_table, prev_sv_reg, year_reg, month_reg)
+        _soil_water(
+            aligned_inputs, site_param_table, veg_trait_table, current_month,
+            month_index, prev_sv_reg, pp_reg, pft_id_set, month_reg,
+            provisional_sv_reg)
+        _decomposition(
+            aligned_inputs, current_month, month_index, pft_id_set,
+            site_param_table, year_reg, month_reg, prev_sv_reg, pp_reg,
+            provisional_sv_reg)
+        _death_and_partition(
+            'stded', aligned_inputs, site_param_table, current_month,
+            year_reg, pft_id_set, veg_trait_table, prev_sv_reg,
+            provisional_sv_reg)
+        _death_and_partition(
+            'bgliv', aligned_inputs, site_param_table, current_month,
+            year_reg, pft_id_set, veg_trait_table, prev_sv_reg,
+            provisional_sv_reg)
+        _shoot_senescence(
+            pft_id_set, veg_trait_table, prev_sv_reg, month_reg, current_month,
+            provisional_sv_reg)
+        intermediate_sv_reg = copy_intermediate_sv(
+            pft_id_set, provisional_sv_reg, intermediate_sv_dir)
+        delta_agliv_dict = _new_growth(
+            pft_id_set, aligned_inputs, site_param_table, veg_trait_table,
+            month_reg, current_month, provisional_sv_reg)
+        _apply_new_growth(delta_agliv_dict, pft_id_set, provisional_sv_reg)
+
+        # estimate animal density from provisional biomass in the absence of
+        #   grazing vs observed biomass from earth observations
+        obs_biomass_path = os.path.join(
+            output_dir, 'observed_biomass_{}_{}.tif'.format(
+                current_year, current_month))
         _estimate_animal_density(
             aligned_inputs, month_index, pft_id_set, site_param_table,
-            args['animal_grazing_areas_path'], prev_sv_reg, month_reg)
+            args['animal_grazing_areas_path'], provisional_sv_reg,
+            obs_biomass_path, month_reg)
 
+        # estimate grazing offtake by animals relative to provisional biomass
+        #   at an intermediate step, after senescence but before new growth
         _calc_grazing_offtake(
             aligned_inputs, args['aoi_path'], args['management_threshold'],
-            prev_sv_reg, pft_id_set, aligned_inputs['animal_index'],
+            intermediate_sv_reg, pft_id_set, aligned_inputs['animal_index'],
             animal_trait_table, veg_trait_table, current_month, month_reg)
+
+        # estimate actual biomass production for this step, integrating impacts
+        #   of grazing
+        sv_dir = os.path.join(
+            args['workspace_dir'], 'state_variables_m%d' % month_index)
+        utils.make_directories([sv_dir])
+        sv_reg = utils.build_file_registry(
+            [(_SITE_STATE_VARIABLE_FILES, sv_dir),
+                (pft_sv_dict, sv_dir)], file_suffix)
 
         _potential_production(
             aligned_inputs, site_param_table, current_month, month_index,
@@ -1026,8 +1084,8 @@ def execute(args):
         _leach(aligned_inputs, site_param_table, month_reg, sv_reg)
 
         _write_monthly_outputs(
-            aligned_inputs, sv_reg, month_reg, pft_id_set, current_year,
-            current_month, output_dir)
+            aligned_inputs, provisional_sv_reg, sv_reg, month_reg, pft_id_set,
+            current_year, current_month, output_dir)
 
     # clean up
     shutil.rmtree(persist_param_dir)
@@ -4270,11 +4328,12 @@ def _root_shoot_ratio(
     # skip the rest of the function
     do_PFT = []
     for pft_i in pft_id_set:
-        if str(current_month) in veg_trait_table[pft_i]['growth_months']:
+        # growth occurs in growth months and when senescence not scheduled
+        do_growth = (
+            current_month != veg_trait_table[pft_i]['senescence_month'] and
+            str(current_month) in veg_trait_table[pft_i]['growth_months'])
+        if do_growth:
             do_PFT.append(pft_i)
-        else:
-            month_reg['tgprod_{}'.format(pft_i)] = None
-            month_reg['rtsh_{}'.format(pft_i)] = None
     if not do_PFT:
         return
 
@@ -4336,7 +4395,7 @@ def _root_shoot_ratio(
     # surface layer
     param_val_dict['favail_2'] = os.path.join(temp_dir, 'favail_2.tif')
     _calc_favail_P(prev_sv_reg, param_val_dict)
-    for pft_i in pft_id_set:
+    for pft_i in do_PFT:
         # fracrc_p, provisional fraction of C allocated to roots
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
@@ -5366,8 +5425,11 @@ def _soil_water(
     # calculate the weighted sum of tgprod, potential production, across PFTs
     weighted_path_list = []
     for pft_i in pft_id_set:
-        target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
-        if month_reg['tgprod_{}'.format(pft_i)]:
+        do_growth = (
+            current_month != veg_trait_table[pft_i]['senescence_month'] and
+            str(current_month) in veg_trait_table[pft_i]['growth_months'])
+        if do_growth:
+            target_path = temp_val_dict['tgprod_weighted_{}'.format(pft_i)]
             pft_nodata = pygeoprocessing.get_raster_info(
                 aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
             raster_multiplication(
@@ -10096,8 +10158,11 @@ def _new_growth(
                     veg_trait_table[pft_i], sv_reg, iel,
                     temp_val_dict['availm_{}_{}'.format(iel, pft_i)])
     for pft_i in pft_id_set:
-        # growth only occurs in months when senescence not scheduled
-        if current_month != veg_trait_table[pft_i]['senescence_month']:
+        # growth occurs in growth months and when senescence not scheduled
+        do_growth = (
+            current_month != veg_trait_table[pft_i]['senescence_month'] and
+            str(current_month) in veg_trait_table[pft_i]['growth_months'])
+        if do_growth:
             # calculate available nutrients
             for iel in [1, 2]:
                 # eavail_iel, available nutrient
@@ -13129,7 +13194,7 @@ def sum_c_to_biomass(sum_aglivc, sum_stdedc):
 
 def _estimate_animal_density(
         aligned_inputs, month_index, pft_id_set, site_param_table,
-        animal_grazing_areas_path, sv_reg, month_reg):
+        animal_grazing_areas_path, sv_reg, obs_biomass_path, month_reg):
     """Estimate the density of grazing animals on each pixel of the study area.
 
     Calculate observed biomass for the current month from a remotely sensed
@@ -13156,6 +13221,7 @@ def _estimate_animal_density(
         sv_reg (dict): map of key, path pairs giving paths to state variables,
             including carbon in aboveground biomass for each plant functional
             type
+        obs_biomass_path (string): path to output location where observed
             biomass for this timestep should be saved as geotiff
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
@@ -13305,9 +13371,8 @@ def _estimate_animal_density(
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in [
-            'biomass_obs', 'biomass_potential', 'biomass_diff',
-            'animal_mgmt_features', 'total_animals', 'sum_biomass_diff',
-            'proportional_diff']:
+            'biomass_potential', 'biomass_diff', 'animal_mgmt_features',
+            'total_animals', 'sum_biomass_diff', 'proportional_diff']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     temp_val_dict['animal_mgmt_copy'] = os.path.join(
         temp_dir, 'animal_mgmt_copy.shp')
@@ -13329,15 +13394,15 @@ def _estimate_animal_density(
             aligned_inputs['EO_index_{}'.format(month_index)],
             param_val_dict['eo_biomass_intercept'],
             param_val_dict['eo_biomass_slope']]],
-        calc_observed_biomass, temp_val_dict['biomass_obs'],
-        gdal.GDT_Float32, _TARGET_NODATA)
+        calc_observed_biomass, obs_biomass_path, gdal.GDT_Float32,
+        _TARGET_NODATA)
     calc_potential_biomass(
         aligned_inputs, sv_reg, pft_id_set, temp_val_dict['biomass_potential'])
 
     # calculate biomass mismatch, setting negative pixels to 0
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
-            temp_val_dict['biomass_obs'], temp_val_dict['biomass_potential']]],
+            obs_biomass_path, temp_val_dict['biomass_potential']]],
         calc_biomass_diff, temp_val_dict['biomass_diff'],
         gdal.GDT_Float32, _TARGET_NODATA)
 
@@ -13385,8 +13450,8 @@ def _estimate_animal_density(
 
 
 def _write_monthly_outputs(
-        aligned_inputs, sv_reg, month_reg, pft_id_set, current_year,
-        current_month, output_dir):
+        aligned_inputs, provisional_sv_reg, sv_reg, month_reg, pft_id_set,
+        current_year, current_month, output_dir):
     """Collect outputs from current state variable and monthly directories.
 
     Collect model outputs from the ending state of the model at the current
@@ -13396,9 +13461,10 @@ def _write_monthly_outputs(
         aligned_inputs (dict): map of key, path pairs indicating paths
             to aligned model inputs, including fractional cover of each plant
             functional type
+        provisional_sv_reg (dict): map of key, path pairs giving paths to state
+            variables for the current month in the absence of grazing
         sv_reg (dict): map of key, path pairs giving paths to state variables
-            for the current month, including aboveground biomass of all plant
-            functional types
+            for the current month integrating impacts of grazing
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             density of grazing animals
@@ -13410,6 +13476,9 @@ def _write_monthly_outputs(
 
     Side effects:
         creates the following rasters in the output_dir directory:
+            potential_biomass_<year>_<month>.tif, total modeled biomass in
+                kg/ha in the absence of grazing, including live and
+                standing dead fractions of all plant functional types
             standing_biomass_<year>_<month>.tif, total modeled biomass in
                 kg/ha after offtake by grazing animals, including live and
                 standing dead fractions of all plant functional types
@@ -13429,12 +13498,28 @@ def _write_monthly_outputs(
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
 
     output_val_dict = {}
-    for val in ['standing_biomass', 'animal_density', 'diet_sufficiency']:
+    for val in [
+            'potential_biomass', 'standing_biomass', 'animal_density',
+            'diet_sufficiency']:
         output_val_dict[val] = os.path.join(
             output_dir, '{}_{}_{}.tif'.format(
                 val, current_year, current_month))
 
-    # total weighted C in aboveground live and standing dead biomass
+    # total weighted C in aboveground biomass in the absence of grazing
+    weighted_state_variable_sum(
+        'aglivc', provisional_sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_aglivc'])
+    weighted_state_variable_sum(
+        'stdedc', provisional_sv_reg, aligned_inputs, pft_id_set,
+        temp_val_dict['weighted_sum_stdedc'])
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            temp_val_dict['weighted_sum_aglivc'],
+            temp_val_dict['weighted_sum_stdedc']]],
+        sum_c_to_biomass, output_val_dict['potential_biomass'],
+        gdal.GDT_Float32, _TARGET_NODATA)
+
+    # total weighted C in aboveground biomass including impacts of grazing
     weighted_state_variable_sum(
         'aglivc', sv_reg, aligned_inputs, pft_id_set,
         temp_val_dict['weighted_sum_aglivc'])
@@ -13455,6 +13540,55 @@ def _write_monthly_outputs(
     # diet sufficiency
     shutil.copyfile(
         month_reg['diet_sufficiency'], output_val_dict['diet_sufficiency'])
+
+    # clean up
+    shutil.rmtree(temp_dir)
+
+
+def copy_intermediate_sv(pft_id_set, sv_reg, intermediate_sv_dir):
+    """Copy state variables representing biomass available for grazing.
+
+    Following Century, grazing animals select their diet from available biomass
+    at an intermediate step following the senescence of live biomass into
+    standing dead, but prior to the application of new growth. Copy the
+    relevant state variables from the provisional state variable registry into
+    an intermediate registry from which animals should select their diet.
+
+    Parameters:
+        pft_id_set (set): set of integers identifying plant functional types
+        sv_reg (dict): map of key, path pairs giving paths to state
+            variables, including C and N in aboveground live and standing dead
+        intermediate_sv_dir (string): path to directory where copied state
+            variable rasters should be stored
+
+    Side effects:
+        creates or modifies the following files in `intermediate_sv_dir`:
+            aglivc_<pft>.tif for each plant functional type
+            stdedc_<pft>.tif for each plant functional type
+            aglive_1_<pft>.tif for each plant functional type
+            stdede_1_<pft>.tif for each plant functional type
+
+    Returns:
+        intermediate_sv_reg (dict), map of key, path pairs giving paths to
+            state variables representing carbon and nitrogen in aboveground
+            biomass at an intermediate step following senescence but prior to
+            application of new growth
+
+    """
+    intermediate_sv_reg = {}
+    for pft_i in pft_id_set:
+        for statv in ['agliv', 'stded']:
+            # copy raster indicating carbon in this state variable
+            c_key = '{}c_{}_path'.format(statv, pft_i)
+            intermediate_sv_reg[c_key] = os.path.join(
+                intermediate_sv_dir, '{}c_{}.tif'.format(statv, pft_i))
+            shutil.copyfile(sv_reg[c_key], intermediate_sv_reg[c_key])
+            # copy raster indicating nitrogen in this state variable
+            n_key = '{}e_1_{}_path'.format(statv, pft_i)
+            intermediate_sv_reg[n_key] = os.path.join(
+                intermediate_sv_dir, '{}_e_1_{}.tif'.format(statv, pft_i))
+            shutil.copyfile(sv_reg[n_key], intermediate_sv_reg[n_key])
+    return intermediate_sv_reg
 
 
 @validation.invest_validator
