@@ -18,6 +18,7 @@ import math
 
 import pygeoprocessing
 from natcap.invest import utils
+from natcap.invest import validation
 
 LOGGER = logging.getLogger('natcap.invest.forage')
 
@@ -13528,6 +13529,9 @@ def _write_monthly_outputs(
     # diet sufficiency
     shutil.copyfile(
         month_reg['diet_sufficiency'], output_val_dict['diet_sufficiency'])
+
+    # clean up
+    shutil.rmtree(temp_dir)
 
     # clean up
     shutil.rmtree(temp_dir)
