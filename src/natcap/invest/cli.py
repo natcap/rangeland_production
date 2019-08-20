@@ -23,10 +23,110 @@ LOGGER = logging.getLogger(__name__)
 _UIMETA = collections.namedtuple('UIMeta', 'pyname gui aliases')
 
 _MODEL_UIS = {
-    'rangelands': _UIMETA(
-        pyname='natcap.invest.forage',
-        gui='forage.Forage',
-        aliases=('RPM')),
+    'carbon': _UIMETA(
+        pyname='natcap.invest.carbon',
+        gui='carbon.Carbon',
+        aliases=()),
+    'coastal_blue_carbon': _UIMETA(
+        pyname='natcap.invest.coastal_blue_carbon.coastal_blue_carbon',
+        gui='cbc.CoastalBlueCarbon',
+        aliases=('cbc',)),
+    'coastal_blue_carbon_preprocessor': _UIMETA(
+        pyname='natcap.invest.coastal_blue_carbon.preprocessor',
+        gui='cbc.CoastalBlueCarbonPreprocessor',
+        aliases=('cbc_pre',)),
+    'coastal_vulnerability': _UIMETA(
+        pyname='natcap.invest.coastal_vulnerability',
+        gui='coastal_vulnerability.CoastalVulnerability',
+        aliases=('cv',)),
+    'crop_production_percentile': _UIMETA(
+        pyname='natcap.invest.crop_production_percentile',
+        gui='crop_production.CropProductionPercentile',
+        aliases=('cpp',)),
+    'crop_production_regression': _UIMETA(
+        pyname='natcap.invest.crop_production_regression',
+        gui='crop_production.CropProductionRegression',
+        aliases=('cpr',)),
+    'delineateit': _UIMETA(
+        pyname='natcap.invest.delineateit',
+        gui='delineateit.Delineateit',
+        aliases=()),
+    'finfish_aquaculture': _UIMETA(
+        pyname='natcap.invest.finfish_aquaculture.finfish_aquaculture',
+        gui='finfish.FinfishAquaculture',
+        aliases=()),
+    'fisheries': _UIMETA(
+        pyname='natcap.invest.fisheries.fisheries',
+        gui='fisheries.Fisheries',
+        aliases=()),
+    'fisheries_hst': _UIMETA(
+        pyname='natcap.invest.fisheries.fisheries_hst',
+        gui='fisheries.FisheriesHST',
+        aliases=()),
+    'forest_carbon_edge_effect': _UIMETA(
+        pyname='natcap.invest.forest_carbon_edge_effect',
+        gui='forest_carbon.ForestCarbonEdgeEffect',
+        aliases=('fc',)),
+    'globio': _UIMETA(
+        pyname='natcap.invest.globio',
+        gui='globio.GLOBIO',
+        aliases=()),
+    'habitat_quality': _UIMETA(
+        pyname='natcap.invest.habitat_quality',
+        gui='habitat_quality.HabitatQuality',
+        aliases=('hq',)),
+    'habitat_risk_assessment': _UIMETA(
+        pyname='natcap.invest.hra',
+        gui='hra.HabitatRiskAssessment',
+        aliases=('hra',)),
+    'hydropower_water_yield': _UIMETA(
+        pyname='natcap.invest.hydropower.hydropower_water_yield',
+        gui='hydropower.HydropowerWaterYield',
+        aliases=('hwy',)),
+    'ndr': _UIMETA(
+        pyname='natcap.invest.ndr.ndr',
+        gui='ndr.Nutrient',
+        aliases=()),
+    'pollination': _UIMETA(
+        pyname='natcap.invest.pollination',
+        gui='pollination.Pollination',
+        aliases=()),
+    'recreation': _UIMETA(
+        pyname='natcap.invest.recreation.recmodel_client',
+        gui='recreation.Recreation',
+        aliases=()),
+    'routedem': _UIMETA(
+        pyname='natcap.invest.routedem',
+        gui='routedem.RouteDEM',
+        aliases=()),
+    'scenario_generator_proximity': _UIMETA(
+        pyname='natcap.invest.scenario_gen_proximity',
+        gui='scenario_gen.ScenarioGenProximity',
+        aliases=('sgp',)),
+    'scenic_quality': _UIMETA(
+        pyname='natcap.invest.scenic_quality.scenic_quality',
+        gui='scenic_quality.ScenicQuality',
+        aliases=('sq',)),
+    'sdr': _UIMETA(
+        pyname='natcap.invest.sdr',
+        gui='sdr.SDR',
+        aliases=()),
+    'seasonal_water_yield': _UIMETA(
+        pyname='natcap.invest.seasonal_water_yield.seasonal_water_yield',
+        gui='seasonal_water_yield.SeasonalWaterYield',
+        aliases=('swy',)),
+    'wind_energy': _UIMETA(
+        pyname='natcap.invest.wind_energy',
+        gui='wind_energy.WindEnergy',
+        aliases=()),
+    'wave_energy': _UIMETA(
+        pyname='natcap.invest.wave_energy',
+        gui='wave_energy.WaveEnergy',
+        aliases=()),
+    'urban_flood_risk_mitigation': _UIMETA(
+        pyname='natcap.invest.urban_flood_risk_mitigation',
+        gui='urban_flood_risk_mitigation.UrbanFloodRiskMitigation',
+        aliases=('ufrm',)),
 }
 
 # Build up an index mapping aliase to modelname.
