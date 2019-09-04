@@ -93,21 +93,21 @@ DOWNLOAD_DIR_URL := $(subst gs://,https://storage.googleapis.com/,$(DIST_URL_BAS
 DATA_BASE_URL := $(DOWNLOAD_DIR_URL)/data
 
 
-TESTRUNNER := $(PYTHON) -m nose -vsP --with-coverage --cover-package=natcap.invest --cover-erase --with-xunit --cover-tests --cover-html --cover-xml --logging-level=DEBUG --with-timer
+TESTRUNNER := $(PYTHON) -m nose -vsP --with-coverage --cover-package=rangeland_production --cover-erase --with-xunit --cover-tests --cover-html --cover-xml --logging-level=DEBUG --with-timer
 
 DATAVALIDATOR := $(PYTHON) scripts/invest-autovalidate.py $(GIT_SAMPLE_DATA_REPO_PATH)
 TEST_DATAVALIDATOR := $(PYTHON) -m nose -vsP scripts/invest-autovalidate.py
 
 # Target names.
-INVEST_BINARIES_DIR := $(DIST_DIR)/invest
+INVEST_BINARIES_DIR := $(DIST_DIR)/rangeland_production
 APIDOCS_HTML_DIR := $(DIST_DIR)/apidocs
-APIDOCS_ZIP_FILE := $(DIST_DIR)/InVEST_$(VERSION)_apidocs.zip
+APIDOCS_ZIP_FILE := $(DIST_DIR)/rangeland_production_$(VERSION)_apidocs.zip
 USERGUIDE_HTML_DIR := $(DIST_DIR)/userguide
-USERGUIDE_PDF_FILE := $(DIST_DIR)/InVEST_$(VERSION)_Documentation.pdf
-USERGUIDE_ZIP_FILE := $(DIST_DIR)/InVEST_$(VERSION)_userguide.zip
-MAC_DISK_IMAGE_FILE := "$(DIST_DIR)/InVEST_$(VERSION).dmg"
-MAC_BINARIES_ZIP_FILE := "$(DIST_DIR)/InVEST-$(VERSION)-mac.zip"
-MAC_APPLICATION_BUNDLE := "$(BUILD_DIR)/mac_app_$(VERSION)/InVEST.app"
+USERGUIDE_PDF_FILE := $(DIST_DIR)/rangeland_production_$(VERSION)_Documentation.pdf
+USERGUIDE_ZIP_FILE := $(DIST_DIR)/rangeland_production_$(VERSION)_userguide.zip
+MAC_DISK_IMAGE_FILE := "$(DIST_DIR)/rangeland_production_$(VERSION).dmg"
+MAC_BINARIES_ZIP_FILE := "$(DIST_DIR)/rangeland_production-$(VERSION)-mac.zip"
+MAC_APPLICATION_BUNDLE := "$(BUILD_DIR)/mac_app_$(VERSION)/rangeland_production.app"
 
 
 .PHONY: fetch install binaries apidocs userguide windows_installer mac_installer sampledata sampledata_single test test_ui clean help check python_packages jenkins purge mac_zipfile deploy signcode
@@ -122,11 +122,11 @@ help:
 	@echo "  check             to verify all needed programs and packages are installed"
 	@echo "  env               to create a virtualenv with packages from requirements.txt, requirements-dev.txt"
 	@echo "  fetch             to clone all managed repositories"
-	@echo "  install           to build and install a wheel of natcap.invest into the active python installation"
+	@echo "  install           to build and install a wheel of rangeland_production into the active python installation"
 	@echo "  binaries          to build pyinstaller binaries"
 	@echo "  apidocs           to build HTML API documentation"
 	@echo "  userguide         to build HTML and PDF versions of the user's guide"
-	@echo "  python_packages   to build natcap.invest wheel and source distributions"
+	@echo "  python_packages   to build rangeland_production wheel and source distributions"
 	@echo "  windows_installer to build an NSIS installer for distribution"
 	@echo "  mac_installer     to build a disk image for distribution"
 	@echo "  sampledata        to build sample data zipfiles"
@@ -153,7 +153,7 @@ validate_sampledata: $(GIT_SAMPLE_DATA_REPO_PATH)
 clean:
 	$(PYTHON) setup.py clean
 	-$(RMDIR) $(BUILD_DIR)
-	-$(RMDIR) natcap.invest.egg-info
+	-$(RMDIR) rangeland_production.egg-info
 	-$(RMDIR) cover
 	-$(RM) coverage.xml
 
@@ -197,21 +197,21 @@ env:
 # compatible with pip>=7.0.0
 # REQUIRED: Need to remove natcap.invest.egg-info directory so recent versions
 # of pip don't think CWD is a valid package.
-install: $(DIST_DIR)/natcap.invest%.whl
-	-$(RMDIR) natcap.invest.egg-info
-	$(PIP) install --isolated --upgrade --only-binary natcap.invest --find-links=dist natcap.invest
+install: $(DIST_DIR)/rangeland_production%.whl
+	-$(RMDIR) rangeland_production.egg-info
+	$(PIP) install --isolated --upgrade --only-binary rangeland_production --find-links=dist rangeland_production
 
 
 # Bulid python packages and put them in dist/
-python_packages: $(DIST_DIR)/natcap.invest%.whl $(DIST_DIR)/natcap.invest%.zip
-$(DIST_DIR)/natcap.invest%.whl: | $(DIST_DIR)
+python_packages: $(DIST_DIR)/rangeland_production%.whl $(DIST_DIR)/rangeland_production%.zip
+$(DIST_DIR)/rangeland_production%.whl: | $(DIST_DIR)
 	$(PYTHON) setup.py bdist_wheel
 
-$(DIST_DIR)/natcap.invest%.zip: | $(DIST_DIR)
+$(DIST_DIR)/rangeland_production%.zip: | $(DIST_DIR)
 	$(PYTHON) setup.py sdist --formats=zip
 
 
-# Build binaries and put them in dist/invest
+# Build binaries and put them in dist/rangeland_production
 # The `invest --list` is to test the binaries.  If something doesn't
 # import, we want to know right away.  No need to provide the `.exe` extension
 # on Windows as the .exe extension is assumed.
@@ -219,14 +219,14 @@ binaries: $(INVEST_BINARIES_DIR)
 $(INVEST_BINARIES_DIR): | $(DIST_DIR) $(BUILD_DIR)
 	-$(RMDIR) $(BUILD_DIR)/pyi-build
 	-$(RMDIR) $(INVEST_BINARIES_DIR)
-	$(PYTHON) -m PyInstaller --workpath $(BUILD_DIR)/pyi-build --clean --distpath $(DIST_DIR) exe/invest.spec
+	$(PYTHON) -m PyInstaller --workpath $(BUILD_DIR)/pyi-build --clean --distpath $(DIST_DIR) exe/rangeland_production.spec
 	$(BASHLIKE_SHELL_COMMAND) "$(PYTHON) -m pip freeze --all > $(INVEST_BINARIES_DIR)/package_versions.txt"
-	$(INVEST_BINARIES_DIR)/invest --list
+	$(INVEST_BINARIES_DIR)/rangeland_production --list
 
 # Documentation.
 # API docs are copied to dist/apidocs
 # Userguide HTML docs are copied to dist/userguide
-# Userguide PDF file is copied to dist/InVEST_<version>_.pdf
+# Userguide PDF file is copied to dist/rangeland_production_<version>_.pdf
 apidocs: $(APIDOCS_HTML_DIR) $(APIDOCS_ZIP_FILE)
 $(APIDOCS_HTML_DIR): | $(DIST_DIR)
 	$(PYTHON) setup.py build_sphinx -a --source-dir doc/api-docs
@@ -240,7 +240,7 @@ $(USERGUIDE_PDF_FILE): $(HG_UG_REPO_PATH) | $(DIST_DIR)
 	-$(RMDIR) build/userguide/latex
 	$(MAKE) -C doc/users-guide SPHINXBUILD=sphinx-build BUILDDIR=../../build/userguide latex
 	$(MAKE) -C build/userguide/latex all-pdf
-	$(CP) build/userguide/latex/InVEST*.pdf dist
+	$(CP) build/userguide/latex/rangeland_production*.pdf dist
 
 $(USERGUIDE_HTML_DIR): $(HG_UG_REPO_PATH) | $(DIST_DIR)
 	$(MAKE) -C doc/users-guide SPHINXBUILD=sphinx-build BUILDDIR=../../build/userguide html
@@ -290,7 +290,7 @@ $(DIST_DATA_DIR)/Terrestrial.zip: DATADIR=Base_Data/
 $(DIST_DATA_DIR)/%.zip: $(DIST_DATA_DIR) $(GIT_SAMPLE_DATA_REPO_PATH)
 	cd $(GIT_SAMPLE_DATA_REPO_PATH); $(BASHLIKE_SHELL_COMMAND) "zip -r $(addprefix ../../,$@) $(subst $(DIST_DATA_DIR)/,$(DATADIR),$(subst .zip,,$@))"
 
-SAMPLEDATA_SINGLE_ARCHIVE := dist/InVEST_$(VERSION)_sample_data.zip
+SAMPLEDATA_SINGLE_ARCHIVE := dist/rangeland_production_$(VERSION)_sample_data.zip
 sampledata_single: $(SAMPLEDATA_SINGLE_ARCHIVE)
 
 $(SAMPLEDATA_SINGLE_ARCHIVE): $(GIT_SAMPLE_DATA_REPO_PATH) dist
@@ -298,18 +298,18 @@ $(SAMPLEDATA_SINGLE_ARCHIVE): $(GIT_SAMPLE_DATA_REPO_PATH) dist
 
 
 # Installers for each platform.
-# Windows (NSIS) installer is written to dist/InVEST_<version>_x86_Setup.exe
-# Mac (DMG) disk image is written to dist/InVEST <version>.dmg
+# Windows (NSIS) installer is written to dist/rangeland_production_<version>_x86_Setup.exe
+# Mac (DMG) disk image is written to dist/rangeland_production <version>.dmg
 ifeq ($(FORKUSER), natcap)
 	INSTALLER_NAME_FORKUSER :=
 else
 	INSTALLER_NAME_FORKUSER := $(FORKUSER)
 endif
-WINDOWS_INSTALLER_FILE := $(DIST_DIR)/InVEST_$(INSTALLER_NAME_FORKUSER)$(VERSION)_$(PYTHON_ARCH)_Setup.exe
+WINDOWS_INSTALLER_FILE := $(DIST_DIR)/rangeland_production_$(INSTALLER_NAME_FORKUSER)$(VERSION)_$(PYTHON_ARCH)_Setup.exe
 windows_installer: $(WINDOWS_INSTALLER_FILE)
 $(WINDOWS_INSTALLER_FILE): $(INVEST_BINARIES_DIR) $(USERGUIDE_HTML_DIR) $(USERGUIDE_PDF_FILE) build/vcredist_x86.exe $(GIT_SAMPLE_DATA_REPO_PATH)
 	-$(RM) $(WINDOWS_INSTALLER_FILE)
-	makensis /DVERSION=$(VERSION) /DBINDIR=$(INVEST_BINARIES_DIR) /DARCHITECTURE=$(PYTHON_ARCH) /DFORKNAME=$(INSTALLER_NAME_FORKUSER) /DDATA_LOCATION=$(DATA_BASE_URL) installer\windows\invest_installer.nsi
+	makensis /DVERSION=$(VERSION) /DBINDIR=$(INVEST_BINARIES_DIR) /DARCHITECTURE=$(PYTHON_ARCH) /DFORKNAME=$(INSTALLER_NAME_FORKUSER) /DDATA_LOCATION=$(DATA_BASE_URL) installer\windows\rangeland_production_installer.nsi
 
 mac_app: $(MAC_APPLICATION_BUNDLE)
 $(MAC_APPLICATION_BUNDLE): $(BUILD_DIR) $(INVEST_BINARIES_DIR)
