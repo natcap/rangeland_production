@@ -19,7 +19,7 @@ __pycache__/
 ^lib/
 ^lib64/
 ^sdist/
-^natcap\.invest\.egg-info/
+^rangeland_production\.egg-info/
 \.egg$
 
 # Unit test / coverage reports

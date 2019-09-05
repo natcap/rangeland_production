@@ -22,7 +22,7 @@ except ImportError:
 
 from osgeo import gdal
 from osgeo import osr
-import natcap.invest
+import rangeland_production
 import pygeoprocessing
 
 from .. import utils
@@ -213,7 +213,7 @@ def _log_exit_status(session_id, status):
     Returns:
         None
     """
-    logger = logging.getLogger('natcap.invest.ui.usage._log_exit_status')
+    logger = logging.getLogger('rangeland_production.ui.usage._log_exit_status')
 
     try:
         payload = {
@@ -243,7 +243,7 @@ def _log_model(model_name, model_args, session_id=None):
     Returns:
         None
     """
-    logger = logging.getLogger('natcap.invest.ui.usage._log_model')
+    logger = logging.getLogger('rangeland_production.ui.usage._log_model')
 
     def _node_hash():
         """Return a hash for the current computational node."""

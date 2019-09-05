@@ -11,9 +11,9 @@ from qtpy import QtGui
 try:
     from .. import cli
 except ImportError:
-    import natcap.invest.cli as cli
+    import rangeland_production.cli as cli
 
-import natcap.invest
+import rangeland_production
 
 LOGGER = logging.getLogger(__name__)
 

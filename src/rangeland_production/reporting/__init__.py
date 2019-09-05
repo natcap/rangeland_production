@@ -6,7 +6,7 @@ import codecs
 import re
 import copy
 
-from ... import invest
+from .. import rangeland_production
 from .. import utils
 from osgeo import gdal
 from . import table_generator
@@ -17,8 +17,9 @@ except ImportError:
     # Python3 doesn't have a basestring.
     basestring = str
 
-LOGGER = logging.getLogger('natcap.invest.reporting')
-REPORTING_DATA = os.path.join(invest.local_dir(__file__), 'reporting_data/')
+LOGGER = logging.getLogger('rangeland_production.reporting')
+REPORTING_DATA = os.path.join(
+    rangeland_production.local_dir(__file__), 'reporting_data/')
 JQUERY_URI = os.path.join(REPORTING_DATA, 'jquery-1.10.2.min.js')
 SORTTABLE_URI = os.path.join(REPORTING_DATA, 'sorttable.js')
 TOTALS_URI = os.path.join(REPORTING_DATA, 'total_functions.js')
