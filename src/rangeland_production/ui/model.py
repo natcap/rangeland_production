@@ -38,7 +38,6 @@ import qtawesome
 import rangeland_production
 
 from . import inputs
-from . import usage
 from . import execution
 from .. import utils
 from .. import datastack
@@ -1627,26 +1626,22 @@ class InVESTModel(QtWidgets.QMainWindow):
                 logging, inputs.INVEST_SETTINGS.value('logging/taskgraph', 'ERROR'))
             logging.getLogger('taskgraph').setLevel(taskgraph_log_level)
 
-            threads_to_exclude = [usage._USAGE_LOGGING_THREAD_NAME]
-
             with utils.prepare_workspace(args['workspace_dir'],
                                          name,
-                                         logging_level=logfile_log_level,
-                                         exclude_threads=threads_to_exclude):
-                with usage.log_run(self.target.__module__, args):
-                    LOGGER.log(datastack.ARGS_LOG_LEVEL,
-                               'Starting model with parameters: \n%s',
-                               datastack.format_args_dict(
-                                   args, self.target.__module__))
+                                         logging_level=logfile_log_level):
+                LOGGER.log(datastack.ARGS_LOG_LEVEL,
+                           'Starting model with parameters: \n%s',
+                           datastack.format_args_dict(
+                               args, self.target.__module__))
 
-                    try:
-                        return self.target(args=args)
-                    except Exception:
-                        LOGGER.exception('Exception while executing %s',
-                                         self.target)
-                        raise
-                    finally:
-                        LOGGER.info('Execution finished')
+                try:
+                    return self.target(args=args)
+                except Exception:
+                    LOGGER.exception('Exception while executing %s',
+                                     self.target)
+                    raise
+                finally:
+                    LOGGER.info('Execution finished')
 
         self.form.run(target=_logged_target,
                       window_title='Running %s' % self.label,

@@ -22,127 +22,8 @@ DEFAULT_EXIT_CODE = 1
 LOGGER = logging.getLogger(__name__)
 _UIMETA = collections.namedtuple('UIMeta', 'pyname gui aliases')
 
-_MODEL_UIS = {
-    'rangelands': _UIMETA(
-        pyname='rangeland_production.forage',
-        gui='forage.Forage',
-        aliases=('RPM')),
-}
-
-# Build up an index mapping aliase to modelname.
-# ``modelname`` is the key to the _MODEL_UIS dict, above.
-_MODEL_ALIASES = {}
-for _modelname, _meta in _MODEL_UIS.items():
-    for _alias in _meta.aliases:
-        assert _alias not in _MODEL_ALIASES, (
-            'Alias %s already defined for model %s') % (
-                _alias, _MODEL_ALIASES[_alias])
-        _MODEL_ALIASES[_alias] = _modelname
-
-
-def build_model_list_table():
-    """Build a table of model names, aliases and other details.
-
-    This table is a table only in the sense that its contents are aligned
-    into columns, but are not separated by a delimited.  This table
-    is intended to be printed to stdout.
-
-    Returns:
-        A string representation of the formatted table.
-    """
-    model_names = sorted(_MODEL_UIS.keys())
-    max_model_name_length = max(len(name) for name in model_names)
-    max_alias_name_length = max(len(', '.join(meta.aliases))
-                                for meta in _MODEL_UIS.values())
-    template_string = '    {modelname} {aliases}   {usage}'
-    strings = ['Available models:']
-    for model_name in sorted(_MODEL_UIS.keys()):
-        usage_string = '(No GUI available)'
-        if _MODEL_UIS[model_name].gui is not None:
-            usage_string = ''
-
-        alias_string = ', '.join(_MODEL_UIS[model_name].aliases)
-        if alias_string:
-            alias_string = '(%s)' % alias_string
-
-        strings.append(template_string.format(
-            modelname=model_name.ljust(max_model_name_length),
-            aliases=alias_string.ljust(max_alias_name_length),
-            usage=usage_string))
-    return '\n'.join(strings) + '\n'
-
-
-class ListModelsAction(argparse.Action):
-    """An argparse action to list the available models."""
-    def __call__(self, parser, namespace, values, option_string=None):
-        """Print the available models and quit the argparse parser.
-
-        See https://docs.python.org/2.7/library/argparse.html#action-classes
-        for the full documentation for argparse classes.
-
-        Overridden from argparse.Action.__call__"""
-        setattr(namespace, self.dest, self.const)
-        parser.exit(message=build_model_list_table())
-
-
-class SelectModelAction(argparse.Action):
-    """Given a possily-ambiguous model string, identify the model to run.
-
-    This is a subclass of ``argparse.Action`` and is executed when the argparse
-    interface detects that the user has attempted to select a model by name.
-    """
-    def __call__(self, parser, namespace, values, option_string=None):
-        """Given the user's input, determine which model they're referring to.
-
-        When the user didn't provide a model name, we print the help and exit
-        with a nonzero exit code.
-
-        Identifiable model names are:
-
-            * the model name (verbatim) as identified in the keys of _MODEL_UIS
-            * a uniquely identifiable prefix for the model name (e.g. "d"
-              matches "delineateit", but "fi" matches both "fisheries" and
-              "finfish"
-            * a known model alias, as registered in _MODEL_UIS
-
-        If no single model can be identified based on these rules, an error
-        message is printed and the parser exits with a nonzero exit code.
-
-        See https://docs.python.org/2.7/library/argparse.html#action-classes
-        for the full documentation for argparse classes and this __call__
-        method.
-
-        Overridden from argparse.Action.__call__"""
-        if values in ['', None]:
-            parser.print_help()
-            parser.exit(1, message=build_model_list_table())
-        else:
-            known_models = sorted(list(_MODEL_UIS.keys()) + ['launcher'])
-
-            matching_models = [model for model in known_models if
-                               model.startswith(values)]
-
-            exact_matches = [model for model in known_models if
-                             model == values]
-
-            if len(matching_models) == 1:  # match an identifying substring
-                modelname = matching_models[0]
-            elif len(exact_matches) == 1:  # match an exact modelname
-                modelname = exact_matches[0]
-            elif values in _MODEL_ALIASES:  # match an alias
-                modelname = _MODEL_ALIASES[values]
-            elif len(matching_models) == 0:
-                parser.exit(status=1, message=(
-                    "Error: '%s' not a known model" % values))
-            else:
-                parser.exit(
-                    status=1,
-                    message=(
-                        "Model string '{model}' is ambiguous:\n"
-                        "    {matching_models}").format(
-                            model=values,
-                            matching_models=' '.join(matching_models)))
-        setattr(namespace, self.dest, modelname)
+_PYNAME = 'rangeland_production.forage'
+_GUI_CLASS = 'forage.Forage'
 
 
 def main(user_args=None):
@@ -168,7 +49,7 @@ def main(user_args=None):
     import rangeland_production
 
     parser.add_argument('--version', action='version',
-                        version='0.1.0')  # TODO rangeland_production.__version__)
+                        version=rangeland_production.__version__)
     verbosity_group.add_argument('-v', '--verbose', dest='verbosity', default=0,
                                  action='count', help=(
                                      'Increase verbosity. Affects how much is '
@@ -179,9 +60,6 @@ def main(user_args=None):
                                  default=logging.CRITICAL,
                                  action='store_const', const=logging.DEBUG,
                                  help='Enable debug logging. Alias for -vvvvv')
-    list_group.add_argument('--list', action=ListModelsAction,
-                            nargs=0, const=True,
-                            help='List available models')
     parser.add_argument('-l', '--headless', action='store_true',
                         dest='headless',
                         help=('Attempt to run model without its GUI.'))
@@ -207,14 +85,7 @@ def main(user_args=None):
                                    dest='validate', default=True,
                                    help=('Do not validate inputs before '
                                          'running the model.'))
-
-    list_group.add_argument('model', action=SelectModelAction, nargs='?',
-                            help=('The model/tool to run. Use --list to show '
-                                  'available models/tools. Identifiable model '
-                                  'prefixes may also be used. Alternatively,'
-                                  'specify "launcher" to reveal a model '
-                                  'launcher window.'))
-
+                                  
     args = parser.parse_args(user_args)
 
     root_logger = logging.getLogger()
@@ -259,13 +130,9 @@ def main(user_args=None):
                       'Is the UI installed?\n'
                       '    pip install rangeland_production[ui]') % error)
 
-    if args.model == 'launcher':
-        from rangeland_production.ui import launcher
-        launcher.main()
-
-    elif args.headless:
+    if args.headless:
         from rangeland_production import datastack
-        target_mod = _MODEL_UIS[args.model].pyname
+        target_mod = _PYNAME
         model_module = importlib.import_module(name=target_mod)
         LOGGER.info('imported target %s from %s',
                     model_module.__name__, model_module)
@@ -346,7 +213,7 @@ def main(user_args=None):
             getattr(model_module, 'execute')(paramset.args)
     else:
         # import the GUI from the known class
-        gui_class = _MODEL_UIS[args.model].gui
+        gui_class = _GUI_CLASS
         module_name, classname = gui_class.split('.')
         module = importlib.import_module(
             name='.ui.%s' % module_name,
@@ -378,7 +245,7 @@ def main(user_args=None):
         # Handle a graceful exit
         if model_form.form.run_dialog.messageArea.error:
             parser.exit(DEFAULT_EXIT_CODE,
-                        'Model %s: run failed\n' % args.model)
+                        'Rangeland Production: run failed\n')
 
         if app_exitcode != 0:
             parser.exit(app_exitcode,
