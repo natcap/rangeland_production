@@ -7,8 +7,6 @@ For other commands, try `python setup.py --help-commands`
 """
 from setuptools.extension import Extension
 from setuptools import setup
-import Cython.Build
-import numpy
 
 
 # Read in requirements.txt and populate the python readme with the
@@ -41,7 +39,7 @@ setup(
                      'local_scheme': 'node-and-date'},
     include_package_data=True,
     install_requires=_REQUIREMENTS,
-    setup_requires=['setuptools_scm', 'numpy', 'cython'],
+    setup_requires=['setuptools_scm'],
     license='BSD',
     zip_safe=False,
     keywords='gis rangeland',
@@ -50,16 +48,13 @@ setup(
         'Development Status :: 4 - Beta',
         'Intended Audience :: Science/Research',
         'Natural Language :: English',
-        'Operating System :: MacOS :: MacOS X',
         'Operating System :: Microsoft',
         'Operating System :: POSIX',
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: Cython',
         'License :: OSI Approved :: BSD License',
         'Topic :: Scientific/Engineering :: GIS'
     ],
-    cmdclass={'build_ext': Cython.Build.build_ext},
     entry_points={
         'console_scripts': [
             'rangeland_production = rangeland_production.cli:main'
