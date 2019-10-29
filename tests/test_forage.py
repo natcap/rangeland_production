@@ -1131,10 +1131,10 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         if not os.path.exists(SAMPLE_DATA):
             self.fail(
@@ -1160,7 +1160,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         fill_value = 0
         template_raster = os.path.join(
             self.workspace_dir, 'template_raster.tif')
@@ -1201,7 +1201,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         som1c_2_path = os.path.join(self.workspace_dir, 'som1c_2.tif')
         som2c_2_path = os.path.join(self.workspace_dir, 'som2c_2.tif')
@@ -1251,7 +1251,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         sand_path = os.path.join(self.workspace_dir, 'sand.tif')
         silt_path = os.path.join(self.workspace_dir, 'silt.tif')
@@ -1300,7 +1300,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         sand_path = os.path.join(self.workspace_dir, 'sand.tif')
         silt_path = os.path.join(self.workspace_dir, 'silt.tif')
@@ -1353,7 +1353,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         site_param_table = {1: {'edepth': 0.2}}
         pp_reg = {
@@ -1476,7 +1476,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         site_param_table = {
             1: {
@@ -1654,7 +1654,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_shape = (10, 10)
         tolerance = 0.0001
@@ -1760,7 +1760,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         site_param_table = {
             1: {
@@ -1871,7 +1871,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         month_index = numpy.random.randint(0, 100)
         site_param_table = {
@@ -2049,7 +2049,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         max_temp_path = os.path.join(self.workspace_dir, 'max_temp.tif')
         min_temp_path = os.path.join(self.workspace_dir, 'min_temp.tif')
@@ -2124,7 +2124,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         month_index = 10
         current_month = 6
@@ -2295,7 +2295,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         sv_reg = {
             'minerl_1_1_path': os.path.join(
@@ -2365,7 +2365,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         num_rasters = numpy.random.randint(1, 10)
         raster_list = [
@@ -2454,7 +2454,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         sv = 'state_variable'
         pft_id_set = [2, 5, 7]
@@ -2535,7 +2535,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         pft_i = numpy.random.randint(0, 4)
         pft_param_dict = {
@@ -2662,7 +2662,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         biomass_production_path = os.path.join(
             self.workspace_dir, 'biomass_production.tif')
@@ -2745,7 +2745,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_shape = (10, 10)
 
@@ -2831,7 +2831,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         pramn_1_path = os.path.join(self.workspace_dir, 'pramn_1.tif')
         pramn_2_path = os.path.join(self.workspace_dir, 'pramn_2.tif')
@@ -2971,7 +2971,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         frtcindx_path = os.path.join(self.workspace_dir, 'frtcindx.tif')
         fracrc_p_path = os.path.join(self.workspace_dir, 'fracrc_p.tif')
@@ -3096,7 +3096,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_shape = (3, 3)
 
@@ -3237,7 +3237,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_size = (3, 3)
         # known values
@@ -3335,7 +3335,7 @@ class foragetests(unittest.TestCase):
             }
             return results_dict
 
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         # shortwave radiation and pet calculated by hand
         CURRENT_MONTH = 10
@@ -3646,7 +3646,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_size = (3, 3)
         # known values
@@ -3675,7 +3675,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_size = (3, 3)
         # known values
@@ -3767,7 +3767,7 @@ class foragetests(unittest.TestCase):
             }
             return results_dict
 
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
 
         # snow cover, runoff losses only
@@ -4077,7 +4077,7 @@ class foragetests(unittest.TestCase):
             }
             return results_dict
 
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
 
         # high transpiration limited by water inputs
@@ -4227,7 +4227,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
         tolerance = 0.00001
 
@@ -4308,7 +4308,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
         tolerance = 0.0000001
 
@@ -4355,7 +4355,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
         tolerance = 0.00001
 
@@ -4460,7 +4460,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
         tolerance = 0.00001
 
@@ -4505,7 +4505,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_size = (10, 10)
         tolerance = 0.00001
 
@@ -4589,7 +4589,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         raster1_val = 10
         raster2_val = 3
@@ -4642,7 +4642,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         raster1_val = 10
         raster2_val = 3
@@ -4942,6 +4942,8 @@ class foragetests(unittest.TestCase):
             for pft_i in pft_dict.iterkeys():
                 veg_trait_table[pft_i] = {
                     'nlaypg': pft_dict[pft_i]['nlaypg'],
+                    'growth_months': pft_dict[pft_i]['growth_months'],
+                    'senescence_month': pft_dict[pft_i]['senescence_month'],
                 }
             # previous state variables
             prev_sv_reg = {
@@ -5043,7 +5045,7 @@ class foragetests(unittest.TestCase):
                 'pft_id_set': pft_id_set,
             }
             return input_dict
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         # no snow, no snowfall
         pet = 4.9680004
@@ -5081,6 +5083,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 49.874,
                 'nlaypg': 5,
                 'tgprod': 371.,
+                'growth_months': ['9', '10', '11'],
+                'senescence_month': 12,
             },
             2: {
                 'cover': 0.2,
@@ -5088,6 +5092,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 31.4,
                 'nlaypg': 3,
                 'tgprod': 300.2,
+                'growth_months': ['9', '10', '11'],
+                'senescence_month': 12,
             },
             3: {
                 'cover': 0.3,
@@ -5095,6 +5101,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 17.03,
                 'nlaypg': 6,
                 'tgprod': 200.8,
+                'growth_months': ['9', '10', '11'],
+                'senescence_month': 12,
             },
         }
         nlaypg_max = max(
@@ -5184,6 +5192,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 49.874,
                 'nlaypg': 5,
                 'tgprod': 371.,
+                'growth_months': ['9', '10', '11'],
+                'senescence_month': 12,
             },
             2: {
                 'cover': 0.2,
@@ -5191,6 +5201,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 31.4,
                 'nlaypg': 3,
                 'tgprod': 300.2,
+                'growth_months': ['9', '10', '11'],
+                'senescence_month': 12,
             },
             3: {
                 'cover': 0.3,
@@ -5198,6 +5210,8 @@ class foragetests(unittest.TestCase):
                 'stdedc': 17.03,
                 'nlaypg': 6,
                 'tgprod': 200.8,
+                'growth_months': ['9', '10', '11'],
+                'senescence_month': 12,
             },
         }
         nlaypg_max = max(
@@ -5268,7 +5282,7 @@ class foragetests(unittest.TestCase):
 
         """
 
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_shape = (10, 10)
         tolerance = 0.00000001
@@ -5566,7 +5580,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00000001
 
         # immobilization
@@ -5820,7 +5834,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00000001
 
         # immobilization
@@ -5993,7 +6007,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         tolerance = 0.00001
 
@@ -6073,7 +6087,7 @@ class foragetests(unittest.TestCase):
             else:
                 tcflow_strucc_1 = 0
             return tcflow_strucc_1
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         array_shape = (10, 10)
         tolerance = 0.0000001
@@ -6214,7 +6228,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         fill_value = 0
         target_path = os.path.join(self.workspace_dir, 'target_raster.tif')
@@ -6290,7 +6304,7 @@ class foragetests(unittest.TestCase):
             mineral_flow = co2_loss * estatv / cstatv
             return mineral_flow
 
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.0000000001
 
@@ -6338,7 +6352,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.0000001
 
@@ -6403,7 +6417,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.0000001
 
@@ -6459,7 +6473,7 @@ class foragetests(unittest.TestCase):
             else:
                 tcflow_metabc_1 = 0.
             return tcflow_metabc_1
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.00001
 
@@ -6599,7 +6613,7 @@ class foragetests(unittest.TestCase):
             else:
                 tcflow_metabc_2 = 0.
             return tcflow_metabc_2
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.00001
 
@@ -6724,7 +6738,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.00001
 
@@ -6839,7 +6853,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.00001
 
@@ -6934,7 +6948,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (10, 10)
         tolerance = 0.00001
 
@@ -7006,7 +7020,7 @@ class foragetests(unittest.TestCase):
                 by hand
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         nrows = 10
         ncols = 10
         tolerance = 0.00001
@@ -7244,7 +7258,7 @@ class foragetests(unittest.TestCase):
                 'mod_strlig_lyr': strlig_lyr + d_strlig_lyr,
             }
             return result_dict
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.0001
 
         # known inputs
@@ -7391,7 +7405,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.000001
         array_shape = (10, 10)
 
@@ -7437,7 +7451,7 @@ class foragetests(unittest.TestCase):
         Returns:
             None
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
         array_shape = (10, 10)
 
@@ -7481,7 +7495,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.0001
         array_shape = (10, 10)
 
@@ -7615,7 +7629,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
         array_shape = (10, 10)
 
@@ -7666,7 +7680,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
         prev_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
         cur_sv_dir = tempfile.mkdtemp(dir=self.workspace_dir)
@@ -7848,7 +7862,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (3, 3)
         tolerance = 0.00001
 
@@ -8165,7 +8179,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known values: iel=1, some uptake from soil, some plant N fixation
@@ -8349,7 +8363,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (3, 3)
         tolerance = 0.00000001
 
@@ -8441,7 +8455,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         array_shape = (3, 3)
         tolerance = 0.00001
 
@@ -8486,7 +8500,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known values
@@ -8526,11 +8540,13 @@ class foragetests(unittest.TestCase):
                 'snfxmx_1': 0.03,
                 'senescence_month': 3,
                 'nlaypg': 5,
+                'growth_months': ['4', '5', '6'],
             },
             2: {
                 'snfxmx_1': 0.004,
                 'senescence_month': 5,
                 'nlaypg': 3,
+                'growth_months': ['3', '4'],
             }
         }
         sv_reg = {
@@ -8798,7 +8814,7 @@ class foragetests(unittest.TestCase):
                         pass
             return ending_minerl_dict
 
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known values, no leaching of P
@@ -9039,7 +9055,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known inputs: one pft
@@ -9346,7 +9362,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known values
@@ -9960,8 +9976,8 @@ class foragetests(unittest.TestCase):
                 'CP15': 0.1,
             },
         }
-        from natcap.invest import forage
-        from natcap.invest import utils
+        from rangeland_production import forage
+        from rangeland_production import utils
 
         # known derived trait values
         entire_m_Z = 0.480537
@@ -10095,7 +10111,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known inputs
@@ -10162,7 +10178,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known inputs
@@ -10234,7 +10250,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         # known inputs
         aglivc_4 = 80
@@ -10313,7 +10329,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.00001
 
         # known inputs
@@ -10478,7 +10494,7 @@ class foragetests(unittest.TestCase):
                 of the beta rangeland model
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.000001
 
         # known inputs
@@ -10675,7 +10691,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
         tolerance = 0.000001
 
         # known inputs
@@ -10719,11 +10735,12 @@ class foragetests(unittest.TestCase):
             'animal_density': os.path.join(
                 self.workspace_dir, 'animal_density.tif'),
         }
+        obs_biomass_path = os.path.join(self.workspace_dir, 'obs_biomass.tif')
 
         animals_per_ha = 0.00011449
         forage._estimate_animal_density(
             aligned_inputs, month_index, pft_id_set, site_param_table,
-            animal_mgmt_layer_path, sv_reg, month_reg)
+            animal_mgmt_layer_path, sv_reg, obs_biomass_path, month_reg)
         self.assert_all_values_in_raster_within_range(
             month_reg['animal_density'], animals_per_ha - tolerance,
             animals_per_ha + tolerance, _TARGET_NODATA)
@@ -10742,7 +10759,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         # known inputs
         aligned_inputs = {
@@ -11026,7 +11043,7 @@ class foragetests(unittest.TestCase):
             None
 
         """
-        from natcap.invest import forage
+        from rangeland_production import forage
 
         # valid inputs, single plant functional type
         aligned_inputs = {
