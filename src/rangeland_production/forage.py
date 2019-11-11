@@ -7,6 +7,7 @@ import os
 import logging
 import tempfile
 import shutil
+from builtins import range
 
 from osgeo import ogr
 from osgeo import osr
@@ -635,7 +636,7 @@ def execute(args):
     # we'll use this to report any missing paths
     missing_precip_path_list = []
     missing_EO_index_path_list = []
-    for month_index in xrange(n_months):
+    for month_index in range(n_months):
         month_i = (starting_month + month_index - 1) % 12 + 1
         temperature_month_set.add(month_i)
         year = starting_year + (starting_month + month_index - 1) // 12
@@ -946,7 +947,7 @@ def execute(args):
 
     # Main simulation loop
     # for each step in the simulation
-    for month_index in xrange(n_months):
+    for month_index in range(n_months):
         if (month_index % 12) == 0:
             # Update yearly quantities
             _yearly_tasks(
@@ -1854,7 +1855,7 @@ def _afiel_awilt(
 
     # calculate field capacity and wilting point for each soil layer,
     # decreasing organic matter content by 85% with each layer
-    for lyr in xrange(1, 10):
+    for lyr in range(1, 10):
         afiel_path = pp_reg['afiel_{}_path'.format(lyr)]
         awilt_path = pp_reg['awilt_{}_path'.format(lyr)]
         _calc_afiel(
@@ -3389,7 +3390,7 @@ def _calc_avail_mineral_nutrient(pft_param_dict, sv_reg, iel, target_path):
     """
     nlay = int(pft_param_dict['nlaypg'])
     mineral_raster_list = [
-        sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in xrange(
+        sv_reg['minerl_{}_{}_path'.format(lyr, iel)] for lyr in range(
             1, nlay + 1)]
     raster_list_sum(
         mineral_raster_list, _SV_NODATA, target_path, _TARGET_NODATA,
@@ -5361,12 +5362,12 @@ def _soil_water(
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     # temporary intermediate values for each layer accessible by plants
     for val in ['avw', 'awwt', 'avinj']:
-        for lyr in xrange(1, nlaypg_max + 1):
+        for lyr in range(1, nlaypg_max + 1):
             val_lyr = '{}_{}'.format(val, lyr)
             temp_val_dict[val_lyr] = os.path.join(
                 temp_dir, '{}.tif'.format(val_lyr))
     # temporary intermediate value for each layer total
-    for lyr in xrange(1, nlayer_max + 1):
+    for lyr in range(1, nlayer_max + 1):
         val_lyr = 'asmos_interim_{}'.format(lyr)
         temp_val_dict[val_lyr] = os.path.join(
             temp_dir, '{}.tif'.format(val_lyr))
@@ -5386,7 +5387,7 @@ def _soil_water(
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in range(1, nlaypg_max + 1):
         val_lyr = 'awtl_{}'.format(lyr)
         target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
         param_val_dict[val_lyr] = target_path
@@ -5396,7 +5397,7 @@ def _soil_water(
         pygeoprocessing.reclassify_raster(
             (aligned_inputs['site_index'], 1), site_to_val, target_path,
             gdal.GDT_Float32, _IC_NODATA)
-    for lyr in xrange(1, nlayer_max + 1):
+    for lyr in range(1, nlayer_max + 1):
         val_lyr = 'adep_{}'.format(lyr)
         target_path = os.path.join(temp_dir, '{}.tif'.format(val_lyr))
         param_val_dict[val_lyr] = target_path
@@ -5550,7 +5551,7 @@ def _soil_water(
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # distribute water to each layer
-    for lyr in xrange(1, nlayer_max + 1):
+    for lyr in range(1, nlayer_max + 1):
         shutil.copyfile(
             temp_val_dict['modified_moisture_inputs'],
             temp_val_dict['current_moisture_inputs'])
@@ -5581,7 +5582,7 @@ def _soil_water(
 
     # calculate available water for transpiration
     avw_list = []
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in range(1, nlaypg_max + 1):
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 temp_val_dict['asmos_interim_{}'.format(lyr)],
@@ -5598,7 +5599,7 @@ def _soil_water(
     # calculate water available for transpiration weighted by transpiration
     # depth for that soil layer
     awwt_list = []
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in range(1, nlaypg_max + 1):
         raster_multiplication(
             temp_val_dict['avw_{}'.format(lyr)], _TARGET_NODATA,
             param_val_dict['awtl_{}'.format(lyr)], _IC_NODATA,
@@ -5615,7 +5616,7 @@ def _soil_water(
         gdal.GDT_Float32, _TARGET_NODATA)
 
     # remove water via transpiration
-    for lyr in xrange(1, nlaypg_max + 1):
+    for lyr in range(1, nlaypg_max + 1):
         pygeoprocessing.raster_calculator(
             [(path, 1) for path in [
                 temp_val_dict['asmos_interim_{}'.format(lyr)],
@@ -5636,7 +5637,7 @@ def _soil_water(
             remove_transpiration('asmos'), sv_reg['asmos_{}_path'.format(lyr)],
             gdal.GDT_Float32, _TARGET_NODATA)
     # no transpiration is removed from layers not accessible by plants
-    for lyr in xrange(nlaypg_max + 1, nlayer_max + 1):
+    for lyr in range(nlaypg_max + 1, nlayer_max + 1):
         shutil.copyfile(
             temp_val_dict['asmos_interim_{}'.format(lyr)],
             sv_reg['asmos_{}_path'.format(lyr)])
@@ -5678,7 +5679,7 @@ def _soil_water(
             aligned_inputs['pft_{}'.format(pft_i)])['nodata'][0]
         soil_layers_accessible = [
             temp_val_dict['avinj_{}'.format(lyr)] for lyr in
-            xrange(1, int(veg_trait_table[pft_i]['nlaypg']) + 1)]
+            range(1, int(veg_trait_table[pft_i]['nlaypg']) + 1)]
         raster_list_sum(
             soil_layers_accessible, _TARGET_NODATA,
             temp_val_dict['sum_avinj_{}'.format(pft_i)],
@@ -5696,7 +5697,7 @@ def _soil_water(
         _SV_NODATA, nodata_remove=False)
 
     # set correct nodata value for all revised asmos rasters
-    for lyr in xrange(1, nlayer_max + 1):
+    for lyr in range(1, nlayer_max + 1):
         reclassify_nodata(sv_reg['asmos_{}_path'.format(lyr)], _SV_NODATA)
 
     # clean up temporary files
@@ -7465,7 +7466,7 @@ def _decomposition(
         'secndy_2': os.path.join(temp_dir, 'secndy_2.tif'),
         'occlud': os.path.join(temp_dir, 'occlud.tif'),
     }
-    for lyr in xrange(1, nlayer_max + 1):
+    for lyr in range(1, nlayer_max + 1):
         state_var = 'minerl_{}_2'.format(lyr)
         shutil.copyfile(
             prev_sv_reg['{}_path'.format(state_var)],
@@ -7473,7 +7474,7 @@ def _decomposition(
         delta_sv_dict[state_var] = os.path.join(
             temp_dir, '{}.tif'.format(state_var))
     # initialize mineral N in current sv_reg
-    for lyr in xrange(1, nlayer_max + 1):
+    for lyr in range(1, nlayer_max + 1):
         state_var = 'minerl_{}_1'.format(lyr)
         shutil.copyfile(
             prev_sv_reg['{}_path'.format(state_var)],
@@ -7518,7 +7519,7 @@ def _decomposition(
             prev_sv_reg['{}_path'.format(state_var)],
             sv_reg['{}_path'.format(state_var)])
 
-    for dtm in xrange(4):
+    for dtm in range(4):
         # initialize change (delta, d) in state variables for this decomp step
         for state_var in delta_sv_dict.keys():
             pygeoprocessing.new_raster_from_base(
@@ -8230,7 +8231,7 @@ def _decomposition(
             delta_sv_dict['minerl_1_2'], _IC_NODATA)
 
         # P flow from mineral to secondary
-        for lyr in xrange(1, nlayer_max + 1):
+        for lyr in range(1, nlayer_max + 1):
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
                     sv_reg['minerl_{}_2_path'.format(lyr)],
@@ -9727,7 +9728,7 @@ def nutrient_uptake(
         sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], _SV_NODATA)
 
     # uptake from each soil layer in proportion to its contribution to availm
-    for lyr in xrange(1, nlay + 1):
+    for lyr in range(1, nlay + 1):
         if iel == 2:
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
@@ -10382,8 +10383,8 @@ def _apply_new_growth(delta_agliv_dict, pft_id_set, sv_reg):
                 sv_reg['{}_{}_path'.format(sv, pft_i)], _SV_NODATA)
 
     # clean up
-    delta_agliv_dir = os.path.dirname(
-        delta_agliv_dict[delta_agliv_dict.keys()[0]])
+    pathlist = list(delta_agliv_dict)
+    delta_agliv_dir = os.path.dirname(delta_agliv_dict[pathlist[0]])
     shutil.rmtree(delta_agliv_dir)
     os.remove(statv_temp_path)
 
@@ -10570,7 +10571,7 @@ def _leach(aligned_inputs, site_param_table, month_reg, sv_reg):
         _TARGET_NODATA)
 
     for iel in [1, 2]:
-        for lyr in xrange(1, nlayer_max + 1):
+        for lyr in range(1, nlayer_max + 1):
             pygeoprocessing.raster_calculator(
                 [(path, 1) for path in [
                     param_val_dict['minlch'], month_reg['amov_{}'.format(lyr)],
@@ -11627,7 +11628,7 @@ def calc_digestibility_intake(
 
     # sum digestibility of feed types weighted by intake
     weighted_digestibility_path_list = []
-    for feed_type_index in xrange(len(intake_path_list)):
+    for feed_type_index in range(len(intake_path_list)):
         target_path = os.path.join(
             temp_dir, 'weighted_digestibility_{}.tif'.format(feed_type_index))
         raster_multiplication(
