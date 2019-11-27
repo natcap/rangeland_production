@@ -1,21 +1,41 @@
 RPM: Rangeland Production Model
 ================================================================
 
-The Rangeland Production Model is a simulation that represents dynamic growth
-of grass and consumption of grass by herbivores to predict productivity in
-terms of herbivore diet sufficiency, or the predicted intake of protein and
-energy relative to maintenance requirements. The model incorporates a gridded
-(i.e., pixel- or raster-based) implementation of the Century ecosystem model
-(Parton et al. 1993) coupled with a basic physiology submodel adapted from
-GRAZPLAN (Freer et al. 2012). At each monthly timestep for which it is run,
-the RPM uses the gridded implementation of Century to predict forage biomass
-and nutrient content on each pixel covering the study area. The model
-estimates the pixel-level densities of herbivores, estimates diet selection
-of those herbivores, and integrates the removal of forage by herbivores into
-the production of forage biomass in the following timestep.
+The purpose of the Rangeland Production model is to project forage
+production and diet sufficiency for grazing animals under different
+conditions of climate and management. The model incorporates a gridded
+(i.e., pixel- or raster-based) implementation of the Century ecosystem
+model (Parton et al. 1993) coupled with a basic physiology submodel
+adapted from GRAZPLAN (Freer et al. 2012). The raster-based Century
+implementation submodel simulates the growth of herbaceous forage on
+each pixel of the simulated area, according to climate and soil
+conditions, at a monthly timestep. The ruminant physiology submodel
+adapted from GRAZPLAN calculates offtake of forage by grazing animals
+according to the biomass and protein content of the simulated forage,
+and estimates the adequacy of the diet to meet the animals’ energy
+requirements.  Then, the estimated offtake by animals is integrated
+into the regrowth of forage in the following timestep through impacts
+on simulated potential production, root:shoot ratio, and plant nitrogen
+content according to Century’s existing grazing routine (Holland et al.
+1992).
 
-For full model documentation and a set of sample outputs, see 
-http://viz.naturalcapitalproject.org/rangelands .
+Inputs to the Rangeland model therefore include gridded inputs to
+Century and descriptive parameters of the modeled livestock herd.
+Outputs of the model consist of monthly rasters giving forage biomass and
+protein content, forage intake by grazing animals, and an estimate of the
+adequacy of the forage consumed by animals to meet their maintenance energy
+requirements, over the same time period as the inputs.
+
+For full model documentation and visualization of sample model outputs,
+see http://viz.naturalcapitalproject.org/rangelands .
+
+References
+-------------------
+Freer, M, A. D Moore, and J. R Donnelly. “The GRAZPLAN Animal Biology Model for Sheep and Cattle and the GrazFeed Decision Support Tool.” Canberra, ACT Australia: CSIRO Plant Industry, 2012.
+
+Holland, E. A., Parton, W. J., Detling, J. K., and D.L. Coppock.  "Physiological Responses of Plant Populations to Herbivory and Their Consequences for Ecosystem Nutrient Flow." The American Naturalist 140, no. 4 (1992): 685-706. doi:10.1086/285435.
+
+Parton, W. J., J. M. O. Scurlock, D. S. Ojima, T. G. Gilmanov, R. J. Scholes, D. S. Schimel, T. Kirchner, et al. “Observations and Modeling of Biomass and Soil Organic Matter Dynamics for the Grassland Biome Worldwide.” Global Biogeochemical Cycles 7, no. 4 (1993): 785–809. doi:10.1029/93GB02042.
 
 General Information
 -------------------
@@ -29,8 +49,6 @@ Dependencies
 ------------
 
 Run ``make check`` to test if all required dependencies are installed on your system.
-OS-specific installation instructions are found either online at
-http://invest.readthedocs.io/en/latest/installing.html or locally at ``doc/api-docs/installing.rst``.
 
 
 NSIS-specific requirements
