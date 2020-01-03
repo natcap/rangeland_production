@@ -26,6 +26,9 @@ protein content, forage intake by grazing animals, and an estimate of the
 adequacy of the forage consumed by animals to meet their maintenance energy
 requirements, over the same time period as the inputs.
 
+A beta version of this model was described in Kowal et al. 2019,
+available at https://www.nature.com/articles/s41598-019-56470-3.
+
 For full model documentation and visualization of sample model outputs,
 see http://viz.naturalcapitalproject.org/rangelands .
 
@@ -34,6 +37,8 @@ References
 Freer, M, A. D Moore, and J. R Donnelly. “The GRAZPLAN Animal Biology Model for Sheep and Cattle and the GrazFeed Decision Support Tool.” Canberra, ACT Australia: CSIRO Plant Industry, 2012.
 
 Holland, E. A., Parton, W. J., Detling, J. K., and D.L. Coppock.  "Physiological Responses of Plant Populations to Herbivory and Their Consequences for Ecosystem Nutrient Flow." The American Naturalist 140, no. 4 (1992): 685-706. doi:10.1086/285435.
+
+Kowal, V.A., Jones, S.M., Keesing, F., Allan, B., Schieltz, J., and R. Chaplin-Kramer. A coupled forage-grazer model predicts viability of livestock production and wildlife habitat at the regional scale. Scientific Repports 9, no. 19957 (2019). doi:10.1038/s41598-019-56470-3
 
 Parton, W. J., J. M. O. Scurlock, D. S. Ojima, T. G. Gilmanov, R. J. Scholes, D. S. Schimel, T. Kirchner, et al. “Observations and Modeling of Biomass and Soil Organic Matter Dynamics for the Grassland Biome Worldwide.” Global Biogeochemical Cycles 7, no. 4 (1993): 785–809. doi:10.1029/93GB02042.
 
