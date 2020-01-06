@@ -1,0 +1,16 @@
+# Byte-compiled files
+*/__pycache__/
+**/__pycache__/
+
+# Distribution/packaging
+build/
+dist/
+eggs/
+.eggs/
+*.egg-info/
+
+# precompiled wheels
+*.whl
+
+# redirected output from Make
+make_*.txt
