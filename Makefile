@@ -131,11 +131,7 @@ $(BINARIES_DIR): | $(DIST_DIR) $(BUILD_DIR)
 
 # Installers for each platform.
 # Windows (NSIS) installer is written to dist/rangeland_production_<version>_x86_Setup.exe
-ifeq ($(FORKUSER), natcap)
-	INSTALLER_NAME_FORKUSER :=
-else
-	INSTALLER_NAME_FORKUSER := $(FORKUSER)
-endif
+INSTALLER_NAME_FORKUSER := $(FORKUSER)
 WINDOWS_INSTALLER_FILE := $(DIST_DIR)/rangeland_production_$(VERSION)_$(PYTHON_ARCH)_Setup.exe
 windows_installer: $(WINDOWS_INSTALLER_FILE)
 $(WINDOWS_INSTALLER_FILE): $(BINARIES_DIR) build/vcredist_x86.exe
