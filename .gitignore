@@ -14,3 +14,7 @@ eggs/
 
 # redirected output from Make
 make_*.txt
+
+# testing and environment
+env/
+.coverage
