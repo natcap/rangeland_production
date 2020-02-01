@@ -1,4 +1,5 @@
 # coding=UTF-8
+# -*- mode: python -*-
 import sys
 import os
 import itertools
@@ -17,11 +18,11 @@ kwargs = {
     'runtime_hooks': [os.path.join(current_dir, 'exe', 'hooks', 'rthook.py')],
     'hiddenimports': [
         'rangeland_production',
-        'rangeland_production.ui.launcher',
         'yaml',
         'distutils',
         'distutils.dist',
         'rtree',  # mac builds aren't picking up rtree by default.
+		'sip',
     ],
     'datas': [('qt.conf', '.')],
     'cipher': block_cipher,

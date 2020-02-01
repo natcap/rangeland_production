@@ -957,7 +957,7 @@ def nutrient_uptake_point(
 
     # uptake from each soil layer in proportion to its contribution to availm
     minerl_dict_copy = minerl_dict.copy()
-    for lyr in xrange(1, nlay + 1):
+    for lyr in range(1, nlay + 1):
         if minerl_dict['minerl_{}_iel'.format(lyr)] > 0:
             if iel == 2:
                 fsol = fsfunc_point(
@@ -1020,7 +1020,7 @@ class foragetests(unittest.TestCase):
             'results_suffix': "",
             'starting_month': 1,
             'starting_year': 2016,
-            'n_months': 22,
+            'n_months': 2,
             'aoi_path': os.path.join(
                 SAMPLE_DATA, 'soums_monitoring_area_diss.shp'),
             'management_threshold': 2000,
@@ -1131,7 +1131,26 @@ class foragetests(unittest.TestCase):
             "max value: {}, acceptable max: {}".format(
                 max_val, maximum_acceptable_value))
 
-    @unittest.skip("did not run the whole model, running unit tests only")
+    def assert_sorted_lists_equal(self, string_list_1, string_list_2):
+        """Test that `string_list_1` and `string_list_2` are equal.
+
+        Test that two lists of strings contain the same strings in the same
+        order.
+
+        Raises:
+            AssertionError if the number of items in string_list_1 is not equal
+                to the number of items in string_list_2, or if the order of
+                elements differs between string_list_1 and string_list_2.
+
+        Returns:
+            None
+
+        """
+        self.assertEqual(len(string_list_1), len(string_list_2))
+        for i in range(len(string_list_1)):
+            self.assertEqual(string_list_1[i], string_list_2[i])
+
+    # @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from rangeland_production import forage
@@ -1404,7 +1423,7 @@ class foragetests(unittest.TestCase):
             som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
             bulk_d_path, pp_reg)
 
-        for key, path in pp_reg.iteritems():
+        for key, path in pp_reg.items():
             self.assert_all_values_in_raster_within_range(
                 path, minimum_acceptable_value,
                 maximum_acceptable_value, nodata_value)
@@ -1417,7 +1436,7 @@ class foragetests(unittest.TestCase):
                 site_index_path, site_param_table, som1c_2_path,
                 som2c_2_path, som3c_path, sand_path, silt_path, clay_path,
                 bulk_d_path, pp_reg)
-            for key, path in pp_reg.iteritems():
+            for key, path in pp_reg.items():
                 self.assert_all_values_in_raster_within_range(
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
@@ -1556,7 +1575,7 @@ class foragetests(unittest.TestCase):
         forage._persistent_params(
             site_index_path, site_param_table, sand_path, clay_path, pp_reg)
 
-        for path, ranges in acceptable_range_dict.iteritems():
+        for path, ranges in acceptable_range_dict.items():
             self.assert_all_values_in_raster_within_range(
                 pp_reg[path], ranges['minimum_acceptable_value'],
                 ranges['maximum_acceptable_value'],
@@ -1569,7 +1588,7 @@ class foragetests(unittest.TestCase):
                 site_index_path, site_param_table, sand_path, clay_path,
                 pp_reg)
 
-            for path, ranges in acceptable_range_dict.iteritems():
+            for path, ranges in acceptable_range_dict.items():
                 self.assert_all_values_in_raster_within_range(
                     pp_reg[path], ranges['minimum_acceptable_value'],
                     ranges['maximum_acceptable_value'],
@@ -1629,7 +1648,7 @@ class foragetests(unittest.TestCase):
             site_index_path, site_param_table, sand_path, clay_path,
             pp_reg)
 
-        for path, values in known_value_dict.iteritems():
+        for path, values in known_value_dict.items():
             self.assert_all_values_in_raster_within_range(
                 pp_reg[path], values['value'] - tolerance,
                 values['value'] + tolerance, values['nodata_value'])
@@ -1829,7 +1848,7 @@ class foragetests(unittest.TestCase):
         forage._structural_ratios(
             site_index_path, site_param_table, sv_reg, pp_reg)
 
-        for key, path in pp_reg.iteritems():
+        for key, path in pp_reg.items():
             self.assert_all_values_in_raster_within_range(
                 path, minimum_acceptable_value,
                 maximum_acceptable_value, nodata_value)
@@ -1841,7 +1860,7 @@ class foragetests(unittest.TestCase):
             forage._structural_ratios(
                 site_index_path, site_param_table, sv_reg, pp_reg)
 
-            for key, path in pp_reg.iteritems():
+            for key, path in pp_reg.items():
                 self.assert_all_values_in_raster_within_range(
                     path, minimum_acceptable_value,
                     maximum_acceptable_value, nodata_value)
@@ -1893,7 +1912,7 @@ class foragetests(unittest.TestCase):
         complete_aligned_inputs = {
             'precip_{}'.format(month): os.path.join(
                 self.workspace_dir, 'precip_{}.tif'.format(month)) for
-            month in xrange(month_index, month_index + 12)
+            month in range(month_index, month_index + 12)
         }
         complete_aligned_inputs['site_index'] = os.path.join(
             self.workspace_dir, 'site_index.tif')
@@ -1911,7 +1930,7 @@ class foragetests(unittest.TestCase):
         create_random_raster(complete_aligned_inputs['site_index'], 1, 1)
         precip_keys = [
             'precip_{}'.format(month) for month in
-            xrange(month_index, month_index + 12)]
+            range(month_index, month_index + 12)]
         for key in precip_keys:
             create_random_raster(complete_aligned_inputs[key], 0, 6)
 
@@ -1952,7 +1971,7 @@ class foragetests(unittest.TestCase):
             year_reg['baseNdep_path'], minimum_acceptable_Ndep,
             maximum_acceptable_Ndep, Ndep_nodata)
 
-        for key, input_raster in complete_aligned_inputs.iteritems():
+        for key, input_raster in complete_aligned_inputs.items():
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
             forage._yearly_tasks(
                 complete_aligned_inputs, site_param_table, veg_trait_table,
@@ -1992,7 +2011,7 @@ class foragetests(unittest.TestCase):
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_below_1'], 0.152 - tolerance, 0.152 + tolerance,
             _TARGET_NODATA)
-        for key, input_raster in complete_aligned_inputs.iteritems():
+        for key, input_raster in complete_aligned_inputs.items():
             insert_nodata_values_into_raster(input_raster, _TARGET_NODATA)
         forage._yearly_tasks(
             complete_aligned_inputs, site_param_table, veg_trait_table,
@@ -2025,7 +2044,7 @@ class foragetests(unittest.TestCase):
             month_index, pft_id_set, year_reg)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_above_1'], 0.020432 - tolerance,
-            020432 + tolerance, _TARGET_NODATA)
+            0.020432 + tolerance, _TARGET_NODATA)
         self.assert_all_values_in_raster_within_range(
             year_reg['pltlig_below_1'], 0.25946 - tolerance,
             0.25946 + tolerance, _TARGET_NODATA)
@@ -2370,7 +2389,7 @@ class foragetests(unittest.TestCase):
         num_rasters = numpy.random.randint(1, 10)
         raster_list = [
             os.path.join(self.workspace_dir, '{}.tif'.format(r)) for r in
-            xrange(num_rasters)]
+            range(num_rasters)]
 
         for input_raster in raster_list:
             create_random_raster(input_raster, 1, 1)
@@ -2898,7 +2917,7 @@ class foragetests(unittest.TestCase):
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
             prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
             month_reg)
-        for path, ranges in acceptable_range_dict.iteritems():
+        for path, ranges in acceptable_range_dict.items():
             self.assert_all_values_in_raster_within_range(
                 month_reg[path], ranges['minimum_acceptable_value'],
                 ranges['maximum_acceptable_value'], _TARGET_NODATA)
@@ -2911,7 +2930,7 @@ class foragetests(unittest.TestCase):
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
             prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
             month_reg)
-        for path, ranges in acceptable_range_dict.iteritems():
+        for path, ranges in acceptable_range_dict.items():
             self.assert_all_values_in_raster_within_range(
                 month_reg[path], ranges['minimum_acceptable_value'],
                 ranges['maximum_acceptable_value'], _TARGET_NODATA)
@@ -2945,7 +2964,7 @@ class foragetests(unittest.TestCase):
             pramx_1_path, pramx_2_path, prbmn_1_path, prbmn_2_path,
             prbmx_1_path, prbmx_2_path, annual_precip_path, pft_i, iel,
             month_reg)
-        for path, value in known_value_dict.iteritems():
+        for path, value in known_value_dict.items():
             self.assert_all_values_in_raster_within_range(
                 month_reg[path], value - tolerance,
                 value + tolerance, _TARGET_NODATA)
@@ -4779,13 +4798,13 @@ class foragetests(unittest.TestCase):
             # canopy and litter cover influencing surface losses
             sum_aglivc = sum(
                 [pft_dict[pft_i]['aglivc'] * pft_dict[pft_i]['cover'] for
-                    pft_i in pft_dict.iterkeys()])
+                    pft_i in pft_dict])
             sum_stdedc = sum(
                 [pft_dict[pft_i]['stdedc'] * pft_dict[pft_i]['cover'] for
-                    pft_i in pft_dict.iterkeys()])
+                    pft_i in pft_dict])
             sum_tgprod = sum(
                 [pft_dict[pft_i]['tgprod'] * pft_dict[pft_i]['cover'] for
-                    pft_i in pft_dict.iterkeys()])
+                    pft_i in pft_dict])
             alit = min((strucc_1 + metabc_1) * 2.5, 400)
             aliv = sum_aglivc * 2.5 + (0.25 * sum_tgprod)
             sd = min(aliv + (sum_stdedc * 2.5), 800.)
@@ -4818,10 +4837,10 @@ class foragetests(unittest.TestCase):
             # distribute moisture to soil layers prior to transpiration
             current_moisture_inputs = modified_moisture_inputs
             nlaypg_max = max(
-                pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict.iterkeys())
-            asmos_dict = {lyr: asmos for lyr in xrange(1, nlaypg_max + 1)}
+                pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict)
+            asmos_dict = {lyr: asmos for lyr in range(1, nlaypg_max + 1)}
             amov_dict = {}
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 afl = adep * afiel
                 asmos_dict[lyr] = asmos_dict[lyr] + current_moisture_inputs
                 if asmos_dict[lyr] > afl:
@@ -4836,7 +4855,7 @@ class foragetests(unittest.TestCase):
             awwt_dict = {}
             tot = 0
             tot2 = 0
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 avw = max(asmos_dict[lyr] - awilt * adep, 0)
                 awwt_dict[lyr] = avw * awtl
                 tot = tot + avw
@@ -4845,7 +4864,7 @@ class foragetests(unittest.TestCase):
             trap = min(trap, tot)
             # remove water via transpiration
             avinj_dict = {}
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 avinj_dict[lyr] = max(asmos_dict[lyr] - awilt * adep, 0)
                 trl = min((trap * awwt_dict[lyr]) / tot2, avinj_dict[lyr])
                 avinj_dict[lyr] = avinj_dict[lyr] - trl
@@ -4864,10 +4883,10 @@ class foragetests(unittest.TestCase):
             avinj_dict[1] - avinj_dict[1] - evlos
             # calculate avh2o_1, soil water available for growth, for each PFT
             avh2o_1_dict = {}
-            for pft_i in pft_dict.iterkeys():
+            for pft_i in pft_dict:
                 avh2o_1_dict[pft_i] = (
                     sum(avinj_dict[lyr] for lyr in
-                        xrange(1, pft_dict[pft_i]['nlaypg'] + 1)) *
+                        range(1, pft_dict[pft_i]['nlaypg'] + 1)) *
                     pft_dict[pft_i]['cover'])
             avh2o_3 = sum([avinj_dict[lyr] for lyr in [1, 2]])
 
@@ -4912,7 +4931,7 @@ class foragetests(unittest.TestCase):
                 precip, nrows=nrows, ncols=ncols)
             create_random_raster(
                 aligned_inputs['site_index'], 1, 1, nrows=nrows, ncols=ncols)
-            for pft_i in pft_dict.iterkeys():
+            for pft_i in pft_dict:
                 cover = pft_dict[pft_i]['cover']
                 aligned_inputs['pft_{}'.format(pft_i)] = os.path.join(
                     self.workspace_dir, 'pft_{}.tif'.format(pft_i))
@@ -4933,13 +4952,13 @@ class foragetests(unittest.TestCase):
                     'nlayer': nlaypg_max,
                 }
             }
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 site_param_table[1]['adep_{}'.format(lyr)] = adep
                 site_param_table[1]['awtl_{}'.format(lyr)] = awtl
             # veg trait table
-            pft_id_set = set([i for i in pft_dict.iterkeys()])
+            pft_id_set = set([i for i in pft_dict])
             veg_trait_table = {}
-            for pft_i in pft_dict.iterkeys():
+            for pft_i in pft_dict:
                 veg_trait_table[pft_i] = {
                     'nlaypg': pft_dict[pft_i]['nlaypg'],
                     'growth_months': pft_dict[pft_i]['growth_months'],
@@ -4966,13 +4985,13 @@ class foragetests(unittest.TestCase):
             create_random_raster(
                 prev_sv_reg['snlq_path'], snlq, snlq, nrows=nrows,
                 ncols=ncols)
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 prev_sv_reg['asmos_{}_path'.format(lyr)] = os.path.join(
                     self.workspace_dir, 'asmos_{}_prev.tif'.format(lyr))
                 create_random_raster(
                     prev_sv_reg['asmos_{}_path'.format(lyr)], asmos, asmos,
                     nrows=nrows, ncols=ncols)
-            for pft_i in pft_dict.iterkeys():
+            for pft_i in pft_dict:
                 prev_sv_reg['aglivc_{}_path'.format(pft_i)] = os.path.join(
                     self.workspace_dir, 'aglivc_{}_prev.tif'.format(pft_i))
                 prev_sv_reg['stdedc_{}_path'.format(pft_i)] = os.path.join(
@@ -4992,15 +5011,15 @@ class foragetests(unittest.TestCase):
                 'avh2o_3_path': os.path.join(
                     self.workspace_dir, 'avh2o_3.tif'),
             }
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 sv_reg['asmos_{}_path'.format(lyr)] = os.path.join(
                     self.workspace_dir, 'asmos_{}_path'.format(lyr))
-            for pft_i in pft_dict.iterkeys():
+            for pft_i in pft_dict:
                 sv_reg['avh2o_1_{}_path'.format(pft_i)] = os.path.join(
                     self.workspace_dir, 'avh2o_1_{}.tif'.format(pft_i))
             # persistent parameters
             pp_reg = {}
-            for lyr in xrange(1, nlaypg_max + 1):
+            for lyr in range(1, nlaypg_max + 1):
                 pp_reg['afiel_{}_path'.format(lyr)] = os.path.join(
                     self.workspace_dir, 'afiel_{}.tif'.format(lyr))
                 pp_reg['awilt_{}_path'.format(lyr)] = os.path.join(
@@ -5025,7 +5044,7 @@ class foragetests(unittest.TestCase):
                 'amov_10': os.path.join(self.workspace_dir, 'amov_10.tif'),
                 'snowmelt': os.path.join(self.workspace_dir, 'snowmelt.tif')
             }
-            for pft_i in pft_dict.iterkeys():
+            for pft_i in pft_dict:
                 month_reg['tgprod_{}'.format(pft_i)] = os.path.join(
                     self.workspace_dir, 'tgprod_{}.tif'.format(pft_i))
                 create_random_raster(
@@ -5106,7 +5125,7 @@ class foragetests(unittest.TestCase):
             },
         }
         nlaypg_max = max(
-            pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict.iterkeys())
+            pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict)
 
         # persistent parameters
         afiel = 0.67
@@ -5137,7 +5156,7 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg']['snlq_path'],
             results_dict['snlq'] - tolerance,
             results_dict['snlq'] + tolerance, _SV_NODATA)
-        for lyr in xrange(1, nlaypg_max + 1):
+        for lyr in range(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
@@ -5215,7 +5234,7 @@ class foragetests(unittest.TestCase):
             },
         }
         nlaypg_max = max(
-            pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict.iterkeys())
+            pft_dict[pft_i]['nlaypg'] for pft_i in pft_dict)
 
         # persistent parameters
         afiel = 0.67
@@ -5247,7 +5266,7 @@ class foragetests(unittest.TestCase):
             input_dict['sv_reg']['snlq_path'],
             results_dict['snlq'] - tolerance,
             results_dict['snlq'] + tolerance, _SV_NODATA)
-        for lyr in xrange(1, nlaypg_max + 1):
+        for lyr in range(1, nlaypg_max + 1):
             self.assert_all_values_in_raster_within_range(
                 input_dict['sv_reg']['asmos_{}_path'.format(lyr)],
                 results_dict['asmos'][lyr] - tolerance,
@@ -7719,7 +7738,7 @@ class foragetests(unittest.TestCase):
                 'crprtf_2': 0.05,
             }
         }
-        pft_id_set = set([key for key in veg_trait_table.iterkeys()])
+        pft_id_set = set([key for key in veg_trait_table])
         prev_sv_reg = {
             'aglivc_1_path': os.path.join(prev_sv_dir, 'aglivc_1.tif'),
             'aglive_1_1_path': os.path.join(prev_sv_dir, 'aglive_1_1.tif'),
@@ -8292,7 +8311,7 @@ class foragetests(unittest.TestCase):
             sv_reg['bglive_{}_{}_path'.format(iel, pft_i)], bglive_iel)
         create_constant_raster(
             sv_reg['crpstg_{}_{}_path'.format(iel, pft_i)], storage_iel)
-        for lyr in xrange(1, 8):
+        for lyr in range(1, 8):
             create_constant_raster(
                 sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                 minerl_dict['minerl_{}_iel'.format(lyr)])
@@ -8571,7 +8590,7 @@ class foragetests(unittest.TestCase):
             'minerl_5_2_path': os.path.join(
                 self.workspace_dir, 'minerl_5_2.tif'),
         }
-        for lyr in xrange(1, 6):
+        for lyr in range(1, 6):
             create_constant_raster(
                 sv_reg['minerl_{}_1_path'.format(lyr)],
                 initial_minerl_1)
@@ -8791,7 +8810,7 @@ class foragetests(unittest.TestCase):
                     frlech = (fleach_1 + fleach_2 * sand) * fleach_3
                 else:
                     frlech = (fleach_1 + fleach_2 * sand) * fleach_4 * fsol
-                for lyr in xrange(1, 5):
+                for lyr in range(1, 5):
                     linten = numpy.clip(
                         1 - (minlch - amov_dict['amov_{}'.format(lyr)]) /
                         minlch, 0., 1.)
@@ -8868,14 +8887,14 @@ class foragetests(unittest.TestCase):
         }
         sv_reg = {}
         for iel in [1, 2]:
-            for lyr in xrange(1, 5):
+            for lyr in range(1, 5):
                 sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
                     self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
                 create_constant_raster(
                     sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                     starting_minerl_dict['minerl_{}_{}'.format(lyr, iel)])
         month_reg = {}
-        for lyr in xrange(1, 5):
+        for lyr in range(1, 5):
             month_reg['amov_{}'.format(lyr)] = os.path.join(
                 self.workspace_dir, 'amov_{}.tif'.format(lyr))
             create_constant_raster(
@@ -8884,7 +8903,7 @@ class foragetests(unittest.TestCase):
 
         forage._leach(aligned_inputs, site_param_table, month_reg, sv_reg)
         for iel in [1, 2]:
-            for lyr in xrange(1, 5):
+            for lyr in range(1, 5):
                 self.assert_all_values_in_raster_within_range(
                     sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                     minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] -
@@ -8943,14 +8962,14 @@ class foragetests(unittest.TestCase):
         }
         sv_reg = {}
         for iel in [1, 2]:
-            for lyr in xrange(1, 5):
+            for lyr in range(1, 5):
                 sv_reg['minerl_{}_{}_path'.format(lyr, iel)] = os.path.join(
                     self.workspace_dir, 'minerl_{}_{}.tif'.format(lyr, iel))
                 create_constant_raster(
                     sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                     starting_minerl_dict['minerl_{}_{}'.format(lyr, iel)])
         month_reg = {}
-        for lyr in xrange(1, 5):
+        for lyr in range(1, 5):
             month_reg['amov_{}'.format(lyr)] = os.path.join(
                 self.workspace_dir, 'amov_{}.tif'.format(lyr))
             create_constant_raster(
@@ -8959,7 +8978,7 @@ class foragetests(unittest.TestCase):
 
         forage._leach(aligned_inputs, site_param_table, month_reg, sv_reg)
         for iel in [1, 2]:
-            for lyr in xrange(1, 5):
+            for lyr in range(1, 5):
                 self.assert_all_values_in_raster_within_range(
                     sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                     minerl_dict_point['minerl_{}_{}'.format(lyr, iel)] -
@@ -8996,11 +9015,11 @@ class foragetests(unittest.TestCase):
         # raster-based inputs
         create_constant_raster(aligned_inputs['sand'], sand)
         for iel in [1, 2]:
-            for lyr in xrange(1, 5):
+            for lyr in range(1, 5):
                 create_constant_raster(
                     sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                     starting_minerl_dict['minerl_{}_{}'.format(lyr, iel)])
-        for lyr in xrange(1, 5):
+        for lyr in range(1, 5):
             create_constant_raster(
                 month_reg['amov_{}'.format(lyr)],
                 amov_dict['amov_{}'.format(lyr)])
@@ -9031,7 +9050,7 @@ class foragetests(unittest.TestCase):
         }
 
         for iel in [1, 2]:
-            for lyr in xrange(1, 5):
+            for lyr in range(1, 5):
                 self.assert_all_values_in_raster_within_range(
                     sv_reg['minerl_{}_{}_path'.format(lyr, iel)],
                     ending_minerl_dict['minerl_{}_{}'.format(lyr, iel)] -
@@ -10312,7 +10331,7 @@ class foragetests(unittest.TestCase):
         ordered_feed_types = forage.order_by_digestibility(
             sv_reg, pft_id_set, args['aoi_path'])
 
-        self.assertItemsEqual(ordered_feed_types, digestibility_order)
+        self.assert_sorted_lists_equal(ordered_feed_types, digestibility_order)
 
     def test_calc_grazing_offtake(self):
         """Test `_calc_grazing_offtake.`

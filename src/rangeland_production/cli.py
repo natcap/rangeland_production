@@ -13,7 +13,7 @@ import multiprocessing
 
 try:
     from . import utils
-except ValueError:
+except ImportError:
     # When we're in a pyinstaller build, this isn't a module.
     from rangeland_production import utils
 
@@ -85,7 +85,7 @@ def main(user_args=None):
                                    dest='validate', default=True,
                                    help=('Do not validate inputs before '
                                          'running the model.'))
-                                  
+
     args = parser.parse_args(user_args)
 
     root_logger = logging.getLogger()
@@ -113,22 +113,6 @@ def main(user_args=None):
 
     # Now that we've set up logging based on args, we can start logging.
     LOGGER.debug(args)
-
-    try:
-        # Importing model UI files here will usually import qtpy before we can
-        # set the sip API in natcap.invest.ui.inputs.
-        # Set it here, before we can do the actual importing.
-        import sip
-        # 2 indicates SIP/Qt API version 2
-        sip.setapi('QString', 2)
-
-        from rangeland_production.ui import inputs
-    except ImportError as error:
-        # Can't import UI, exit with nonzero exit code
-        LOGGER.exception('Unable to import the UI')
-        parser.error(('Unable to import the UI (failed with "%s")\n'
-                      'Is the UI installed?\n'
-                      '    pip install rangeland_production[ui]') % error)
 
     if args.headless:
         from rangeland_production import datastack
@@ -212,6 +196,7 @@ def main(user_args=None):
             # execute the model's execute function with the loaded args
             getattr(model_module, 'execute')(paramset.args)
     else:
+        from rangeland_production.ui import inputs
         # import the GUI from the known class
         gui_class = _GUI_CLASS
         module_name, classname = gui_class.split('.')

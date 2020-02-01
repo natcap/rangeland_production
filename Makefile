@@ -98,7 +98,7 @@ check:
 
 # Python environment management
 env:
-	$(PYTHON) -m virtualenv --system-site-packages $(ENV)
+	$(PYTHON) -m venv --system-site-packages $(ENV)
 	$(BASHLIKE_SHELL_COMMAND) "$(ENV_ACTIVATE) && $(PIP) install -r requirements.txt -r requirements-gui.txt"
 	$(BASHLIKE_SHELL_COMMAND) "$(ENV_ACTIVATE) && $(PIP) install -I -r requirements-dev.txt"
 	$(BASHLIKE_SHELL_COMMAND) "$(ENV_ACTIVATE) && $(MAKE) install"
@@ -131,12 +131,8 @@ $(BINARIES_DIR): | $(DIST_DIR) $(BUILD_DIR)
 
 # Installers for each platform.
 # Windows (NSIS) installer is written to dist/rangeland_production_<version>_x86_Setup.exe
-ifeq ($(FORKUSER), natcap)
-	INSTALLER_NAME_FORKUSER :=
-else
-	INSTALLER_NAME_FORKUSER := $(FORKUSER)
-endif
-WINDOWS_INSTALLER_FILE := $(DIST_DIR)/rangeland_production_$(INSTALLER_NAME_FORKUSER)$(VERSION)_$(PYTHON_ARCH)_Setup.exe
+INSTALLER_NAME_FORKUSER := $(FORKUSER)
+WINDOWS_INSTALLER_FILE := $(DIST_DIR)/rangeland_production_$(VERSION)_$(PYTHON_ARCH)_Setup.exe
 windows_installer: $(WINDOWS_INSTALLER_FILE)
 $(WINDOWS_INSTALLER_FILE): $(BINARIES_DIR) build/vcredist_x86.exe
 	-$(RM) $(WINDOWS_INSTALLER_FILE)
