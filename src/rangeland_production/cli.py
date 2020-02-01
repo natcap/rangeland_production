@@ -13,7 +13,7 @@ import multiprocessing
 
 try:
     from . import utils
-except ValueError:
+except ImportError:
     # When we're in a pyinstaller build, this isn't a module.
     from rangeland_production import utils
 
