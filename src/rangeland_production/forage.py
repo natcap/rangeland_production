@@ -606,15 +606,30 @@ def execute(args):
             the values in the "animal_id" column of the animal trait csv, and
             a field named "num_animal" giving the number of animals grazing
             inside each polygon feature.
-        args['site_initial_table'] (string): path to table containing initial
-            conditions for each site state variable. This table must contain
-            a value for each site code and each state variable listed in the
-            following table:
-            https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
-        args['pft_initial_table'] (string): path to table containing initial
-            conditions for each plant functional type state variable. This
-            table must contain a value for each plant functional type index and
+        args['initial_conditions_dir'] (string): optional input, path to
+            directory containing initial conditions. If this directory is not
+            supplied, a site_initial_table and pft_initial_table must be
+            supplied. If supplied, this directory must contain a series of
+            rasters with initial values for each PFT and for the site.
+                Required rasters for each PFT:
+                    initial variables that are a property of PFT in the table
+                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+                    e.g., aglivc_<PFT>.tif
+                Required for the site:
+                    initial variables that are a property of site in the table
+                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['site_initial_table'] (string): optional input, path to table
+            containing initial conditions for each site state variable. If an
+            initial conditions directory is not supplied, this table must be
+            supplied. This table must contain a value for each site code and
             each state variable listed in the following table:
+            https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['pft_initial_table'] (string): optional input, path to table
+            containing initial conditions for each plant functional type state
+            variable. If an initial conditions directory is not supplied, this
+            table must be supplied. This table must contain a value for each
+            plant functional type index and each state variable listed in the
+            following table:
             https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 
     Returns:
@@ -743,17 +758,8 @@ def execute(args):
         raise ValueError(
             "Couldn't find parameter values for the following site " +
             "indices: %s\n\t" + ", ".join(missing_site_index_list))
-    site_initial_conditions_table = utils.build_lookup_from_csv(
-        args['site_initial_table'], 'site')
-    missing_site_index_list = list(
-        site_index_set.difference(site_initial_conditions_table.keys()))
-    if missing_site_index_list:
-        raise ValueError(
-            "Couldn't find initial conditions values for the following site " +
-            "indices: %s\n\t" + ", ".join(missing_site_index_list))
 
-    # make sure plant functional type initial conditiosn and parameters exist
-    # for each pft raster
+    # make sure plant functional type parameters exist for each pft raster
     pft_dir = os.path.dirname(args['veg_spatial_composition_path_pattern'])
     pft_basename = os.path.basename(
         args['veg_spatial_composition_path_pattern'])
@@ -775,14 +781,6 @@ def execute(args):
         raise ValueError(
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
-    pft_initial_conditions_table = utils.build_lookup_from_csv(
-        args['pft_initial_table'], 'PFT')
-    missing_pft_index_list = pft_id_set.difference(
-        pft_initial_conditions_table.keys())
-    if missing_pft_index_list:
-        raise ValueError(
-            "Couldn't find initial condition values for the following plant "
-            "functional types: %s\n\t" + ", ".join(missing_pft_index_list))
     frtcindx_set = set([
         pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
@@ -866,9 +864,97 @@ def execute(args):
     # Initialization
     sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
     os.makedirs(sv_dir)
-    sv_reg = initial_conditions_from_tables(
-        aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
-        pft_initial_conditions_table)
+    initial_conditions_dir = None
+    try:
+        initial_conditions_dir = args['initial_conditions_dir']
+    except KeyError:
+        pass
+    if initial_conditions_dir:
+        # check that a raster for each required state variable is supplied
+        missing_initial_values = []
+        # set _SV_NODATA from initial rasters
+        state_var_nodata = set([])
+        # align initial state variables to resampled inputs
+        resample_initial_path_map = {}
+        for sv in _SITE_STATE_VARIABLE_FILES.keys():
+            sv_path = os.path.join(
+                initial_conditions_dir, _SITE_STATE_VARIABLE_FILES[sv])
+            state_var_nodata.update(
+                set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
+            resample_initial_path_map[sv] = sv_path
+            if not os.path.exists(sv_path):
+                missing_initial_values.append(sv_path)
+        for pft_i in pft_id_set:
+            for sv in _PFT_STATE_VARIABLES:
+                sv_key = '{}_{}_path'.format(sv, pft_i)
+                sv_path = os.path.join(
+                    initial_conditions_dir, '{}_{}.tif'.format(sv, pft_i))
+                state_var_nodata.update(
+                    set([pygeoprocessing.get_raster_info(sv_path)['nodata']
+                        [0]]))
+                resample_initial_path_map[sv_key] = sv_path
+                if not os.path.exists(sv_path):
+                    missing_initial_values.append(sv_path)
+        if missing_initial_values:
+            raise ValueError(
+                "Couldn't find the following required initial values: " +
+                "\n\t".join(missing_initial_values))
+        if len(state_var_nodata) > 1:
+            raise ValueError(
+                "Initial state variable rasters contain >1 nodata value")
+        _SV_NODATA = list(state_var_nodata)[0]
+
+        # align initial values with inputs
+        initial_path_list = (
+            [aligned_inputs['precip_0']] +
+            [resample_initial_path_map[key] for key in sorted(
+                resample_initial_path_map.keys())])
+        aligned_initial_path_list = (
+            [os.path.join(PROCESSING_DIR, 'aligned_input_template.tif')] +
+            [os.path.join(
+                sv_dir, os.path.basename(resample_initial_path_map[key])) for
+                key in sorted(resample_initial_path_map.keys())])
+        pygeoprocessing.align_and_resize_raster_stack(
+            initial_path_list, aligned_initial_path_list,
+            ['near'] * len(initial_path_list),
+            target_pixel_size, 'intersection',
+            base_vector_path_list=[args['aoi_path']], raster_align_index=0,
+            vector_mask_options={'mask_vector_path': args['aoi_path']})
+        sv_reg = dict(
+            [(key, os.path.join(sv_dir, os.path.basename(path)))
+                for key, path in resample_initial_path_map.items()])
+    else:
+        # create initialization rasters from tables
+        try:
+            site_initial_conditions_table = utils.build_lookup_from_csv(
+                args['site_initial_table'], 'site')
+        except KeyError:
+            raise ValueError(
+                "If initial conditions rasters are not supplied, initial " +
+                "conditions tables must be supplied")
+        missing_site_index_list = list(
+            site_index_set.difference(site_initial_conditions_table.keys()))
+        if missing_site_index_list:
+            raise ValueError(
+                "Couldn't find initial conditions values for the following " +
+                "site indices: %s\n\t" + ", ".join(missing_site_index_list))
+        try:
+            pft_initial_conditions_table = utils.build_lookup_from_csv(
+                args['pft_initial_table'], 'PFT')
+        except KeyError:
+            raise ValueError(
+                "If initial conditions rasters are not supplied, initial " +
+                "conditions tables must be supplied")
+        missing_pft_index_list = pft_id_set.difference(
+            pft_initial_conditions_table.keys())
+        if missing_pft_index_list:
+            raise ValueError(
+                "Couldn't find initial condition values for the following "
+                "plant functional types: %s\n\t" + ", ".join(
+                    missing_pft_index_list))
+        sv_reg = initial_conditions_from_tables(
+            aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
+            pft_initial_conditions_table)
 
     # calculate persistent intermediate parameters that do not change during
     # the simulation
