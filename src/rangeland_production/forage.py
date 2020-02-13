@@ -1,21 +1,17 @@
-"""InVEST Forage module.
-
-InVEST Forage model developed from this design doc:
-https://docs.google.com/document/d/10oJo43buEdJkFTZ0wYaW00EagSzs1oM7g_lBUc8URMI/edit#
-"""
+"""Rangeland Production Model."""
 import os
 import logging
 import tempfile
 import shutil
 from builtins import range
+import re
+import math
 
+import numpy
+import pandas
 from osgeo import ogr
 from osgeo import osr
 from osgeo import gdal
-import re
-import numpy
-import pandas
-import math
 
 import pygeoprocessing
 from rangeland_production import utils
@@ -891,7 +887,7 @@ def execute(args):
                     initial_conditions_dir, '{}_{}.tif'.format(sv, pft_i))
                 state_var_nodata.update(
                     set([pygeoprocessing.get_raster_info(sv_path)['nodata']
-                        [0]]))
+                         [0]]))
                 resample_initial_path_map[sv_key] = sv_path
                 if not os.path.exists(sv_path):
                     missing_initial_values.append(sv_path)
@@ -922,7 +918,7 @@ def execute(args):
             vector_mask_options={'mask_vector_path': args['aoi_path']})
         sv_reg = dict(
             [(key, os.path.join(sv_dir, os.path.basename(path)))
-                for key, path in resample_initial_path_map.items()])
+             for key, path in resample_initial_path_map.items()])
     else:
         # create initialization rasters from tables
         try:
@@ -3694,6 +3690,8 @@ def _calc_nutrient_demand(
             (biomass_production != _TARGET_NODATA) &
             (root_fraction != _TARGET_NODATA) &
             (cercrp_min_above != _TARGET_NODATA) &
+            (cercrp_min_above > 0) &
+            (cercrp_min_below > 0) &
             (cercrp_min_below != _TARGET_NODATA))
 
         demand_above = numpy.empty(root_fraction.shape, dtype=numpy.float32)
@@ -5897,6 +5895,7 @@ def esched(return_type):
         valid_mask = (
             (cflow != _IC_NODATA) &
             (~numpy.isclose(tca, _SV_NODATA)) &
+            (tca > 0) &
             (rcetob != _TARGET_NODATA) &
             (~numpy.isclose(anps, _SV_NODATA)) &
             (~numpy.isclose(labile, _SV_NODATA)))
@@ -5984,6 +5983,7 @@ def fsfunc(minerl_1_2, sorpmx, pslsrb):
     """
     valid_mask = (
         (~numpy.isclose(minerl_1_2, _SV_NODATA)) &
+        (minerl_1_2 > 0) &
         (sorpmx != _IC_NODATA) &
         (pslsrb != _IC_NODATA))
     c_ar = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
@@ -6034,6 +6034,7 @@ def calc_surface_som2_ratio(
     valid_mask = (
         (~numpy.isclose(som1c_1, _SV_NODATA)) &
         (~numpy.isclose(som1e_1_iel, _SV_NODATA)) &
+        (som1e_1_iel > 0) &
         (rad1p_1_iel != _IC_NODATA) &
         (rad1p_2_iel != _IC_NODATA) &
         (pcemic1_2_iel != _IC_NODATA) &
@@ -6094,6 +6095,8 @@ def calc_tcflow_strucc_1(
         (~numpy.isclose(strucc_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_2, _SV_NODATA)) &
+        (struce_1_1 > 0) &
+        (struce_1_2 > 0) &
         (rnewas_1_1 != _TARGET_NODATA) &
         (rnewas_2_1 != _TARGET_NODATA) &
         (strmax_1 != _IC_NODATA) &
@@ -6167,6 +6170,8 @@ def calc_tcflow_strucc_2(
         (~numpy.isclose(strucc_2, _SV_NODATA)) &
         (~numpy.isclose(struce_2_1, _SV_NODATA)) &
         (~numpy.isclose(struce_2_2, _SV_NODATA)) &
+        (struce_2_1 > 0) &
+        (struce_2_2 > 0) &
         (rnewbs_1_1 != _TARGET_NODATA) &
         (rnewbs_2_1 != _TARGET_NODATA) &
         (strmax_2 != _IC_NODATA) &
@@ -6231,6 +6236,8 @@ def calc_tcflow_surface(
         (~numpy.isclose(cstatv, _SV_NODATA)) &
         (~numpy.isclose(estatv_1, _SV_NODATA)) &
         (~numpy.isclose(estatv_2, _SV_NODATA)) &
+        (estatv_1 > 0) &
+        (estatv_2 > 0) &
         (rcetob_1 != _TARGET_NODATA) &
         (rcetob_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6293,6 +6300,8 @@ def calc_tcflow_soil(
         (~numpy.isclose(cstatv, _SV_NODATA)) &
         (~numpy.isclose(estatv_1, _SV_NODATA)) &
         (~numpy.isclose(estatv_2, _SV_NODATA)) &
+        (estatv_1 > 0) &
+        (estatv_2 > 0) &
         (rcetob_1 != _TARGET_NODATA) &
         (rcetob_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6358,6 +6367,8 @@ def calc_tcflow_som1c_2(
         (~numpy.isclose(som1c_2, _SV_NODATA)) &
         (~numpy.isclose(som1e_2_1, _SV_NODATA)) &
         (~numpy.isclose(som1e_2_2, _SV_NODATA)) &
+        (som1e_2_1 > 0) &
+        (som1e_2_2 > 0) &
         (rceto2_1 != _TARGET_NODATA) &
         (rceto2_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6839,6 +6850,8 @@ def remove_leached_iel(
         valid_mask = (
             (~numpy.isclose(som1c_2, _SV_NODATA)) &
             (~numpy.isclose(som1e_2_1, _SV_NODATA)) &
+            (som1c_2 > 0) &
+            (som1e_2_1 > 0) &
             (cleach != _TARGET_NODATA))
         rceof1_1 = numpy.zeros(som1c_2.shape)
         rceof1_1[valid_mask] = som1c_2[valid_mask] / som1e_2_1[valid_mask] * 2.
@@ -6852,6 +6865,8 @@ def remove_leached_iel(
         valid_mask = (
             (~numpy.isclose(som1c_2, _SV_NODATA)) &
             (~numpy.isclose(som1e_2_2, _SV_NODATA)) &
+            (som1c_2 > 0) &
+            (som1e_2_2 > 0) &
             (cleach != _TARGET_NODATA))
         rceof1_2 = numpy.zeros(som1c_2.shape)
         rceof1_2[valid_mask] = (
@@ -7180,7 +7195,7 @@ def _decomposition(
         rprpet = numpy.empty(pevap.shape, dtype=numpy.float32)
         rprpet[:] = _TARGET_NODATA
 
-        snowmelt_mask = (valid_mask & (snowmelt > 0))
+        snowmelt_mask = (valid_mask & (snowmelt > 0) & (pevap > 0))
         rprpet[snowmelt_mask] = snowmelt[snowmelt_mask] / pevap[snowmelt_mask]
 
         no_melt_mask = (valid_mask & (snowmelt <= 0))
@@ -8956,6 +8971,7 @@ def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
     valid_mask = (
         (~numpy.isclose(c_state_variable, _SV_NODATA)) &
         (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
+        (c_state_variable > 0) &
         (delta_c != _TARGET_NODATA))
     delta_iel = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
     delta_iel[:] = _TARGET_NODATA
@@ -9684,7 +9700,8 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
         (uptake_soil != _TARGET_NODATA) &
         (~numpy.isclose(minerl_lyr_iel, _SV_NODATA)) &
         (fsol != _TARGET_NODATA) &
-        (availm != _TARGET_NODATA))
+        (availm != _TARGET_NODATA) &
+        (availm > 0))
     minerl_uptake_lyr = numpy.empty(uptake_soil.shape, dtype=numpy.float32)
     minerl_uptake_lyr[valid_mask] = (
         uptake_soil[valid_mask] * minerl_lyr_iel[valid_mask] *
@@ -10731,7 +10748,8 @@ def calc_iel_removed(c_consumed, iel_state_variable, c_state_variable):
     valid_mask = (
         (c_consumed != _TARGET_NODATA) &
         (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
-        (~numpy.isclose(c_state_variable, _SV_NODATA)))
+        (~numpy.isclose(c_state_variable, _SV_NODATA)) &
+        (c_state_variable > 0))
     iel_consumed = numpy.empty(c_consumed.shape, dtype=numpy.float32)
     iel_consumed[:] = _TARGET_NODATA
     iel_consumed[valid_mask] = (
@@ -11490,7 +11508,8 @@ def calc_fraction_biomass(
         valid_mask = (
             (~numpy.isclose(cstatv, _SV_NODATA)) &
             (~numpy.isclose(pft_cover, pft_nodata)) &
-            (total_weighted_C != _TARGET_NODATA))
+            (total_weighted_C != _TARGET_NODATA) &
+            (total_weighted_C > 0))
         weighted_fraction = numpy.empty(cstatv.shape, dtype=numpy.float32)
         weighted_fraction[:] = _TARGET_NODATA
         weighted_fraction[valid_mask] = (
@@ -11575,15 +11594,21 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
         carbon_zonal_stat_df = pandas.DataFrame.from_dict(
             pygeoprocessing.zonal_statistics((cstatv_path, 1), aoi_path),
             orient='index')
-        mean_carbon = (
-            carbon_zonal_stat_df['sum'].sum() /
-            carbon_zonal_stat_df['count'].sum())
+        if carbon_zonal_stat_df['count'].sum() == 0:
+            return 0
+        else:
+            mean_carbon = (
+                carbon_zonal_stat_df['sum'].sum() /
+                carbon_zonal_stat_df['count'].sum())
         nitrogen_zonal_stat_df = pandas.DataFrame.from_dict(
             pygeoprocessing.zonal_statistics((nstatv_path, 1), aoi_path),
             orient='index')
-        mean_nitrogen = (
-            nitrogen_zonal_stat_df['sum'].sum() /
-            nitrogen_zonal_stat_df['count'].sum())
+        if nitrogen_zonal_stat_df['count'].sum() == 0:
+            mean_nitrogen = 0
+        else:
+            mean_nitrogen = (
+                nitrogen_zonal_stat_df['sum'].sum() /
+                nitrogen_zonal_stat_df['count'].sum())
         return (mean_nitrogen / mean_carbon)
 
     nc_ratio_dict = {}
@@ -13153,7 +13178,7 @@ def _animal_diet_sufficiency(
     shutil.rmtree(temp_dir)
 
 
-def animal_density(
+def calc_animal_density(
         biomass_diff, sum_biomass_diff, total_animals, pixel_area_ha):
     """Calculate animals per ha from total animals inside management polygons.
 
@@ -13181,10 +13206,13 @@ def animal_density(
             polygons, in animals/ha
 
     """
+    default_mask = (
+        (total_animals != _TARGET_NODATA))
     valid_mask = (
         (biomass_diff != _TARGET_NODATA) &
         (sum_biomass_diff != _TARGET_NODATA) &
-        (total_animals != _TARGET_NODATA))
+        (sum_biomass_diff > 0) &
+        (default_mask))
     animals_per_pixel = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
     animals_per_pixel[:] = _TARGET_NODATA
     animals_per_pixel[valid_mask] = (
@@ -13192,6 +13220,7 @@ def animal_density(
         total_animals[valid_mask])
     animal_density = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
     animal_density[:] = _TARGET_NODATA
+    animal_density[default_mask] = 0
     animal_density[valid_mask] = animals_per_pixel[valid_mask] / pixel_area_ha
     return animal_density
 
@@ -13529,7 +13558,7 @@ def _estimate_animal_density(
         [(path, 1) for path in [
             temp_val_dict['biomass_diff'], temp_val_dict['sum_biomass_diff'],
             temp_val_dict['total_animals']]] + [(pixel_area_ha, 'raw')],
-        animal_density, month_reg['animal_density'], gdal.GDT_Float32,
+        calc_animal_density, month_reg['animal_density'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
     # clean up temporary files

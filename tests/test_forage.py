@@ -4,7 +4,6 @@ import unittest
 import tempfile
 import shutil
 import os
-import sys
 import math
 
 import numpy
