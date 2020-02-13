@@ -1,21 +1,17 @@
-"""InVEST Forage module.
-
-InVEST Forage model developed from this design doc:
-https://docs.google.com/document/d/10oJo43buEdJkFTZ0wYaW00EagSzs1oM7g_lBUc8URMI/edit#
-"""
+"""Rangeland Production Model."""
 import os
 import logging
 import tempfile
 import shutil
 from builtins import range
+import re
+import math
 
+import numpy
+import pandas
 from osgeo import ogr
 from osgeo import osr
 from osgeo import gdal
-import re
-import numpy
-import pandas
-import math
 
 import pygeoprocessing
 from rangeland_production import utils
@@ -606,15 +602,30 @@ def execute(args):
             the values in the "animal_id" column of the animal trait csv, and
             a field named "num_animal" giving the number of animals grazing
             inside each polygon feature.
-        args['site_initial_table'] (string): path to table containing initial
-            conditions for each site state variable. This table must contain
-            a value for each site code and each state variable listed in the
-            following table:
-            https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
-        args['pft_initial_table'] (string): path to table containing initial
-            conditions for each plant functional type state variable. This
-            table must contain a value for each plant functional type index and
+        args['initial_conditions_dir'] (string): optional input, path to
+            directory containing initial conditions. If this directory is not
+            supplied, a site_initial_table and pft_initial_table must be
+            supplied. If supplied, this directory must contain a series of
+            rasters with initial values for each PFT and for the site.
+                Required rasters for each PFT:
+                    initial variables that are a property of PFT in the table
+                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+                    e.g., aglivc_<PFT>.tif
+                Required for the site:
+                    initial variables that are a property of site in the table
+                    https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['site_initial_table'] (string): optional input, path to table
+            containing initial conditions for each site state variable. If an
+            initial conditions directory is not supplied, this table must be
+            supplied. This table must contain a value for each site code and
             each state variable listed in the following table:
+            https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['pft_initial_table'] (string): optional input, path to table
+            containing initial conditions for each plant functional type state
+            variable. If an initial conditions directory is not supplied, this
+            table must be supplied. This table must contain a value for each
+            plant functional type index and each state variable listed in the
+            following table:
             https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
 
     Returns:
@@ -743,17 +754,8 @@ def execute(args):
         raise ValueError(
             "Couldn't find parameter values for the following site " +
             "indices: %s\n\t" + ", ".join(missing_site_index_list))
-    site_initial_conditions_table = utils.build_lookup_from_csv(
-        args['site_initial_table'], 'site')
-    missing_site_index_list = list(
-        site_index_set.difference(site_initial_conditions_table.keys()))
-    if missing_site_index_list:
-        raise ValueError(
-            "Couldn't find initial conditions values for the following site " +
-            "indices: %s\n\t" + ", ".join(missing_site_index_list))
 
-    # make sure plant functional type initial conditiosn and parameters exist
-    # for each pft raster
+    # make sure plant functional type parameters exist for each pft raster
     pft_dir = os.path.dirname(args['veg_spatial_composition_path_pattern'])
     pft_basename = os.path.basename(
         args['veg_spatial_composition_path_pattern'])
@@ -775,14 +777,6 @@ def execute(args):
         raise ValueError(
             "Couldn't find trait values for the following plant functional " +
             "types: %s\n\t" + ", ".join(missing_pft_trait_list))
-    pft_initial_conditions_table = utils.build_lookup_from_csv(
-        args['pft_initial_table'], 'PFT')
-    missing_pft_index_list = pft_id_set.difference(
-        pft_initial_conditions_table.keys())
-    if missing_pft_index_list:
-        raise ValueError(
-            "Couldn't find initial condition values for the following plant "
-            "functional types: %s\n\t" + ", ".join(missing_pft_index_list))
     frtcindx_set = set([
         pft_i['frtcindx'] for pft_i in veg_trait_table.values()])
     if frtcindx_set.difference(set([0, 1])):
@@ -866,9 +860,97 @@ def execute(args):
     # Initialization
     sv_dir = os.path.join(args['workspace_dir'], 'state_variables_m-1')
     os.makedirs(sv_dir)
-    sv_reg = initial_conditions_from_tables(
-        aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
-        pft_initial_conditions_table)
+    initial_conditions_dir = None
+    try:
+        initial_conditions_dir = args['initial_conditions_dir']
+    except KeyError:
+        pass
+    if initial_conditions_dir:
+        # check that a raster for each required state variable is supplied
+        missing_initial_values = []
+        # set _SV_NODATA from initial rasters
+        state_var_nodata = set([])
+        # align initial state variables to resampled inputs
+        resample_initial_path_map = {}
+        for sv in _SITE_STATE_VARIABLE_FILES.keys():
+            sv_path = os.path.join(
+                initial_conditions_dir, _SITE_STATE_VARIABLE_FILES[sv])
+            state_var_nodata.update(
+                set([pygeoprocessing.get_raster_info(sv_path)['nodata'][0]]))
+            resample_initial_path_map[sv] = sv_path
+            if not os.path.exists(sv_path):
+                missing_initial_values.append(sv_path)
+        for pft_i in pft_id_set:
+            for sv in _PFT_STATE_VARIABLES:
+                sv_key = '{}_{}_path'.format(sv, pft_i)
+                sv_path = os.path.join(
+                    initial_conditions_dir, '{}_{}.tif'.format(sv, pft_i))
+                state_var_nodata.update(
+                    set([pygeoprocessing.get_raster_info(sv_path)['nodata']
+                         [0]]))
+                resample_initial_path_map[sv_key] = sv_path
+                if not os.path.exists(sv_path):
+                    missing_initial_values.append(sv_path)
+        if missing_initial_values:
+            raise ValueError(
+                "Couldn't find the following required initial values: " +
+                "\n\t".join(missing_initial_values))
+        if len(state_var_nodata) > 1:
+            raise ValueError(
+                "Initial state variable rasters contain >1 nodata value")
+        _SV_NODATA = list(state_var_nodata)[0]
+
+        # align initial values with inputs
+        initial_path_list = (
+            [aligned_inputs['precip_0']] +
+            [resample_initial_path_map[key] for key in sorted(
+                resample_initial_path_map.keys())])
+        aligned_initial_path_list = (
+            [os.path.join(PROCESSING_DIR, 'aligned_input_template.tif')] +
+            [os.path.join(
+                sv_dir, os.path.basename(resample_initial_path_map[key])) for
+                key in sorted(resample_initial_path_map.keys())])
+        pygeoprocessing.align_and_resize_raster_stack(
+            initial_path_list, aligned_initial_path_list,
+            ['near'] * len(initial_path_list),
+            target_pixel_size, 'intersection',
+            base_vector_path_list=[args['aoi_path']], raster_align_index=0,
+            vector_mask_options={'mask_vector_path': args['aoi_path']})
+        sv_reg = dict(
+            [(key, os.path.join(sv_dir, os.path.basename(path)))
+             for key, path in resample_initial_path_map.items()])
+    else:
+        # create initialization rasters from tables
+        try:
+            site_initial_conditions_table = utils.build_lookup_from_csv(
+                args['site_initial_table'], 'site')
+        except KeyError:
+            raise ValueError(
+                "If initial conditions rasters are not supplied, initial " +
+                "conditions tables must be supplied")
+        missing_site_index_list = list(
+            site_index_set.difference(site_initial_conditions_table.keys()))
+        if missing_site_index_list:
+            raise ValueError(
+                "Couldn't find initial conditions values for the following " +
+                "site indices: %s\n\t" + ", ".join(missing_site_index_list))
+        try:
+            pft_initial_conditions_table = utils.build_lookup_from_csv(
+                args['pft_initial_table'], 'PFT')
+        except KeyError:
+            raise ValueError(
+                "If initial conditions rasters are not supplied, initial " +
+                "conditions tables must be supplied")
+        missing_pft_index_list = pft_id_set.difference(
+            pft_initial_conditions_table.keys())
+        if missing_pft_index_list:
+            raise ValueError(
+                "Couldn't find initial condition values for the following "
+                "plant functional types: %s\n\t" + ", ".join(
+                    missing_pft_index_list))
+        sv_reg = initial_conditions_from_tables(
+            aligned_inputs, sv_dir, pft_id_set, site_initial_conditions_table,
+            pft_initial_conditions_table)
 
     # calculate persistent intermediate parameters that do not change during
     # the simulation
@@ -3608,6 +3690,8 @@ def _calc_nutrient_demand(
             (biomass_production != _TARGET_NODATA) &
             (root_fraction != _TARGET_NODATA) &
             (cercrp_min_above != _TARGET_NODATA) &
+            (cercrp_min_above > 0) &
+            (cercrp_min_below > 0) &
             (cercrp_min_below != _TARGET_NODATA))
 
         demand_above = numpy.empty(root_fraction.shape, dtype=numpy.float32)
@@ -5811,6 +5895,7 @@ def esched(return_type):
         valid_mask = (
             (cflow != _IC_NODATA) &
             (~numpy.isclose(tca, _SV_NODATA)) &
+            (tca > 0) &
             (rcetob != _TARGET_NODATA) &
             (~numpy.isclose(anps, _SV_NODATA)) &
             (~numpy.isclose(labile, _SV_NODATA)))
@@ -5898,6 +5983,7 @@ def fsfunc(minerl_1_2, sorpmx, pslsrb):
     """
     valid_mask = (
         (~numpy.isclose(minerl_1_2, _SV_NODATA)) &
+        (minerl_1_2 > 0) &
         (sorpmx != _IC_NODATA) &
         (pslsrb != _IC_NODATA))
     c_ar = numpy.zeros(minerl_1_2.shape, dtype=numpy.float32)
@@ -5948,6 +6034,7 @@ def calc_surface_som2_ratio(
     valid_mask = (
         (~numpy.isclose(som1c_1, _SV_NODATA)) &
         (~numpy.isclose(som1e_1_iel, _SV_NODATA)) &
+        (som1e_1_iel > 0) &
         (rad1p_1_iel != _IC_NODATA) &
         (rad1p_2_iel != _IC_NODATA) &
         (pcemic1_2_iel != _IC_NODATA) &
@@ -6008,6 +6095,8 @@ def calc_tcflow_strucc_1(
         (~numpy.isclose(strucc_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_2, _SV_NODATA)) &
+        (struce_1_1 > 0) &
+        (struce_1_2 > 0) &
         (rnewas_1_1 != _TARGET_NODATA) &
         (rnewas_2_1 != _TARGET_NODATA) &
         (strmax_1 != _IC_NODATA) &
@@ -6081,6 +6170,8 @@ def calc_tcflow_strucc_2(
         (~numpy.isclose(strucc_2, _SV_NODATA)) &
         (~numpy.isclose(struce_2_1, _SV_NODATA)) &
         (~numpy.isclose(struce_2_2, _SV_NODATA)) &
+        (struce_2_1 > 0) &
+        (struce_2_2 > 0) &
         (rnewbs_1_1 != _TARGET_NODATA) &
         (rnewbs_2_1 != _TARGET_NODATA) &
         (strmax_2 != _IC_NODATA) &
@@ -6145,6 +6236,8 @@ def calc_tcflow_surface(
         (~numpy.isclose(cstatv, _SV_NODATA)) &
         (~numpy.isclose(estatv_1, _SV_NODATA)) &
         (~numpy.isclose(estatv_2, _SV_NODATA)) &
+        (estatv_1 > 0) &
+        (estatv_2 > 0) &
         (rcetob_1 != _TARGET_NODATA) &
         (rcetob_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6207,6 +6300,8 @@ def calc_tcflow_soil(
         (~numpy.isclose(cstatv, _SV_NODATA)) &
         (~numpy.isclose(estatv_1, _SV_NODATA)) &
         (~numpy.isclose(estatv_2, _SV_NODATA)) &
+        (estatv_1 > 0) &
+        (estatv_2 > 0) &
         (rcetob_1 != _TARGET_NODATA) &
         (rcetob_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6272,6 +6367,8 @@ def calc_tcflow_som1c_2(
         (~numpy.isclose(som1c_2, _SV_NODATA)) &
         (~numpy.isclose(som1e_2_1, _SV_NODATA)) &
         (~numpy.isclose(som1e_2_2, _SV_NODATA)) &
+        (som1e_2_1 > 0) &
+        (som1e_2_2 > 0) &
         (rceto2_1 != _TARGET_NODATA) &
         (rceto2_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6753,6 +6850,8 @@ def remove_leached_iel(
         valid_mask = (
             (~numpy.isclose(som1c_2, _SV_NODATA)) &
             (~numpy.isclose(som1e_2_1, _SV_NODATA)) &
+            (som1c_2 > 0) &
+            (som1e_2_1 > 0) &
             (cleach != _TARGET_NODATA))
         rceof1_1 = numpy.zeros(som1c_2.shape)
         rceof1_1[valid_mask] = som1c_2[valid_mask] / som1e_2_1[valid_mask] * 2.
@@ -6766,6 +6865,8 @@ def remove_leached_iel(
         valid_mask = (
             (~numpy.isclose(som1c_2, _SV_NODATA)) &
             (~numpy.isclose(som1e_2_2, _SV_NODATA)) &
+            (som1c_2 > 0) &
+            (som1e_2_2 > 0) &
             (cleach != _TARGET_NODATA))
         rceof1_2 = numpy.zeros(som1c_2.shape)
         rceof1_2[valid_mask] = (
@@ -7094,7 +7195,7 @@ def _decomposition(
         rprpet = numpy.empty(pevap.shape, dtype=numpy.float32)
         rprpet[:] = _TARGET_NODATA
 
-        snowmelt_mask = (valid_mask & (snowmelt > 0))
+        snowmelt_mask = (valid_mask & (snowmelt > 0) & (pevap > 0))
         rprpet[snowmelt_mask] = snowmelt[snowmelt_mask] / pevap[snowmelt_mask]
 
         no_melt_mask = (valid_mask & (snowmelt <= 0))
@@ -8870,6 +8971,7 @@ def calc_delta_iel(c_state_variable, iel_state_variable, delta_c):
     valid_mask = (
         (~numpy.isclose(c_state_variable, _SV_NODATA)) &
         (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
+        (c_state_variable > 0) &
         (delta_c != _TARGET_NODATA))
     delta_iel = numpy.empty(c_state_variable.shape, dtype=numpy.float32)
     delta_iel[:] = _TARGET_NODATA
@@ -9598,7 +9700,8 @@ def calc_minerl_uptake_lyr(uptake_soil, minerl_lyr_iel, fsol, availm):
         (uptake_soil != _TARGET_NODATA) &
         (~numpy.isclose(minerl_lyr_iel, _SV_NODATA)) &
         (fsol != _TARGET_NODATA) &
-        (availm != _TARGET_NODATA))
+        (availm != _TARGET_NODATA) &
+        (availm > 0))
     minerl_uptake_lyr = numpy.empty(uptake_soil.shape, dtype=numpy.float32)
     minerl_uptake_lyr[valid_mask] = (
         uptake_soil[valid_mask] * minerl_lyr_iel[valid_mask] *
@@ -10645,7 +10748,8 @@ def calc_iel_removed(c_consumed, iel_state_variable, c_state_variable):
     valid_mask = (
         (c_consumed != _TARGET_NODATA) &
         (~numpy.isclose(iel_state_variable, _SV_NODATA)) &
-        (~numpy.isclose(c_state_variable, _SV_NODATA)))
+        (~numpy.isclose(c_state_variable, _SV_NODATA)) &
+        (c_state_variable > 0))
     iel_consumed = numpy.empty(c_consumed.shape, dtype=numpy.float32)
     iel_consumed[:] = _TARGET_NODATA
     iel_consumed[valid_mask] = (
@@ -11404,7 +11508,8 @@ def calc_fraction_biomass(
         valid_mask = (
             (~numpy.isclose(cstatv, _SV_NODATA)) &
             (~numpy.isclose(pft_cover, pft_nodata)) &
-            (total_weighted_C != _TARGET_NODATA))
+            (total_weighted_C != _TARGET_NODATA) &
+            (total_weighted_C > 0))
         weighted_fraction = numpy.empty(cstatv.shape, dtype=numpy.float32)
         weighted_fraction[:] = _TARGET_NODATA
         weighted_fraction[valid_mask] = (
@@ -11489,15 +11594,21 @@ def order_by_digestibility(sv_reg, pft_id_set, aoi_path):
         carbon_zonal_stat_df = pandas.DataFrame.from_dict(
             pygeoprocessing.zonal_statistics((cstatv_path, 1), aoi_path),
             orient='index')
-        mean_carbon = (
-            carbon_zonal_stat_df['sum'].sum() /
-            carbon_zonal_stat_df['count'].sum())
+        if carbon_zonal_stat_df['count'].sum() == 0:
+            return 0
+        else:
+            mean_carbon = (
+                carbon_zonal_stat_df['sum'].sum() /
+                carbon_zonal_stat_df['count'].sum())
         nitrogen_zonal_stat_df = pandas.DataFrame.from_dict(
             pygeoprocessing.zonal_statistics((nstatv_path, 1), aoi_path),
             orient='index')
-        mean_nitrogen = (
-            nitrogen_zonal_stat_df['sum'].sum() /
-            nitrogen_zonal_stat_df['count'].sum())
+        if nitrogen_zonal_stat_df['count'].sum() == 0:
+            mean_nitrogen = 0
+        else:
+            mean_nitrogen = (
+                nitrogen_zonal_stat_df['sum'].sum() /
+                nitrogen_zonal_stat_df['count'].sum())
         return (mean_nitrogen / mean_carbon)
 
     nc_ratio_dict = {}
@@ -13067,7 +13178,7 @@ def _animal_diet_sufficiency(
     shutil.rmtree(temp_dir)
 
 
-def animal_density(
+def calc_animal_density(
         biomass_diff, sum_biomass_diff, total_animals, pixel_area_ha):
     """Calculate animals per ha from total animals inside management polygons.
 
@@ -13095,10 +13206,13 @@ def animal_density(
             polygons, in animals/ha
 
     """
+    default_mask = (
+        (total_animals != _TARGET_NODATA))
     valid_mask = (
         (biomass_diff != _TARGET_NODATA) &
         (sum_biomass_diff != _TARGET_NODATA) &
-        (total_animals != _TARGET_NODATA))
+        (sum_biomass_diff > 0) &
+        (default_mask))
     animals_per_pixel = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
     animals_per_pixel[:] = _TARGET_NODATA
     animals_per_pixel[valid_mask] = (
@@ -13106,6 +13220,7 @@ def animal_density(
         total_animals[valid_mask])
     animal_density = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
     animal_density[:] = _TARGET_NODATA
+    animal_density[default_mask] = 0
     animal_density[valid_mask] = animals_per_pixel[valid_mask] / pixel_area_ha
     return animal_density
 
@@ -13443,7 +13558,7 @@ def _estimate_animal_density(
         [(path, 1) for path in [
             temp_val_dict['biomass_diff'], temp_val_dict['sum_biomass_diff'],
             temp_val_dict['total_animals']]] + [(pixel_area_ha, 'raw')],
-        animal_density, month_reg['animal_density'], gdal.GDT_Float32,
+        calc_animal_density, month_reg['animal_density'], gdal.GDT_Float32,
         _TARGET_NODATA)
 
     # clean up temporary files
