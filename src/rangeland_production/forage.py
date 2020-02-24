@@ -13752,9 +13752,7 @@ def validate(args, limit_to=None):
         'animal_grazing_areas_path',
         'site_param_table',
         'veg_trait_path',
-        'animal_trait_path',
-        'site_initial_table',
-        'pft_initial_table']
+        'animal_trait_path']
 
     spatial_file_list = [
         ('aoi_path', gdal.OF_VECTOR, 'vector'),
@@ -13779,6 +13777,15 @@ def validate(args, limit_to=None):
                 missing_key_list.append(key)
             elif args[key] in ['', None]:
                 no_value_list.append(key)
+
+    # if initial conditions dir is not supplied, initial tables are required
+    if 'initial_conditions_dir' not in args:
+        for key in ['site_initial_table', 'pft_initial_table']:
+            if limit_to is None or limit_to == key:
+                if key not in args:
+                    missing_key_list.append(key)
+                elif args[key] in ['', None]:
+                    no_value_list.append(key)
 
     if missing_key_list:
         # if there are missing keys, we have raise KeyError to stop hard
