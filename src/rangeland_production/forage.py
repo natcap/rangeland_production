@@ -1554,7 +1554,6 @@ def _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set):
 
     # clean up
     os.remove(cover_sum_path)
-    os.remove(operand_temp_path)
 
 
 def initial_conditions_from_tables(
