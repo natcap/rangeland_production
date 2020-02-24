@@ -1003,9 +1003,11 @@ class foragetests(unittest.TestCase):
 
     def setUp(self):
         """Create temporary workspace directory."""
-        self.workspace_dir = tempfile.mkdtemp()
-        self.PROCESSING_DIR = os.path.join(
-            self.workspace_dir, "temporary_files")
+        self.workspace_dir = "C:/Users/ginge/Desktop/temp_test_dir"
+        os.makedirs(self.workspace_dir)
+        global PROCESSING_DIR
+        PROCESSING_DIR = os.path.join(self.workspace_dir, "temporary_files")
+        os.makedirs(PROCESSING_DIR)
 
     def tearDown(self):
         """Clean up remaining files."""
@@ -1149,7 +1151,7 @@ class foragetests(unittest.TestCase):
         for i in range(len(string_list_1)):
             self.assertEqual(string_list_1[i], string_list_2[i])
 
-    # @unittest.skip("did not run the whole model, running unit tests only")
+    @unittest.skip("did not run the whole model, running unit tests only")
     def test_model_runs(self):
         """Test forage model."""
         from rangeland_production import forage

@@ -817,6 +817,7 @@ def execute(args):
         "pixel size of aligned inputs: %s", target_pixel_size)
 
     # temporary directory for intermediate files
+    global PROCESSING_DIR
     PROCESSING_DIR = os.path.join(args['workspace_dir'], "temporary_files")
     if not os.path.exists(PROCESSING_DIR):
         os.makedirs(PROCESSING_DIR)
@@ -826,6 +827,8 @@ def execute(args):
     # rasters to be used in raster calculations for the model.
     aligned_raster_dir = os.path.join(
         args['workspace_dir'], 'aligned_inputs')
+    if os.path.exists(aligned_raster_dir):
+        shutil.rmtree(aligned_raster_dir)
     os.makedirs(aligned_raster_dir)
     aligned_inputs = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
@@ -898,6 +901,7 @@ def execute(args):
         if len(state_var_nodata) > 1:
             raise ValueError(
                 "Initial state variable rasters contain >1 nodata value")
+        global _SV_NODATA
         _SV_NODATA = list(state_var_nodata)[0]
 
         # align initial values with inputs
