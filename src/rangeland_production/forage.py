@@ -817,6 +817,7 @@ def execute(args):
         "pixel size of aligned inputs: %s", target_pixel_size)
 
     # temporary directory for intermediate files
+    global PROCESSING_DIR
     PROCESSING_DIR = os.path.join(args['workspace_dir'], "temporary_files")
     if not os.path.exists(PROCESSING_DIR):
         os.makedirs(PROCESSING_DIR)
@@ -826,6 +827,8 @@ def execute(args):
     # rasters to be used in raster calculations for the model.
     aligned_raster_dir = os.path.join(
         args['workspace_dir'], 'aligned_inputs')
+    if os.path.exists(aligned_raster_dir):
+        shutil.rmtree(aligned_raster_dir)
     os.makedirs(aligned_raster_dir)
     aligned_inputs = dict([(key, os.path.join(
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
@@ -898,6 +901,7 @@ def execute(args):
         if len(state_var_nodata) > 1:
             raise ValueError(
                 "Initial state variable rasters contain >1 nodata value")
+        global _SV_NODATA
         _SV_NODATA = list(state_var_nodata)[0]
 
         # align initial values with inputs
@@ -1550,7 +1554,6 @@ def _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set):
 
     # clean up
     os.remove(cover_sum_path)
-    os.remove(operand_temp_path)
 
 
 def initial_conditions_from_tables(
@@ -13752,9 +13755,7 @@ def validate(args, limit_to=None):
         'animal_grazing_areas_path',
         'site_param_table',
         'veg_trait_path',
-        'animal_trait_path',
-        'site_initial_table',
-        'pft_initial_table']
+        'animal_trait_path']
 
     spatial_file_list = [
         ('aoi_path', gdal.OF_VECTOR, 'vector'),
@@ -13779,6 +13780,15 @@ def validate(args, limit_to=None):
                 missing_key_list.append(key)
             elif args[key] in ['', None]:
                 no_value_list.append(key)
+
+    # if initial conditions dir is not supplied, initial tables are required
+    if 'initial_conditions_dir' not in args:
+        for key in ['site_initial_table', 'pft_initial_table']:
+            if limit_to is None or limit_to == key:
+                if key not in args:
+                    missing_key_list.append(key)
+                elif args[key] in ['', None]:
+                    no_value_list.append(key)
 
     if missing_key_list:
         # if there are missing keys, we have raise KeyError to stop hard

@@ -273,6 +273,17 @@ class Forage(model.InVESTModel):
             label=u'Animal Parameter Table (CSV)',
             validator=self.validator)
         self.add_input(self.animal_trait_path)
+        self.initial_conditions_dir = inputs.File(
+            args_key=u'initial_conditions_dir',
+            helptext=(
+                u"A path to a directory containing initial conditions rasters "
+                "for each site- and PFT-level state variable (optional). "
+                "See model documentation for required state variables and "
+                "file names. If this directory is not supplied, initial "
+                "values tables must be supplied."),
+            label=u'Initial Conditions Directory',
+            validator=self.validator)
+        self.add_input(self.initial_conditions_dir)
         self.site_initial_table = inputs.File(
             args_key=u'site_initial_table',
             helptext=(
@@ -283,7 +294,7 @@ class Forage(model.InVESTModel):
                 "modeled site type to their location within the study area. "
                 "See model documentation for state variables that are "
                 "required to be included in this table."),
-            label=u'Initial Conditions Site State Variables',
+            label=u'Initial Conditions Table: Site State Variables',
             validator=self.validator)
         self.add_input(self.site_initial_table)
         self.pft_initial_table = inputs.File(
@@ -297,7 +308,7 @@ class Forage(model.InVESTModel):
                 "their fractional cover in each pixel. See model "
                 "documentation for state variables that are required to be "
                 "included in this table."),
-            label=u'Initial Conditions: Plant Functional Type State Variables',
+            label=u'Initial Conditions Table: PFT State Variables',
             validator=self.validator)
         self.add_input(self.pft_initial_table)
 
@@ -337,6 +348,8 @@ class Forage(model.InVESTModel):
             self.site_param_table.args_key: self.site_param_table.value(),
             self.veg_trait_path.args_key: self.veg_trait_path.value(),
             self.animal_trait_path.args_key: self.animal_trait_path.value(),
+            self.initial_conditions_dir.args_key:
+                self.initial_conditions_dir.value(),
             self.site_initial_table.args_key: self.site_initial_table.value(),
             self.pft_initial_table.args_key: self.pft_initial_table.value(),
         }
