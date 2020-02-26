@@ -29,8 +29,8 @@ requirements, over the same time period as the inputs.
 A beta version of this model was described in Kowal et al. 2019,
 available at https://www.nature.com/articles/s41598-019-56470-3.
 
-For full model documentation and visualization of sample model outputs,
-see http://viz.naturalcapitalproject.org/rangelands .
+For an interactive visualization of sample model outputs, see
+http://viz.naturalcapitalproject.org/rangelands .
 
 References
 -------------------
