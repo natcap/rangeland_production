@@ -1101,14 +1101,10 @@ def execute(args):
         _apply_new_growth(delta_agliv_dict, pft_id_set, provisional_sv_reg)
 
         # estimate animal density from provisional biomass in the absence of
-        #   grazing vs observed biomass from earth observations
-        obs_biomass_path = os.path.join(
-            output_dir, 'observed_biomass_{}_{}.tif'.format(
-                current_year, current_month))
+        #   grazing vs a remotely sensed vegetation index
         _estimate_animal_density(
-            aligned_inputs, month_index, pft_id_set, site_param_table,
-            args['animal_grazing_areas_path'], provisional_sv_reg,
-            obs_biomass_path, month_reg)
+            aligned_inputs, month_index, pft_id_set,
+            args['animal_grazing_areas_path'], provisional_sv_reg, month_reg)
 
         # estimate grazing offtake by animals relative to provisional biomass
         #   at an intermediate step, after senescence but before new growth
@@ -1343,7 +1339,7 @@ def raster_sum(
         return result
 
     def raster_sum_op_nodata_remove(raster1, raster2):
-        """Subtract raster2 from raster1, treating nodata as zero."""
+        """Add raster1 and raster2, treating nodata as zero."""
         numpy.place(raster1, numpy.isclose(raster1, raster1_nodata), [0])
         numpy.place(raster2, numpy.isclose(raster2, raster2_nodata), [0])
         result = raster1 + raster2
@@ -13182,23 +13178,24 @@ def _animal_diet_sufficiency(
 
 
 def calc_animal_density(
-        biomass_diff, sum_biomass_diff, total_animals, pixel_area_ha):
+        adjusted_diff, sum_adjusted_diff, total_animals, pixel_area_ha):
     """Calculate animals per ha from total animals inside management polygons.
 
     Calculate animal density in animals per ha from the difference between
-    potential and observed biomass inside polygon features containing grazing
-    animals. First calculate the number of animals per pixel from the
-    proportional difference between observed and potential biomass inside
-    grazing area polygons, assuming that pixels with a greater proportional
-    difference between potential and observed biomass contain a greater
-    proportion of the total number of animals grazing inside that polygon
-    feature. Then divide the number of animals per pixel by the pixel area in
-    ha to get animals per ha.
+    normalized potential biomass and normalized vegetation index inside polygon
+    features containing grazing animals. First calculate the number of animals
+    per pixel from the proportional adjusted difference between normalized
+    potential biomass and normalized vegetation index derived from earth
+    observations, assuming that pixels with a greater proportional
+    difference between relative potential biomass and the vegetation index
+    contain a greater proportion of the total number of animals grazing inside
+    that polygon feature. Then divide the number of animals per pixel by the
+    pixel area in ha to get animals per ha.
 
     Parameters:
-        biomass_diff (numpy.ndarray): derived, difference between observed and
-            predicted biomass
-        sum_biomass_diff (numpy.ndarray): derived, the sum of biomass_diff
+        adjusted_diff (numpy.ndarray): derived, difference between normalized,
+            translated predicted biomass and normalized EO index
+        sum_adjusted_diff (numpy.ndarray): derived, the sum of adjusted_diff
             inside animal management polygons
         total_animals (numpy.ndarray): derived, total number of grazing animals
             inside animal management polygons
@@ -13212,16 +13209,16 @@ def calc_animal_density(
     default_mask = (
         (total_animals != _TARGET_NODATA))
     valid_mask = (
-        (biomass_diff != _TARGET_NODATA) &
-        (sum_biomass_diff != _TARGET_NODATA) &
-        (sum_biomass_diff > 0) &
+        (adjusted_diff != _TARGET_NODATA) &
+        (sum_adjusted_diff != _TARGET_NODATA) &
+        (sum_adjusted_diff > 0) &
         (default_mask))
-    animals_per_pixel = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
+    animals_per_pixel = numpy.empty(adjusted_diff.shape, dtype=numpy.float32)
     animals_per_pixel[:] = _TARGET_NODATA
     animals_per_pixel[valid_mask] = (
-        (biomass_diff[valid_mask] / sum_biomass_diff[valid_mask]) *
+        (adjusted_diff[valid_mask] / sum_adjusted_diff[valid_mask]) *
         total_animals[valid_mask])
-    animal_density = numpy.empty(biomass_diff.shape, dtype=numpy.float32)
+    animal_density = numpy.empty(adjusted_diff.shape, dtype=numpy.float32)
     animal_density[:] = _TARGET_NODATA
     animal_density[default_mask] = 0
     animal_density[valid_mask] = animals_per_pixel[valid_mask] / pixel_area_ha
@@ -13311,9 +13308,145 @@ def sum_c_to_biomass(sum_aglivc, sum_stdedc):
     return total_biomass
 
 
+def normalize_within_grazing_areas(
+        vegetation_path, animal_grazing_areas_shp_path,
+        animal_grazing_areas_raster_path, target_path):
+    """Normalize vegetation values across pixels within grazing area features.
+
+    Normalize vegetation values within each grazing area feature relative to
+    the maximum and minimum value inside that feature.
+
+    Parameters:
+        vegetation_path (string): path to raster giving vegetation values
+        animal_grazing_areas_shp_path (string): path to animal vector inputs
+            giving the location of grazing animals. This dataset must have a
+            'shp_id' field.
+        animal_grazing_areas_raster_path (string): path to raster giving the
+            location of grazing animals. The values in this raster are the
+            values in the 'shp_id' field of `animal_grazing_areas_shp_path`
+        target_path (string): location where normalized output should be saved
+
+    Side effects:
+        creates raster of vegetation values normalized within grazing area
+            features at the location given by `target_path`
+
+    Returns:
+        None
+
+    """
+    def normalize_op(value, min_value, max_value):
+        """Normalize values relative to minimum and maximum."""
+        valid_mask = (
+            (~numpy.isclose(value, value_nodata)) &
+            (min_value != _TARGET_NODATA) &
+            (max_value != _TARGET_NODATA))
+        normalized = numpy.empty(value.shape, dtype=numpy.float32)
+        normalized[:] = _TARGET_NODATA
+        normalized[valid_mask] = (
+            (value[valid_mask] - min_value[valid_mask]) /
+            (max_value[valid_mask] - min_value[valid_mask]))
+        return normalized
+
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['min_value', 'max_value']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+
+    # identify min and max vegetation value inside each grazing area feature
+    zonal_stats = pygeoprocessing.zonal_statistics(
+        (vegetation_path, 1), animal_grazing_areas_shp_path,
+        polygons_might_overlap=False)
+    feature_to_min_val = dict(
+        [(fid, float(table['min'])) for fid, table in zonal_stats.items()])
+    pygeoprocessing.reclassify_raster(
+        (animal_grazing_areas_raster_path, 1), feature_to_min_val,
+        temp_val_dict['min_value'], gdal.GDT_Float32, _TARGET_NODATA)
+    feature_to_max_val = dict(
+        [(fid, float(table['max'])) for fid, table in zonal_stats.items()])
+    pygeoprocessing.reclassify_raster(
+        (animal_grazing_areas_raster_path, 1), feature_to_max_val,
+        temp_val_dict['max_value'], gdal.GDT_Float32, _TARGET_NODATA)
+    value_nodata = pygeoprocessing.get_raster_info(
+        vegetation_path)['nodata'][0]
+
+    # normalize values relative to min and max
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in [
+            vegetation_path,
+            temp_val_dict['min_value'], temp_val_dict['max_value']]],
+        normalize_op, target_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+
+def calc_adjusted_diff(
+        EO_normalized_path, biomass_potential_normalized_path,
+        animal_grazing_areas_shp_path, animal_grazing_areas_raster_path,
+        target_path):
+    """Calculate the adjusted difference of normalized vegetation.
+
+    The adjusted difference of normalized vegetation is an indicator of
+    grazing pressure, or the relative number of grazing animals across pixels.
+    The adjusted difference is calculated by subtracting normalized vegetation
+    indicated by an earth observations (EO) vegetation index from normalized
+    potential vegetation predicted by the Rangeland Production model, after
+    normalized potential vegetation is translated up so that all normalized
+    potential vegetation values are greater than normalized EO values. This
+    translation step ensures that the minimum adjusted difference is 0.
+
+    Parameters:
+        EO_normalized_path (string): path to raster of earth observations
+            vegetation index normalized within grazing area features
+        biomass_potential_normalized_path (string): path to raster of potential
+            biomass normalized within grazing area features
+        animal_grazing_areas_shp_path (string): path to animal vector inputs
+            giving the location of grazing animals. This dataset must have a
+            'shp_id' field.
+        animal_grazing_areas_raster_path (string): path to raster giving the
+            location of grazing animals. The values in this raster are the
+            values in the 'shp_id' field of `animal_grazing_areas_shp_path`
+        target_path (string): location where output should be saved
+
+    Side effects:
+        creates a raster of adjusted difference in normalized vegetation within
+            grazing features at the location given by `target_path`
+
+    Returns:
+        None
+
+    """
+    temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
+    temp_val_dict = {}
+    for val in ['normalized_diff', 'max_diff', 'biomass_potential_translated']:
+        temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
+    raster_difference(
+        EO_normalized_path, _TARGET_NODATA,
+        biomass_potential_normalized_path, _TARGET_NODATA,
+        temp_val_dict['normalized_diff'], _IC_NODATA)
+
+    # find maximum difference within grazing area features
+    zonal_stats = pygeoprocessing.zonal_statistics(
+        (temp_val_dict['normalized_diff'], 1), animal_grazing_areas_shp_path,
+        polygons_might_overlap=False)
+    feature_to_max_diff = dict(
+        [(fid, float(table['max'])) for fid, table in zonal_stats.items()])
+    pygeoprocessing.reclassify_raster(
+        (animal_grazing_areas_raster_path, 1), feature_to_max_diff,
+        temp_val_dict['max_diff'], gdal.GDT_Float32, _TARGET_NODATA)
+
+    # translate normalized potential biomass up by maximum difference
+    raster_sum(
+        biomass_potential_normalized_path, _TARGET_NODATA,
+        temp_val_dict['max_diff'], _TARGET_NODATA,
+        temp_val_dict['biomass_potential_translated'], _TARGET_NODATA)
+
+    # adjusted difference: biomass_potential_translated - EO_normalized
+    raster_difference(
+        temp_val_dict['biomass_potential_translated'], _TARGET_NODATA,
+        EO_normalized_path, _TARGET_NODATA, target_path, _TARGET_NODATA)
+
+
 def _estimate_animal_density(
-        aligned_inputs, month_index, pft_id_set, site_param_table,
-        animal_grazing_areas_path, sv_reg, obs_biomass_path, month_reg):
+        aligned_inputs, month_index, pft_id_set, animal_grazing_areas_path,
+        sv_reg, month_reg):
     """Estimate the density of grazing animals on each pixel of the study area.
 
     Calculate observed biomass for the current month from a remotely sensed
@@ -13332,9 +13465,6 @@ def _estimate_animal_density(
         month_index (int): month of the simulation, such that month_index=13
             indicates month 13 of the simulation
         pft_id_set (set): set of integers identifying plant functional types
-        site_param_table (dict): map of site spatial index to dictionaries
-            that contain site-level parameters, including slope and intercept
-            of relationship between NDVI and biomass
         animal_grazing_areas_path (string): path to animal vector inputs giving
             the location of grazing animals
         sv_reg (dict): map of key, path pairs giving paths to state variables,
@@ -13353,36 +13483,6 @@ def _estimate_animal_density(
         creates or modifies the raster indicated by month_reg['animal_density']
 
     """
-    def calc_observed_biomass(
-            EO_index, EO_biomass_intercept, EO_biomass_slope):
-        """Calculate observed biomass from a remotely sensed vegetation index.
-
-        Observed biomass is calculated via linear regression from a vegetation
-        index derived from earth observations.  The linear regression is
-        assumed to apply to total standing biomass in kg per ha.
-
-        EO_index (numpy.ndarray): input, remotely sensed vegetation index for
-            the current month
-        EO_biomass_intercept (numpy.ndarray): parameter, intercept of linear
-            regression to predict total biomass from the vegetation index
-        EO_biomass_slope (numpy.ndarray): parameter, slope of linear regression
-            to predict total biomass from the vegetation index
-
-        Returns:
-            biomass_obs, observed total biomass
-
-        """
-        valid_mask = (
-            (~numpy.isclose(EO_index, EO_nodata)) &
-            (EO_biomass_intercept != _IC_NODATA) &
-            (EO_biomass_slope != _IC_NODATA))
-        biomass_obs = numpy.empty(EO_index.shape, dtype=numpy.float32)
-        biomass_obs[:] = _TARGET_NODATA
-        biomass_obs[valid_mask] = numpy.clip(
-            EO_index[valid_mask] * EO_biomass_slope[valid_mask] +
-            EO_biomass_intercept[valid_mask], 0., None)
-        return biomass_obs
-
     def calc_potential_biomass(
             aligned_inputs, sv_reg, pft_id_set, potential_biomass_path):
         """Sum total aboveground biomass across modeled plant functional types.
@@ -13433,35 +13533,6 @@ def _estimate_animal_density(
         # clean up temporary files
         shutil.rmtree(temp_dir)
 
-    def calc_biomass_diff(biomass_obs, biomass_potential):
-        """Calculate the difference between potential and observed biomass.
-
-        The difference between potential biomass estimated from modeled biomass
-        in the absence of grazing and observed biomass from a remotely sensed
-        vegetation index is taken as an indication of grazing pressure. Because
-        grazing pressure cannot be negative, set any such pixels where
-        potential biomass is smaller than observed biomass to zero.
-
-        Parameters:
-            biomass_obs (numpy.ndarray): derived, observed biomass estimated
-                from remotely sensed vegetation index
-            biomass_potential (numpy.ndarray): derived, potential biomass
-                estimated from modeled biomass in the absence of grazing
-
-        Returns:
-            biomass_diff, biomass_obs subtracted from biomass_potential with
-                negative values set to zero
-
-        """
-        valid_mask = (
-            (biomass_obs != _TARGET_NODATA) &
-            (biomass_potential != _TARGET_NODATA) &
-            (biomass_potential > biomass_obs))
-        biomass_diff = numpy.zeros(biomass_obs.shape, dtype=numpy.float32)
-        biomass_diff[valid_mask] = (
-            biomass_potential[valid_mask] - biomass_obs[valid_mask])
-        return biomass_diff
-
     def get_pixel_area_ha(raster_path):
         """Get pixel area in ha from dataset in geographic coordinates.
 
@@ -13490,47 +13561,14 @@ def _estimate_animal_density(
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     temp_val_dict = {}
     for val in [
-            'biomass_potential', 'biomass_diff', 'animal_mgmt_features',
-            'total_animals', 'sum_biomass_diff', 'proportional_diff']:
+            'animal_mgmt_features', 'biomass_potential',
+            'biomass_potential_normalized', 'EO_normalized', 'adjusted_diff',
+            'total_animals', 'sum_adjusted_diff', 'proportional_diff']:
         temp_val_dict[val] = os.path.join(temp_dir, '{}.tif'.format(val))
     temp_val_dict['animal_mgmt_copy'] = os.path.join(
         temp_dir, 'animal_mgmt_copy.shp')
-    param_val_dict = {}
-    for val in ['eo_biomass_intercept', 'eo_biomass_slope']:
-        target_path = os.path.join(temp_dir, '{}.tif'.format(val))
-        param_val_dict[val] = target_path
-        site_to_val = dict(
-            [(site_code, float(table[val])) for
-                (site_code, table) in site_param_table.items()])
-        pygeoprocessing.reclassify_raster(
-            (aligned_inputs['site_index'], 1), site_to_val, target_path,
-            gdal.GDT_Float32, _IC_NODATA)
 
-    EO_nodata = pygeoprocessing.get_raster_info(
-        aligned_inputs['EO_index_{}'.format(month_index)])['nodata'][0]
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [
-            aligned_inputs['EO_index_{}'.format(month_index)],
-            param_val_dict['eo_biomass_intercept'],
-            param_val_dict['eo_biomass_slope']]],
-        calc_observed_biomass, obs_biomass_path, gdal.GDT_Float32,
-        _TARGET_NODATA)
-    calc_potential_biomass(
-        aligned_inputs, sv_reg, pft_id_set, temp_val_dict['biomass_potential'])
-
-    # calculate biomass mismatch, setting negative pixels to 0
-    pygeoprocessing.raster_calculator(
-        [(path, 1) for path in [
-            obs_biomass_path, temp_val_dict['biomass_potential']]],
-        calc_biomass_diff, temp_val_dict['biomass_diff'],
-        gdal.GDT_Float32, _TARGET_NODATA)
-
-    # calculate the sum of biomass_diff within animal management polygons
-    biomass_diff_table = pygeoprocessing.zonal_statistics(
-        (temp_val_dict['biomass_diff'], 1), animal_grazing_areas_path,
-        polygons_might_overlap=False)
-
-    # generate raster with the sum of biomass diff within animal polygons
+    # generate raster of animal grazing areas
     add_shp_id_field(
         animal_grazing_areas_path, temp_val_dict['animal_mgmt_copy'])
     pygeoprocessing.new_raster_from_base(
@@ -13540,12 +13578,40 @@ def _estimate_animal_density(
         temp_val_dict['animal_mgmt_copy'],
         temp_val_dict['animal_mgmt_features'],
         option_list=["ATTRIBUTE=shp_id"])
+
+    # normalize modeled biomass and the EO index within grazing areas
+    calc_potential_biomass(
+        aligned_inputs, sv_reg, pft_id_set, temp_val_dict['biomass_potential'])
+    normalize_within_grazing_areas(
+        temp_val_dict['biomass_potential'],
+        temp_val_dict['animal_mgmt_copy'],
+        temp_val_dict['animal_mgmt_features'],
+        temp_val_dict['biomass_potential_normalized'])
+    normalize_within_grazing_areas(
+        aligned_inputs['EO_index_{}'.format(month_index)],
+        temp_val_dict['animal_mgmt_copy'],
+        temp_val_dict['animal_mgmt_features'], temp_val_dict['EO_normalized'])
+
+    # calculate adjusted diff, the difference between normalized, translated
+    #   modeled biomass and normalized EO index
+    calc_adjusted_diff(
+        temp_val_dict['EO_normalized'],
+        temp_val_dict['biomass_potential_normalized'],
+        temp_val_dict['animal_mgmt_copy'],
+        temp_val_dict['animal_mgmt_features'], temp_val_dict['adjusted_diff'])
+
+    # calculate the sum of adjusted_diff within animal management polygons
+    adjusted_diff_table = pygeoprocessing.zonal_statistics(
+        (temp_val_dict['adjusted_diff'], 1), animal_grazing_areas_path,
+        polygons_might_overlap=False)
+
+    # generate raster with the sum of biomass diff within animal polygons
     feature_to_val = dict(
         [(fid, float(table['sum'])) for fid, table in
-            biomass_diff_table.items()])
+            adjusted_diff_table.items()])
     pygeoprocessing.reclassify_raster(
         (temp_val_dict['animal_mgmt_features'], 1), feature_to_val,
-        temp_val_dict['sum_biomass_diff'], gdal.GDT_Float32, _TARGET_NODATA)
+        temp_val_dict['sum_adjusted_diff'], gdal.GDT_Float32, _TARGET_NODATA)
 
     # generate raster of total animals from animal management polygon
     pygeoprocessing.new_raster_from_base(
@@ -13559,7 +13625,7 @@ def _estimate_animal_density(
     pixel_area_ha = get_pixel_area_ha(aligned_inputs['animal_index'])
     pygeoprocessing.raster_calculator(
         [(path, 1) for path in [
-            temp_val_dict['biomass_diff'], temp_val_dict['sum_biomass_diff'],
+            temp_val_dict['adjusted_diff'], temp_val_dict['sum_adjusted_diff'],
             temp_val_dict['total_animals']]] + [(pixel_area_ha, 'raw')],
         calc_animal_density, month_reg['animal_density'], gdal.GDT_Float32,
         _TARGET_NODATA)
