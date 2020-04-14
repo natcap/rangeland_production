@@ -13342,9 +13342,17 @@ def normalize_within_grazing_areas(
             (max_value != _TARGET_NODATA))
         normalized = numpy.empty(value.shape, dtype=numpy.float32)
         normalized[:] = _TARGET_NODATA
-        normalized[valid_mask] = (
-            (value[valid_mask] - min_value[valid_mask]) /
-            (max_value[valid_mask] - min_value[valid_mask]))
+        # special case: all pixels have equal value inside grazing feature
+        zero_mask = (
+            (numpy.isclose(min_value, max_value)) &
+            valid_mask)
+        normalized[zero_mask] = 0.5
+        nonzero_mask = (
+            (~numpy.isclose(min_value, max_value)) &
+            valid_mask)
+        normalized[nonzero_mask] = (
+            (value[nonzero_mask] - min_value[nonzero_mask]) /
+            (max_value[nonzero_mask] - min_value[nonzero_mask]))
         return normalized
 
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
