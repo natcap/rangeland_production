@@ -4958,6 +4958,7 @@ def subtract_surface_losses(return_type):
         # loss to bare soil evaporation
         absevap = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
         absevap[:] = _TARGET_NODATA
+        absevap[valid_mask] = 0.
         absevap[evap_mask] = (
             0.5 *
             numpy.exp((-0.002 * alit[evap_mask]) - (0.004 * sd[evap_mask])) *
@@ -4965,6 +4966,7 @@ def subtract_surface_losses(return_type):
         # total losses to interception and evaporation
         evap_losses = numpy.empty(inputs_after_snow.shape, dtype=numpy.float32)
         evap_losses[:] = _TARGET_NODATA
+        evap_losses[valid_mask] = 0.
         evap_losses[evap_mask] = (
             numpy.minimum(((absevap[evap_mask] + aint[evap_mask]) *
             inputs_after_runoff[evap_mask]), (0.4 * pet_rem[evap_mask])))
@@ -5036,7 +5038,7 @@ def calc_potential_transpiration(return_type):
         valid_mask = (
             (pet_rem != _TARGET_NODATA) &
             (evap_losses != _TARGET_NODATA) &
-            (tave != _TARGET_NODATA) &
+            (tave != _IC_NODATA) &
             (aliv != _TARGET_NODATA) &
             (current_moisture_inputs != _TARGET_NODATA))
         trap = numpy.empty(pet_rem.shape, dtype=numpy.float32)
@@ -6094,8 +6096,6 @@ def calc_tcflow_strucc_1(
         (~numpy.isclose(strucc_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_1, _SV_NODATA)) &
         (~numpy.isclose(struce_1_2, _SV_NODATA)) &
-        (struce_1_1 > 0) &
-        (struce_1_2 > 0) &
         (rnewas_1_1 != _TARGET_NODATA) &
         (rnewas_2_1 != _TARGET_NODATA) &
         (strmax_1 != _IC_NODATA) &
@@ -6169,8 +6169,6 @@ def calc_tcflow_strucc_2(
         (~numpy.isclose(strucc_2, _SV_NODATA)) &
         (~numpy.isclose(struce_2_1, _SV_NODATA)) &
         (~numpy.isclose(struce_2_2, _SV_NODATA)) &
-        (struce_2_1 > 0) &
-        (struce_2_2 > 0) &
         (rnewbs_1_1 != _TARGET_NODATA) &
         (rnewbs_2_1 != _TARGET_NODATA) &
         (strmax_2 != _IC_NODATA) &
@@ -6235,8 +6233,6 @@ def calc_tcflow_surface(
         (~numpy.isclose(cstatv, _SV_NODATA)) &
         (~numpy.isclose(estatv_1, _SV_NODATA)) &
         (~numpy.isclose(estatv_2, _SV_NODATA)) &
-        (estatv_1 > 0) &
-        (estatv_2 > 0) &
         (rcetob_1 != _TARGET_NODATA) &
         (rcetob_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6299,8 +6295,6 @@ def calc_tcflow_soil(
         (~numpy.isclose(cstatv, _SV_NODATA)) &
         (~numpy.isclose(estatv_1, _SV_NODATA)) &
         (~numpy.isclose(estatv_2, _SV_NODATA)) &
-        (estatv_1 > 0) &
-        (estatv_2 > 0) &
         (rcetob_1 != _TARGET_NODATA) &
         (rcetob_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &
@@ -6366,8 +6360,6 @@ def calc_tcflow_som1c_2(
         (~numpy.isclose(som1c_2, _SV_NODATA)) &
         (~numpy.isclose(som1e_2_1, _SV_NODATA)) &
         (~numpy.isclose(som1e_2_2, _SV_NODATA)) &
-        (som1e_2_1 > 0) &
-        (som1e_2_2 > 0) &
         (rceto2_1 != _TARGET_NODATA) &
         (rceto2_2 != _TARGET_NODATA) &
         (defac != _TARGET_NODATA) &

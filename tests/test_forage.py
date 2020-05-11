@@ -4123,7 +4123,7 @@ class foragetests(unittest.TestCase):
         insert_nodata_values_into_array(aliv, _TARGET_NODATA)
         insert_nodata_values_into_array(
             current_moisture_inputs, _TARGET_NODATA)
-        insert_nodata_values_into_array(tave, _TARGET_NODATA)
+        insert_nodata_values_into_array(tave, _IC_NODATA)
 
         trap = forage.calc_potential_transpiration(
             'trap')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
@@ -4210,7 +4210,7 @@ class foragetests(unittest.TestCase):
 
         insert_nodata_values_into_array(pet_rem, _TARGET_NODATA)
         insert_nodata_values_into_array(evap_losses, _TARGET_NODATA)
-        insert_nodata_values_into_array(tave, _TARGET_NODATA)
+        insert_nodata_values_into_array(tave, _IC_NODATA)
 
         trap = forage.calc_potential_transpiration(
             'trap')(pet_rem, evap_losses, tave, aliv, current_moisture_inputs)
