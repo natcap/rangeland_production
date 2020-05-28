@@ -810,9 +810,9 @@ def execute(args):
             "Couldn't find trait values for the following animal " +
             "ids: %s\n\t" + ", ".join(missing_animal_trait_list))
 
-    # align inputs to match resolution of precipitation rasters
+    # align inputs to match resolution of earth observation rasters
     target_pixel_size = pygeoprocessing.get_raster_info(
-        base_align_raster_path_id_map['precip_0'])['pixel_size']
+        base_align_raster_path_id_map['EO_index_0'])['pixel_size']
     LOGGER.info(
         "pixel size of aligned inputs: %s", target_pixel_size)
 
@@ -834,7 +834,7 @@ def execute(args):
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
         for key, path in base_align_raster_path_id_map.items()])
 
-    # align all the base inputs to be the minimum known pixel size and to
+    # align all the base inputs to pixel size of earth observations and to
     # only extend over their combined intersections
     source_input_path_list = [
         base_align_raster_path_id_map[k] for k in sorted(
