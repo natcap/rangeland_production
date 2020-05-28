@@ -11187,6 +11187,7 @@ def calc_derived_animal_traits(input_animal_trait_table, freer_parameter_df):
     animal_df['reproductive_status_int'] = 0
     animal_df['A_foet'] = 0
     animal_df['A_y'] = 0
+    animal_df.set_index(['animal_id'], inplace=True)
     animal_trait_table = animal_df.to_dict(orient='index')
     return animal_trait_table
 
