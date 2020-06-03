@@ -810,9 +810,9 @@ def execute(args):
             "Couldn't find trait values for the following animal " +
             "ids: %s\n\t" + ", ".join(missing_animal_trait_list))
 
-    # align inputs to match resolution of precipitation rasters
+    # align inputs to match resolution of earth observation rasters
     target_pixel_size = pygeoprocessing.get_raster_info(
-        base_align_raster_path_id_map['precip_0'])['pixel_size']
+        base_align_raster_path_id_map['EO_index_0'])['pixel_size']
     LOGGER.info(
         "pixel size of aligned inputs: %s", target_pixel_size)
 
@@ -834,7 +834,7 @@ def execute(args):
         aligned_raster_dir, 'aligned_%s' % os.path.basename(path)))
         for key, path in base_align_raster_path_id_map.items()])
 
-    # align all the base inputs to be the minimum known pixel size and to
+    # align all the base inputs to pixel size of earth observations and to
     # only extend over their combined intersections
     source_input_path_list = [
         base_align_raster_path_id_map[k] for k in sorted(
@@ -11906,7 +11906,6 @@ def calc_energy_maintenance(
         (weight != _TARGET_NODATA) &
         (energy_intake != _TARGET_NODATA) &
         (total_intake != _TARGET_NODATA) &
-        (total_intake > 0) &
         (total_digestibility != _TARGET_NODATA) &
         (CK1 != _IC_NODATA) &
         (CK2 != _IC_NODATA) &
@@ -11917,26 +11916,31 @@ def calc_energy_maintenance(
         (CM6 != _IC_NODATA) &
         (CM7 != _IC_NODATA) &
         (CM16 != _IC_NODATA))
+    nonzero_mask = (
+        (total_intake > 0) &
+        valid_mask)
     km = numpy.empty(age.shape, dtype=numpy.float32)
-    km[valid_mask] = (
-        CK1[valid_mask] + CK2[valid_mask] * (
-            energy_intake[valid_mask] / total_intake[valid_mask]))
+    km[nonzero_mask] = (
+        CK1[nonzero_mask] + CK2[nonzero_mask] * (
+            energy_intake[nonzero_mask] / total_intake[nonzero_mask]))
     Egraze = numpy.empty(age.shape, dtype=numpy.float32)
-    Egraze[valid_mask] = (
-        CM6[valid_mask] * weight[valid_mask] * total_intake[valid_mask] *
-        (CM7[valid_mask] - total_digestibility[valid_mask]) +
-        (CM16[valid_mask] * 4. * weight[valid_mask]))
+    Egraze[nonzero_mask] = (
+        CM6[nonzero_mask] * weight[nonzero_mask] * total_intake[nonzero_mask] *
+        (CM7[nonzero_mask] - total_digestibility[nonzero_mask]) +
+        (CM16[nonzero_mask] * 4. * weight[nonzero_mask]))
     Emetab = numpy.empty(age.shape, dtype=numpy.float32)
-    Emetab[valid_mask] = (
-        CM2[valid_mask] * weight[valid_mask] ** 0.75 *
+    Emetab[nonzero_mask] = (
+        CM2[nonzero_mask] * weight[nonzero_mask] ** 0.75 *
         numpy.maximum(
-            numpy.exp(-CM3[valid_mask] * age[valid_mask]), CM4[valid_mask]))
+            numpy.exp(-CM3[nonzero_mask] * age[nonzero_mask]),
+            CM4[nonzero_mask]))
 
     energy_maintenance_female = numpy.empty(age.shape, dtype=numpy.float32)
     energy_maintenance_female[:] = _TARGET_NODATA
-    energy_maintenance_female[valid_mask] = (
-        (Emetab[valid_mask] + Egraze[valid_mask]) / km[valid_mask] +
-        CM1[valid_mask] * energy_intake[valid_mask])
+    energy_maintenance_female[valid_mask] = 0
+    energy_maintenance_female[nonzero_mask] = (
+        (Emetab[nonzero_mask] + Egraze[nonzero_mask]) / km[nonzero_mask] +
+        CM1[nonzero_mask] * energy_intake[nonzero_mask])
 
     energy_maintenance = energy_maintenance_female
     male_mask = (
@@ -12038,6 +12042,9 @@ def calc_protein_req(
                 (CRD5 != _IC_NODATA) &
                 (CRD6 != _IC_NODATA) &
                 (CRD7 != _IC_NODATA))
+            nonzero_mask = (
+                (energy_maintenance > 0) &
+                valid_mask)
             # estimated day of the year in the middle of current current_month
             day_of_year = 15.2 + 30.4 * (current_month - 1)
 
@@ -12048,12 +12055,13 @@ def calc_protein_req(
 
             protein_req = numpy.empty(latitude.shape, dtype=numpy.float32)
             protein_req[:] = _TARGET_NODATA
-            protein_req[valid_mask] = (
-                (CRD4[valid_mask] + CRD5[valid_mask] * (1. - numpy.exp(
-                    -CRD6[valid_mask] * (
-                        energy_intake[valid_mask] /
-                        energy_maintenance[valid_mask])))) *
-                (radiation_factor[valid_mask] * energy_intake[valid_mask]))
+            protein_req[valid_mask] = 0
+            protein_req[nonzero_mask] = (
+                (CRD4[nonzero_mask] + CRD5[nonzero_mask] * (1. - numpy.exp(
+                    -CRD6[nonzero_mask] * (
+                        energy_intake[nonzero_mask] /
+                        energy_maintenance[nonzero_mask])))) *
+                (radiation_factor[nonzero_mask] * energy_intake[nonzero_mask]))
             return protein_req
         return _protein_req_op
 
@@ -12831,6 +12839,9 @@ def calc_diet_sufficiency(
         (degr_protein_intake != _TARGET_NODATA) &
         (protein_req != _TARGET_NODATA) &
         (SRW != _IC_NODATA))
+    nonzero_mask = (
+        (energy_maintenance > 0) &
+        valid_mask)
     # energy requirements of pregnancy
     energy_pregnancy = numpy.zeros(energy_intake.shape, dtype=numpy.float32)
     pregnant_mask = ((reproductive_status == 1) & valid_mask)
@@ -12913,10 +12924,11 @@ def calc_diet_sufficiency(
 
     diet_sufficiency = numpy.empty(energy_intake.shape, dtype=numpy.float32)
     diet_sufficiency[:] = _TARGET_NODATA
-    diet_sufficiency[valid_mask] = (
-        energy_intake[valid_mask] / (
-            energy_maintenance[valid_mask] + energy_pregnancy[valid_mask] +
-            energy_lactation[valid_mask] + energy_wool[valid_mask]))
+    diet_sufficiency[valid_mask] = 0
+    diet_sufficiency[nonzero_mask] = (
+        energy_intake[nonzero_mask] / (
+            energy_maintenance[nonzero_mask] + energy_pregnancy[nonzero_mask] +
+            energy_lactation[nonzero_mask] + energy_wool[nonzero_mask]))
     return diet_sufficiency
 
 
