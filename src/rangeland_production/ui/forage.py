@@ -315,7 +315,7 @@ class Forage(model.InVESTModel):
             args_key=u'save_sv_rasters',
             helptext=(u"Should rasters for each state variable, for each "
                 "timestep, be saved?"),
-            label=u'Save State Variable Rasters', validator=self.validator)
+            label=u'Save State Variable Rasters')
         self.add_input(self.save_sv_rasters)
 
     def assemble_args(self):
@@ -358,7 +358,7 @@ class Forage(model.InVESTModel):
                 self.initial_conditions_dir.value(),
             self.site_initial_table.args_key: self.site_initial_table.value(),
             self.pft_initial_table.args_key: self.pft_initial_table.value(),
-            self.save_sv_rasters.args_key: self.save_sv_rasters.values(),
+            self.save_sv_rasters.args_key: self.save_sv_rasters.value(),
         }
 
         return args
