@@ -6,6 +6,7 @@ import shutil
 from builtins import range
 import re
 import math
+import pickle
 
 import numpy
 import pandas
@@ -1177,6 +1178,19 @@ def execute(args):
         _write_monthly_outputs(
             aligned_inputs, provisional_sv_reg, sv_reg, month_reg, pft_id_set,
             current_year, current_month, output_dir)
+
+    # summary results
+    summary_output_dir = os.path.join(output_dir, 'summary_results')
+    os.makedirs(summary_output_dir)
+    summary_shp_path = os.path.join(
+        summary_output_dir, 'grazing_areas_results_rpm.shp')
+    create_vector_copy(
+        args['animal_grazing_areas_path'], summary_shp_path)
+
+    field_pickle_map, field_header_order_list = aggregate_and_pickle_results(
+        output_dir, summary_shp_path)
+    _add_fields_to_shapefile(
+        field_pickle_map, field_header_order_list, summary_shp_path)
 
     # clean up
     shutil.rmtree(persist_param_dir)
@@ -13800,6 +13814,128 @@ def copy_intermediate_sv(pft_id_set, sv_reg, intermediate_sv_dir):
                 intermediate_sv_dir, '{}_e_1_{}.tif'.format(statv, pft_i))
             shutil.copyfile(sv_reg[n_key], intermediate_sv_reg[n_key])
     return intermediate_sv_reg
+
+
+def create_vector_copy(base_vector_path, target_vector_path):
+    """Create a copy of base vector."""
+    if os.path.isfile(target_vector_path):
+        os.remove(target_vector_path)
+    base_vector = gdal.OpenEx(base_vector_path, gdal.OF_VECTOR)
+    driver = gdal.GetDriverByName('ESRI Shapefile')
+    target_vector = driver.CreateCopy(
+        target_vector_path, base_vector)
+    target_vector = None  # seemingly uncessary but gdal seems to like it.
+
+
+def aggregate_and_pickle_results(output_dir, grazing_areas_path):
+    """Calculate aggregated biomass and diet sufficiency per grazing area.
+
+    Parameters:
+        output_dir (string): path to directory containing model outputs: diet
+            sufficiency, potential biomass, standing biomass rasters per time
+            step
+        grazing_areas_path (string): path to shapefile giving the location of
+            grazing animals. Zonal mean values are calculated per feature in
+            this dataset.
+
+    Side effects:
+        creates pickle files for mean diet sufficiency, mean potential biomass,
+            and mean standing biomass
+
+    Returns:
+        a dictionary with the following keys, where values contain paths to
+            pickled zonal statistics for the given result:
+            'potbiom_m' (mean total potential biomass)
+            'stdbiom_m' (mean total standing biomass)
+            'dietsuff_m' (mean diet sufficiency)
+
+    """
+    def dump_zonal_stats(raster_prefix, pickle_path):
+        """Calculate zonal mean and save as pickle."""
+        raster_path_list = [
+            os.path.join(output_dir, f) for f in os.listdir(output_dir) if
+            f.startswith(raster_prefix) and f.endswith('.tif')]
+        df_list = []
+        for raster_path in raster_path_list:
+            zonal_stat_dict = pygeoprocessing.zonal_statistics(
+                (raster_path, 1), grazing_areas_path)
+            zonal_df = pandas.DataFrame(
+                {
+                    'fid': [
+                        key for key, value in sorted(
+                            zonal_stat_dict.items())],
+                    'sum': [
+                        value['sum'] for key, value in
+                        sorted(zonal_stat_dict.items())],
+                    'count': [
+                        value['count'] for key, value in
+                        sorted(zonal_stat_dict.items())]
+                })
+            df_list.append(zonal_df)
+        summary_df = pandas.concat(df_list)
+        df_means = summary_df.groupby('fid').mean()
+        df_means['mean'] = df_means['sum'] / df_means['count']
+        df_means = df_means[['mean']].to_dict(orient='index')
+        with open(pickle_path, 'wb') as target_pickle_file:
+            pickle.dump(df_means, target_pickle_file)
+
+
+    potential_biomass_pickle_path = os.path.join(
+        PROCESSING_DIR, 'potential_biomass.pickle')
+    dump_zonal_stats('potential_biomass', potential_biomass_pickle_path)
+    diet_suff_pickle_path = os.path.join(
+        PROCESSING_DIR, 'diet_sufficiency.pickle')
+    dump_zonal_stats('diet_sufficiency', diet_suff_pickle_path)
+    standing_biomass_pickle_path = os.path.join(
+        PROCESSING_DIR, 'standing_biomass.pickle')
+    dump_zonal_stats('standing_biomass', standing_biomass_pickle_path)
+
+    field_pickle_map = {
+        'potbiom_m': potential_biomass_pickle_path,
+        'stdbiom_m': standing_biomass_pickle_path,
+        'dietsuff_m': diet_suff_pickle_path,
+    }
+    field_header_order_list = ['potbiom_m', 'stdbiom_m', 'dietsuff_m']
+    return field_pickle_map, field_header_order_list
+
+
+def _add_fields_to_shapefile(
+        field_pickle_map, field_header_order, target_vector_path):
+    """Add fields and values to an OGR layer open for writing.
+
+    Parameters:
+        field_pickle_map (dict): maps field name to a pickle file that is a
+            result of pygeoprocessing.zonal_stats with FIDs that match
+            `target_vector_path`.
+        field_header_order (list of string): a list of field headers in the
+            order to appear in the output table.
+        target_vector_path (string): path to target vector file.
+
+    Returns:
+        None.
+
+    """
+    target_vector = gdal.OpenEx(
+        target_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+    target_layer = target_vector.GetLayer()
+    field_summaries = {}
+    for field_name in field_header_order:
+        field_def = ogr.FieldDefn(field_name, ogr.OFTReal)
+        field_def.SetWidth(24)
+        field_def.SetPrecision(11)
+        target_layer.CreateField(field_def)
+        with open(field_pickle_map[field_name], 'rb') as pickle_file:
+            field_summaries[field_name] = pickle.load(pickle_file)
+
+    for feature in target_layer:
+        fid = feature.GetFID()
+        for field_name in field_header_order:
+            feature.SetField(
+                field_name, float(field_summaries[field_name][fid]['mean']))
+        # Save back to datasource
+        target_layer.SetFeature(feature)
+    target_layer = None
+    target_vector = None
 
 
 @validation.invest_validator
