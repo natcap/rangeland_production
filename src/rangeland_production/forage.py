@@ -627,6 +627,9 @@ def execute(args):
             plant functional type index and each state variable listed in the
             following table:
             https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
+        args['save_sv_rasters'] (boolean): optional input, default true. Should
+            rasters containing all state variables be saved for each model time
+            step?
 
     Returns:
         None.
@@ -636,6 +639,11 @@ def execute(args):
     starting_month = int(args['starting_month'])
     starting_year = int(args['starting_year'])
     n_months = int(args['n_months'])
+    try:
+        delete_sv_folders = not args['save_sv_rasters']
+    except KeyError:
+        delete_sv_folders = False
+
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
     temperature_month_set = set()
@@ -1173,7 +1181,12 @@ def execute(args):
     # clean up
     shutil.rmtree(persist_param_dir)
     shutil.rmtree(PROCESSING_DIR)
-
+    if delete_sv_folders:
+        for month_index in range(-1, n_months):
+            shutil.rmtree(
+                os.path.join(
+                    args['workspace_dir'],
+                    'state_variables_m%d' % month_index))
 
 def raster_multiplication(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
