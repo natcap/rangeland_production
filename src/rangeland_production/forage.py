@@ -1192,6 +1192,10 @@ def execute(args):
     _add_fields_to_shapefile(
         field_pickle_map, field_header_order_list, summary_shp_path)
 
+    mean_animal_density_path = os.path.join(
+        summary_output_dir, 'mean_animal_density.tif')
+    calc_mean_animal_density(output_dir, mean_animal_density_path)
+
     # clean up
     shutil.rmtree(persist_param_dir)
     shutil.rmtree(PROCESSING_DIR)
@@ -1201,6 +1205,7 @@ def execute(args):
                 os.path.join(
                     args['workspace_dir'],
                     'state_variables_m%d' % month_index))
+
 
 def raster_multiplication(
         raster1, raster1_nodata, raster2, raster2_nodata, target_path,
@@ -13510,16 +13515,11 @@ def _estimate_animal_density(
         sv_reg (dict): map of key, path pairs giving paths to state variables,
             including carbon in aboveground biomass for each plant functional
             type
-        obs_biomass_path (string): path to output location where observed
-            biomass for this timestep should be saved as geotiff
         month_reg (dict): map of key, path pairs giving paths to intermediate
             calculated values that are shared between submodels, including
             estimated animal density
 
     Side effects:
-        creates a geotiff raster of observed biomass calculated from remotely
-            sensed vegetation index at the location indicated by
-            `obs_biomass_path`
         creates or modifies the raster indicated by month_reg['animal_density']
 
     """
@@ -13936,6 +13936,60 @@ def _add_fields_to_shapefile(
         target_layer.SetFeature(feature)
     target_layer = None
     target_vector = None
+
+
+def calc_mean_animal_density(output_dir, target_path):
+    """Calculate mean animal density inside each pixel during the model run.
+
+    Calculate mean animal density per pixel across months of the simulation.
+    Calculate the mean for all pixels that have >1 valid value during the
+    months of the simulation, discarding months without valid values.
+
+    Parameters:
+        output_dir (string): path to directory containing output rasters
+            produced during the model run, including animal density rasters
+        target_path (string): path to location where raster with mean animal
+            density should be saved
+
+    Side effects:
+        creates or modifies the raster at `target_path` to contain mean animal
+            density (animals/ha) across model timesteps
+
+    Returns:
+        None
+
+    """
+    def raster_mean_op(*raster_list):
+        """Calculate the mean value pixel-wise from rasters in raster_list."""
+        valid_mask = numpy.any(
+            ~numpy.isclose(numpy.array(raster_list), _TARGET_NODATA), axis=0)
+        # get number of valid observations per pixel
+        num_observations = numpy.count_nonzero(
+            ~numpy.isclose(numpy.array(raster_list), _TARGET_NODATA), axis=0)
+        for r in raster_list:
+            numpy.place(r, numpy.isclose(r, _TARGET_NODATA), [0])
+        sum_of_rasters = numpy.sum(raster_list, axis=0)
+
+        divide_mask = (
+            (sum_of_rasters > 0) &
+            (num_observations > 0) &
+            valid_mask)
+
+        mean_of_rasters = numpy.empty(
+            sum_of_rasters.shape, dtype=numpy.float32)
+        mean_of_rasters[:] = _TARGET_NODATA
+        mean_of_rasters[valid_mask] = 0
+        mean_of_rasters[divide_mask] = numpy.divide(
+            sum_of_rasters[divide_mask], num_observations[divide_mask])
+        return mean_of_rasters
+
+    raster_path_list = [
+        os.path.join(output_dir, f) for f in os.listdir(output_dir) if
+        f.startswith('animal_density_') and f.endswith('.tif')]
+
+    pygeoprocessing.raster_calculator(
+        [(path, 1) for path in raster_path_list], raster_mean_op,
+            target_path, gdal.GDT_Float32, _TARGET_NODATA)
 
 
 @validation.invest_validator
