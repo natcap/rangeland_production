@@ -311,6 +311,12 @@ class Forage(model.InVESTModel):
             label=u'Initial Conditions Table: PFT State Variables',
             validator=self.validator)
         self.add_input(self.pft_initial_table)
+        self.save_sv_rasters = inputs.Checkbox(
+            args_key=u'save_sv_rasters',
+            helptext=(u"Should rasters for each state variable, for each "
+                "timestep, be saved?"),
+            label=u'Save State Variable Rasters')
+        self.add_input(self.save_sv_rasters)
 
     def assemble_args(self):
         args = {
@@ -352,6 +358,7 @@ class Forage(model.InVESTModel):
                 self.initial_conditions_dir.value(),
             self.site_initial_table.args_key: self.site_initial_table.value(),
             self.pft_initial_table.args_key: self.pft_initial_table.value(),
+            self.save_sv_rasters.args_key: self.save_sv_rasters.value(),
         }
 
         return args
