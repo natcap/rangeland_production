@@ -643,7 +643,7 @@ def execute(args):
     try:
         delete_sv_folders = not args['save_sv_rasters']
     except KeyError:
-        delete_sv_folders = False
+        delete_sv_folders = True
 
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
