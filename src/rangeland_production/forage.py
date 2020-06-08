@@ -628,9 +628,9 @@ def execute(args):
             plant functional type index and each state variable listed in the
             following table:
             https://docs.google.com/spreadsheets/d/1TGCDOJS4nNsJpzTWdiWed390NmbhQFB2uUoMs9oTTYo/edit?usp=sharing
-        args['save_sv_rasters'] (boolean): optional input, default true. Should
-            rasters containing all state variables be saved for each model time
-            step?
+        args['save_sv_rasters'] (boolean): optional input, default false.
+            Should rasters containing all state variables be saved for each
+            model time step?
 
     Returns:
         None.
@@ -13942,8 +13942,9 @@ def calc_mean_animal_density(output_dir, target_path):
     """Calculate mean animal density inside each pixel during the model run.
 
     Calculate mean animal density per pixel across months of the simulation.
-    Calculate the mean for all pixels that have >1 valid value during the
-    months of the simulation, discarding months without valid values.
+    Calculate the mean for all pixels that have >0 valid value during the
+    months of the simulation, discarding months without valid values in the
+    calculation of the average.
 
     Parameters:
         output_dir (string): path to directory containing output rasters
