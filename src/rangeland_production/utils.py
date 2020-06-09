@@ -103,8 +103,7 @@ def prepare_workspace(workspace, name, logging_level=logging.NOTSET,
 
     logfile = os.path.join(
         workspace,
-        'InVEST-{modelname}-log-{timestamp}.txt'.format(
-            modelname='-'.join(name.replace(':', '').split(' ')),
+        'Rangeland-Production-Model-log-{timestamp}.txt'.format(
             timestamp=datetime.now().strftime("%Y-%m-%d--%H_%M_%S")))
 
     with capture_gdal_logging(), log_to_file(logfile,
