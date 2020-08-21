@@ -14133,4 +14133,34 @@ def validate(args, limit_to=None):
             validation_error_list.append(
                 ([key], "Must be a number"))
 
+    # check that path patterns contain required regex matches
+    if not '<month>' in args['monthly_precip_path_pattern']:
+        validation_error_list.append((
+            ['monthly_precip_path_pattern'],
+            'Pattern must contain "<month>".'))
+    if not '<year>' in args['monthly_precip_path_pattern']:
+        validation_error_list.append((
+            ['monthly_precip_path_pattern'],
+            'Pattern must contain "<year>".'))
+    if not '<month>' in args['min_temp_path_pattern']:
+        validation_error_list.append((
+            ['min_temp_path_pattern'],
+            'Pattern must contain "<month>".'))
+    if not '<month>' in args['max_temp_path_pattern']:
+        validation_error_list.append((
+            ['max_temp_path_pattern'],
+            'Pattern must contain "<month>".'))
+    if not '<month>' in args['monthly_vi_path_pattern']:
+        validation_error_list.append((
+            ['monthly_vi_path_pattern'],
+            'Pattern must contain "<month>".'))
+    if not '<year>' in args['monthly_vi_path_pattern']:
+        validation_error_list.append((
+            ['monthly_vi_path_pattern'],
+            'Pattern must contain "<year>".'))
+    if not '<PFT>' in args['veg_spatial_composition_path_pattern']:
+        validation_error_list.append((
+            ['veg_spatial_composition_path_pattern'],
+            'Pattern must contain "<PFT>".'))
+
     return validation_error_list
