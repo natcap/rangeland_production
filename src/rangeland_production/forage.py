@@ -691,14 +691,17 @@ def execute(args):
     n_precip_months = int(args['n_months'])
     if n_precip_months < 12:
         m_index = int(args['n_months'])
-        while m_index <= 12:
+        while n_precip_months < 12:
             month_i = (starting_month + m_index - 1) % 12 + 1
             year = starting_year + (starting_month + m_index - 1) // 12
             precip_path = args['monthly_precip_path_pattern'].replace(
                 '<year>', str(year)).replace('<month>', '%.2d' % month_i)
-            base_align_raster_path_id_map['precip_%d' % m_index] = precip_path
             if os.path.exists(precip_path):
+                base_align_raster_path_id_map[
+                    'precip_%d' % m_index] = precip_path
                 n_precip_months = n_precip_months + 1
+            else:
+                break
             m_index = m_index + 1
     if n_precip_months < 12:
         raise ValueError("At least 12 months of precipitation data required")
