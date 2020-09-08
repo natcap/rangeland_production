@@ -12168,17 +12168,18 @@ def revise_max_intake(
         (CRD1 != _IC_NODATA) &
         (CRD2 != _IC_NODATA))
 
-    corrected_protein_intake = degr_protein_intake
+    corrected_protein_intake = degr_protein_intake.copy()
+    feeding_level = numpy.zeros(max_intake.shape, dtype=numpy.float32)
+    feeding_level[valid_mask] = (
+        energy_intake[valid_mask] / energy_maintenance[valid_mask]) - 1
     high_intake_mask = (
-        (((energy_intake / energy_maintenance) - 1) > 0) &
+        (feeding_level > 0) &
         valid_mask)
     corrected_protein_intake[high_intake_mask] = (
-        degr_protein_intake[high_intake_mask] *
-        (1. - (
-            CRD1[high_intake_mask] - CRD2[high_intake_mask] *
+        degr_protein_intake[high_intake_mask] * (
+            1. - CRD1[high_intake_mask] - CRD2[high_intake_mask] *
             total_digestibility[high_intake_mask]) *
-            (energy_intake[high_intake_mask] /
-                energy_maintenance[high_intake_mask]) - 1.))
+        feeding_level[high_intake_mask])
 
     reduction_factor = numpy.empty(max_intake.shape, dtype=numpy.float32)
     reduction_factor[valid_mask] = 1.
@@ -12201,7 +12202,7 @@ def revise_max_intake(
             corrected_protein_intake[insuff_cross_mask] /
             protein_req[insuff_cross_mask])) * 0.75))
     # apply the reduction factor
-    max_intake_revised = max_intake
+    max_intake_revised = max_intake.copy()
     max_intake_revised[valid_mask] = (
         max_intake[valid_mask] * reduction_factor[valid_mask])
     return max_intake_revised
