@@ -634,6 +634,9 @@ def execute(args):
         args['save_sv_rasters'] (boolean): optional input, default false.
             Should rasters containing all state variables be saved for each
             model time step?
+        args['animal_density'] (string): optional input, density of grazing
+            animals in animals per hectare. If this is supplied, the model does
+            not estimate animal density with comparison to NDVI.
         args['crude_protein'] (float): optional input, crude protein
             concentration of forage for the purposes of animal diet selection.
             Should be a value between 0-1. If included, this value is
@@ -654,9 +657,16 @@ def execute(args):
     except KeyError:
         delete_sv_folders = True
 
-    global CRUDE_PROTEIN
-    if args['crude_protein']:
+    try:
+        global CRUDE_PROTEIN
         CRUDE_PROTEIN = args['crude_protein']
+    except KeyError:
+        pass
+
+    try:
+        animal_density_path = args['animal_density']
+    except KeyError:
+        args['animal_density'] = None
 
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
@@ -681,14 +691,16 @@ def execute(args):
             'precip_{}'.format(month_index)] = precip_path
         if not os.path.exists(precip_path):
             missing_precip_path_list.append(precip_path)
-        EO_index_path = args[
-            'monthly_vi_path_pattern'].replace(
-                '<year>', str(year)).replace(
-                '<month>', '{:02d}'.format(month_i))
-        base_align_raster_path_id_map[
-            'EO_index_{}'.format(month_index)] = EO_index_path
-        if not os.path.exists(EO_index_path):
-            missing_EO_index_path_list.append(EO_index_path)
+        # Earth Observation inputs required if animal density not supplied
+        if not args['animal_density']:
+            EO_index_path = args[
+                'monthly_vi_path_pattern'].replace(
+                    '<year>', str(year)).replace(
+                    '<month>', '{:02d}'.format(month_i))
+            base_align_raster_path_id_map[
+                'EO_index_{}'.format(month_index)] = EO_index_path
+            if not os.path.exists(EO_index_path):
+                missing_EO_index_path_list.append(EO_index_path)
     if missing_precip_path_list:
         raise ValueError(
             "Couldn't find the following precipitation paths given the " +
@@ -835,9 +847,16 @@ def execute(args):
             "Couldn't find trait values for the following animal " +
             "ids: %s\n\t" + ", ".join(missing_animal_trait_list))
 
-    # align inputs to match resolution of precipitation rasters
-    target_pixel_size = pygeoprocessing.get_raster_info(
-        base_align_raster_path_id_map['precip_0'])['pixel_size']
+    # if animal density is supplied, align inputs to match its resolution
+    # otherwise, match resolution of earth observation rasters
+    if args['animal_density']:
+        target_pixel_size = pygeoprocessing.get_raster_info(
+            args['animal_density'])['pixel_size']
+        base_align_raster_path_id_map['animal_density'] = args[
+            'animal_density']
+    else:
+        target_pixel_size = pygeoprocessing.get_raster_info(
+            base_align_raster_path_id_map['EO_index_0'])['pixel_size']
     LOGGER.info(
         "pixel size of aligned inputs: %s", target_pixel_size)
 
@@ -1125,11 +1144,15 @@ def execute(args):
             month_reg, current_month, provisional_sv_reg)
         _apply_new_growth(delta_agliv_dict, pft_id_set, provisional_sv_reg)
 
-        # estimate animal density from provisional biomass in the absence of
-        #   grazing vs a remotely sensed vegetation index
-        _estimate_animal_density(
-            aligned_inputs, month_index, pft_id_set,
-            args['animal_grazing_areas_path'], provisional_sv_reg, month_reg)
+        if args['animal_density']:
+            month_reg['animal_density'] = aligned_inputs['animal_density']
+        else:
+            # estimate animal density from provisional biomass in the absence
+            # of grazing vs a remotely sensed vegetation index
+            _estimate_animal_density(
+                aligned_inputs, month_index, pft_id_set,
+                args['animal_grazing_areas_path'], provisional_sv_reg,
+                month_reg)
 
         # estimate grazing offtake by animals relative to provisional biomass
         #   at an intermediate step, after senescence but before new growth
