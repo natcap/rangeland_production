@@ -657,9 +657,16 @@ def execute(args):
     except KeyError:
         delete_sv_folders = True
 
-    global CRUDE_PROTEIN
-    if args['crude_protein']:
+    try:
+        global CRUDE_PROTEIN
         CRUDE_PROTEIN = args['crude_protein']
+    except KeyError:
+        pass
+
+    try:
+        animal_density_path = args['animal_density']
+    except KeyError:
+        args['animal_density'] = None
 
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
@@ -841,7 +848,7 @@ def execute(args):
             "ids: %s\n\t" + ", ".join(missing_animal_trait_list))
 
     # if animal density is supplied, align inputs to match its resolution
-    # otherwise, match resolution of precipitation rasters
+    # otherwise, match resolution of earth observation rasters
     if args['animal_density']:
         target_pixel_size = pygeoprocessing.get_raster_info(
             args['animal_density'])['pixel_size']
@@ -849,7 +856,7 @@ def execute(args):
             'animal_density']
     else:
         target_pixel_size = pygeoprocessing.get_raster_info(
-            base_align_raster_path_id_map['precip_0'])['pixel_size']
+            base_align_raster_path_id_map['EO_index_0'])['pixel_size']
     LOGGER.info(
         "pixel size of aligned inputs: %s", target_pixel_size)
 
