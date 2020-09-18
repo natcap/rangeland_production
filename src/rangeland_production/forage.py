@@ -26,6 +26,9 @@ SOIL_TYPE_LIST = ['clay', 'silt', 'sand']
 # temporary directory to store intermediate files
 PROCESSING_DIR = None
 
+# user-supplied crude protein of vegetation
+CRUDE_PROTEIN = None
+
 # state variables and parameters take their names from Century
 # _SITE_STATE_VARIABLE_FILES contains state variables that are a
 # property of the site, including:
@@ -631,6 +634,12 @@ def execute(args):
         args['save_sv_rasters'] (boolean): optional input, default false.
             Should rasters containing all state variables be saved for each
             model time step?
+        args['crude_protein'] (float): optional input, crude protein
+            concentration of forage for the purposes of animal diet selection.
+            Should be a value between 0-1. If included, this value is
+            substituted for N content of forage when calculating digestibility
+            and "ingestibility" of forage, and protein content of the diet, for
+            grazing animals.
 
     Returns:
         None.
@@ -644,6 +653,10 @@ def execute(args):
         delete_sv_folders = not args['save_sv_rasters']
     except KeyError:
         delete_sv_folders = True
+
+    global CRUDE_PROTEIN
+    if args['crude_protein']:
+        CRUDE_PROTEIN = args['crude_protein']
 
     # this set will build up the integer months that are used so we can index
     # the mwith temperature later
@@ -11683,10 +11696,16 @@ def calc_digestibility(
         (digestibility_slope != _IC_NODATA) &
         (digestibility_intercept != _IC_NODATA))
     digestibility = numpy.zeros(cstatv.shape, dtype=numpy.float32)
-    digestibility[valid_mask] = (
-        ((nstatv[valid_mask] * 6.25) / (cstatv[valid_mask] * 2.5)) *
-        digestibility_slope[valid_mask] +
-        digestibility_intercept[valid_mask])
+    if CRUDE_PROTEIN:
+        digestibility[valid_mask] = (
+            CRUDE_PROTEIN *
+            digestibility_slope[valid_mask] +
+            digestibility_intercept[valid_mask])
+    else:
+        digestibility[valid_mask] = (
+            ((nstatv[valid_mask] * 6.25) / (cstatv[valid_mask] * 2.5)) *
+            digestibility_slope[valid_mask] +
+            digestibility_intercept[valid_mask])
     return digestibility
 
 
@@ -11837,9 +11856,12 @@ def calc_crude_protein_intake(
             (intake != _TARGET_NODATA))
         weighted_cp = numpy.empty(cstatv.shape, dtype=numpy.float32)
         weighted_cp[:] = _TARGET_NODATA
-        weighted_cp[valid_mask] = (
-            ((nstatv[valid_mask] * 6.25) / (cstatv[valid_mask] * 2.5)) *
-            intake[valid_mask])
+        if CRUDE_PROTEIN:
+            weighted_cp[valid_mask] = (CRUDE_PROTEIN * intake[valid_mask])
+        else:
+            weighted_cp[valid_mask] = (
+                ((nstatv[valid_mask] * 6.25) / (cstatv[valid_mask] * 2.5)) *
+                intake[valid_mask])
         return weighted_cp
     temp_dir = tempfile.mkdtemp(dir=PROCESSING_DIR)
     weighted_crude_protein_path_list = []
