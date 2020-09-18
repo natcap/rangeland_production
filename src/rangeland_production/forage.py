@@ -634,6 +634,12 @@ def execute(args):
         args['save_sv_rasters'] (boolean): optional input, default false.
             Should rasters containing all state variables be saved for each
             model time step?
+        args['crude_protein'] (float): optional input, crude protein
+            concentration of forage for the purposes of animal diet selection.
+            Should be a value between 0-1. If included, this value is
+            substituted for N content of forage when calculating digestibility
+            and "ingestibility" of forage, and protein content of the diet, for
+            grazing animals.
 
     Returns:
         None.
