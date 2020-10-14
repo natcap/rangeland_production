@@ -14148,10 +14148,10 @@ def validate(args, limit_to=None):
             else:
                 if filetype_string == 'vector':
                     input_proj = pygeoprocessing.get_vector_info(
-                        args[key])['projection']
+                        args[key])['projection_wkt']
                 else:
                     input_proj = pygeoprocessing.get_raster_info(
-                        args[key])['projection']
+                        args[key])['projection_wkt']
                 input_srs = osr.SpatialReference()
                 input_srs.ImportFromWKt(input_proj)
                 if not bool(input_srs.IsGeographic()):
