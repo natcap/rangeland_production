@@ -321,6 +321,7 @@ class Forage(model.InVESTModel):
     def assemble_args(self):
         args = {
             self.workspace.args_key: self.workspace.value(),
+            self.suffix.args_key: self.suffix.value(),
             self.n_months.args_key: self.n_months.value(),
             self.starting_year.args_key: self.starting_year.value(),
             self.starting_month.args_key: self.starting_month.value(),
