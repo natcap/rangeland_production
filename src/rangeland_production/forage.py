@@ -1216,13 +1216,14 @@ def execute(args):
 
         _write_monthly_outputs(
             aligned_inputs, provisional_sv_reg, sv_reg, month_reg, pft_id_set,
-            current_year, current_month, output_dir)
+            current_year, current_month, output_dir, file_suffix)
 
     # summary results
     summary_output_dir = os.path.join(output_dir, 'summary_results')
     os.makedirs(summary_output_dir)
     summary_shp_path = os.path.join(
-        summary_output_dir, 'grazing_areas_results_rpm.shp')
+        summary_output_dir,
+        'grazing_areas_results_rpm{}.shp'.format(file_suffix))
     create_vector_copy(
         args['animal_grazing_areas_path'], summary_shp_path)
 
@@ -1232,7 +1233,7 @@ def execute(args):
         field_pickle_map, field_header_order_list, summary_shp_path)
 
     mean_animal_density_path = os.path.join(
-        summary_output_dir, 'mean_animal_density.tif')
+        summary_output_dir, 'mean_animal_density{}.tif'.format(file_suffix))
     calc_mean_animal_density(output_dir, mean_animal_density_path)
 
     # clean up
@@ -13725,7 +13726,7 @@ def _estimate_animal_density(
 
 def _write_monthly_outputs(
         aligned_inputs, provisional_sv_reg, sv_reg, month_reg, pft_id_set,
-        current_year, current_month, output_dir):
+        current_year, current_month, output_dir, file_suffix):
     """Collect outputs from current state variable and monthly directories.
 
     Collect model outputs from the ending state of the model at the current
@@ -13747,18 +13748,19 @@ def _write_monthly_outputs(
         current_month (int): current month of the year, such that
             current_month=1 indicates January
         output_dir (string): path to directory where outputs should be written
+        file_suffix (string): suffix to be added to output file names
 
     Side effects:
         creates the following rasters in the output_dir directory:
-            potential_biomass_<year>_<month>.tif, total modeled biomass in
-                kg/ha in the absence of grazing, including live and
+            potential_biomass_<year>_<month><suffix>.tif, total modeled
+                biomass in kg/ha in the absence of grazing, including live and
                 standing dead fractions of all plant functional types
-            standing_biomass_<year>_<month>.tif, total modeled biomass in
-                kg/ha after offtake by grazing animals, including live and
+            standing_biomass_<year>_<month><suffix>.tif, total modeled biomass
+                in kg/ha after offtake by grazing animals, including live and
                 standing dead fractions of all plant functional types
-            animal_density_<year>_<month>.tif, distribution of grazing animal
-                density in animals/ha inside grazing area polygons
-            diet_sufficiency_<year>_<month>.tif, ratio of metabolizable
+            animal_density_<year>_<month><suffix>.tif, distribution of grazing
+                animal density in animals/ha inside grazing area polygons
+            diet_sufficiency_<year>_<month><suffix>.tif, ratio of metabolizable
                 energy intake to maintenance energy requirements on pixels
                 where animals grazed
 
@@ -13776,8 +13778,8 @@ def _write_monthly_outputs(
             'potential_biomass', 'standing_biomass', 'animal_density',
             'diet_sufficiency']:
         output_val_dict[val] = os.path.join(
-            output_dir, '{}_{}_{}.tif'.format(
-                val, current_year, current_month))
+            output_dir, '{}_{}_{}{}.tif'.format(
+                val, current_year, current_month, file_suffix))
 
     # total weighted C in aboveground biomass in the absence of grazing
     weighted_state_variable_sum(
@@ -14181,6 +14183,12 @@ def validate(args, limit_to=None):
         except (ValueError, TypeError):
             validation_error_list.append(
                 ([key], "Must be a number"))
+
+    # the model must be run in an empty directory
+    if os.path.exists(args['workspace_dir']):
+        if len(os.listdir(args['workspace_dir'])) > 0:
+            validation_error_list.append((
+                ['workspace_dir'], 'Workspace directory must be empty.'))
 
     # check that path patterns contain required regex matches
     if not '<month>' in args['monthly_precip_path_pattern']:
