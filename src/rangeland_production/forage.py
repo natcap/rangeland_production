@@ -12237,9 +12237,9 @@ def revise_max_intake(
         valid_mask)
     corrected_protein_intake[high_intake_mask] = (
         degr_protein_intake[high_intake_mask] * (
-            1. - CRD1[high_intake_mask] - CRD2[high_intake_mask] *
+            1. - (CRD1[high_intake_mask] - CRD2[high_intake_mask] *
             total_digestibility[high_intake_mask]) *
-        feeding_level[high_intake_mask])
+        feeding_level[high_intake_mask]))
 
     reduction_factor = numpy.empty(max_intake.shape, dtype=numpy.float32)
     reduction_factor[valid_mask] = 1.
