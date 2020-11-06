@@ -495,46 +495,26 @@ def execute(args):
             per-pixel proportion of soil component that is silt
         args['sand_proportion_path'] (string): path to raster representing
             per-pixel proportion of soil component that is sand
-        args['monthly_precip_path_pattern'] (string): path to the monthly
-            precipitation path pattern. where the string <month> and <year>
-            can be replaced with the number 1..12 for the month and integer
-            year. The model requires at least 12 months of precipitation and
-            expects to find a precipitation file input for
+        args['precip_dir'] (string): path to a directory containing monthly
+            precipitation rasters. The model requires at least 12 months of
+            precipitation and expects to find a precipitation file input for
             every month of the simulation, so the number of precipitation
-            files should be the maximum of 12 and `n_months`. The <month>
-            value in input files must be two digits.
-            Example: if this value is given as:
-            `./precip_dir/chirps-v2.0.<year>.<month>.tif, `starting_year` as
-            2016, `starting_month` as 5, and `n_months` is 29, the model will
-            expect to find files named
-                 "./precip_dir/chirps-v2.0.2016.05.tif" to
-                 "./precip_dir/chirps-v2.0.2018.09.tif"
-        args['min_temp_path_pattern'] (string): path to monthly
-            temperature data pattern where <month> can be replaced with the
-            number 1..12 when the simulation needs a monthly temperature
-            input. The model expects to find only one minimum temperature
-            file input for each month of the year, so the number of minimum
-            temperature input files could be less than `n_months`. The
-            <month> value in input files must be two digits.
-            Example: if this value is given as
-            `./temperature/min_temperature_<month>.tif', `starting_month` as
-            5, and `n_months` is 29, the model will expect to find files
-            named
-                "./temperature/min_temperature_01.tif to
-                "./temperature/min_temperature_12.tif"
-        args['max_temp_path_pattern'] (string): path to monthly
-            temperature data pattern where <month> can be replaced with the
-            number 1..12 when the simulation needs a monthly temperature
-            input. The model expects to find only one maximum temperature
-            file input for each month of the year, so the number of maximum
-            temperature input files could be less than `n_months`. The
-            <month> value in input files must be two digits.
-            Example: if this value is given as
-            `./temperature/max_temperature_<month>.tif', `starting_month` as
-            5, and `n_months` is 29, the model will expect to find files
-            named
-                "./temperature/max_temperature_01.tif to
-                "./temperature/max_temperature_12.tif"
+            files should be the maximum of 12 and `n_months`. The file name of
+            each precipitation raster must end with the year, followed by an
+            underscore, followed by the month number. E.g., Precip_2016_1.tif
+            for January of 2016.
+        args['min_temp_dir'] (string): path to a directory containing monthly
+            minimum temperature rasters. The model requires one minimum
+            temperature raster for each month of the year, or each month that
+            the model is run, whichever is smaller. The file name of each
+            minimum temperature raster must end with the month number. E.g.,
+            Min_temperature_1.tif for January.
+        args['max_temp_dir'] (string): path to a directory containing monthly
+            maximum temperature rasters. The model requires one maximum
+            temperature raster for each month of the year, or each month that
+            the model is run, whichever is smaller. The file name of each
+            maximum temperature raster must end with the month number. E.g.,
+            Max_temperature_1.tif for January.
         args['monthly_vi_path_pattern'] (string): path to the monthly
             vegetation index path pattern, where the strings <month> and <year>
             can be replaced with the number 01..12 for the month and the
@@ -649,6 +629,12 @@ def execute(args):
 
     """
     LOGGER.info("model execute: %s", args)
+
+    # fail early on if workspace directory is not empty
+    if os.path.exists(args['workspace_dir']):
+        if len(os.listdir(args['workspace_dir'])) > 0:
+            raise ValueError('Workspace directory must be empty.')
+
     starting_month = int(args['starting_month'])
     starting_year = int(args['starting_year'])
     n_months = int(args['n_months'])
@@ -669,43 +655,46 @@ def execute(args):
         args['animal_density'] = None
 
     # this set will build up the integer months that are used so we can index
-    # the mwith temperature later
+    # them with temperature later
     temperature_month_set = set()
 
     # this dict will be used to build the set of input rasters associated with
     # a reasonable lookup ID so we can have a nice dataset to align for raster
     # stack operations
     base_align_raster_path_id_map = {}
-    # we'll use this to report any missing paths
-    missing_precip_path_list = []
     missing_EO_index_path_list = []
+    precip_dir_list = [
+        os.path.join(args['precip_dir'], f) for f in
+        os.listdir(args['precip_dir'])]
     for month_index in range(n_months):
         month_i = (starting_month + month_index - 1) % 12 + 1
         temperature_month_set.add(month_i)
         year = starting_year + (starting_month + month_index - 1) // 12
-        precip_path = args[
-            'monthly_precip_path_pattern'].replace(
-                '<year>', str(year)).replace(
-                '<month>', '{:02d}'.format(month_i))
+        year_month_match = re.compile(
+            r'.*[^\d]%d_%d\.[^.]+$' % (year, month_i))
+        file_list = [
+            month_file_path for month_file_path in precip_dir_list if
+            year_month_match.match(month_file_path)]
+        if len(file_list) == 0:
+            raise ValueError(
+                "No precipitation data found for year %d, month %d" %
+                (year, month_i))
+        if len(file_list) > 1:
+            raise ValueError(
+                "Ambiguous set of files found for year %d, month %d: %s" %
+                (year, month_i, file_list))
         base_align_raster_path_id_map[
-            'precip_{}'.format(month_index)] = precip_path
-        if not os.path.exists(precip_path):
-            missing_precip_path_list.append(precip_path)
+            'precip_{}'.format(month_index)] = file_list[0]
         # Earth Observation inputs required if animal density not supplied
         if not args['animal_density']:
             EO_index_path = args[
                 'monthly_vi_path_pattern'].replace(
                     '<year>', str(year)).replace(
-                    '<month>', '{:02d}'.format(month_i))
+                        '<month>', '{:02d}'.format(month_i))
             base_align_raster_path_id_map[
                 'EO_index_{}'.format(month_index)] = EO_index_path
             if not os.path.exists(EO_index_path):
                 missing_EO_index_path_list.append(EO_index_path)
-    if missing_precip_path_list:
-        raise ValueError(
-            "Couldn't find the following precipitation paths given the " +
-            "pattern: %s\n\t" % args['monthly_precip_path_pattern'] +
-            "\n\t".join(missing_precip_path_list))
     if missing_EO_index_path_list:
         raise ValueError(
             "Couldn't find the following vegetation index paths given the " +
@@ -719,35 +708,60 @@ def execute(args):
         while n_precip_months < 12:
             month_i = (starting_month + m_index - 1) % 12 + 1
             year = starting_year + (starting_month + m_index - 1) // 12
-            precip_path = args['monthly_precip_path_pattern'].replace(
-                '<year>', str(year)).replace('<month>', '%.2d' % month_i)
-            if os.path.exists(precip_path):
-                base_align_raster_path_id_map[
-                    'precip_%d' % m_index] = precip_path
-                n_precip_months = n_precip_months + 1
-            else:
+            year_month_match = re.compile(
+                r'.*[^\d]%d_%d\.[^.]+$' % (year, month_i))
+            file_list = [
+                month_file_path for month_file_path in precip_dir_list if
+                year_month_match.match(month_file_path)]
+            if len(file_list) == 0:
                 break
+            if len(file_list) > 1:
+                raise ValueError(
+                    "Ambiguous set of files found for year %d, month %d: %s" %
+                    (year, month_i, file_list))
+            base_align_raster_path_id_map[
+                'precip_%d' % m_index] = file_list[0]
+            n_precip_months = n_precip_months + 1
             m_index = m_index + 1
     if n_precip_months < 12:
         raise ValueError("At least 12 months of precipitation data required")
 
-    # this list will be used to record any expected files that are not found
-    for substring in ['min', 'max']:
-        missing_temperature_path_list = []
-        for month_i in temperature_month_set:
-            monthly_temp_path = args[
-                '%s_temp_path_pattern' % substring].replace(
-                    '<month>', '%.2d' % month_i)
-            base_align_raster_path_id_map[
-                '%s_temp_%d' % (substring, month_i)] = monthly_temp_path
-            if not os.path.exists(monthly_temp_path):
-                missing_temperature_path_list.append(monthly_temp_path)
-        if missing_temperature_path_list:
+    # collect monthly temperature data
+    min_temp_dir_list = [
+        os.path.join(args['min_temp_dir'], f) for f in
+        os.listdir(args['min_temp_dir'])]
+    for month_i in temperature_month_set:
+        month_file_match = re.compile(r'.*[^\d]%d\.[^.]+$' % month_i)
+        file_list = [
+            month_file_path for month_file_path in min_temp_dir_list if
+            month_file_match.match(month_file_path)]
+        if len(file_list) == 0:
             raise ValueError(
-                "Couldn't find the following temperature raster paths" +
-                " given the pattern: %s\n\t" % args[
-                    '%s_temp_path_pattern' % substring] +
-                "\n\t".join(missing_temperature_path_list))
+                "No minimum temperature data found for month %d" % month_i)
+        if len(file_list) > 1:
+            raise ValueError(
+                "Ambiguous set of files found for month %d: %s" %
+                (month_i, file_list))
+        base_align_raster_path_id_map[
+            'min_temp_%d' % month_i] = file_list[0]
+
+    max_temp_dir_list = [
+        os.path.join(args['max_temp_dir'], f) for f in
+        os.listdir(args['max_temp_dir'])]
+    for month_i in temperature_month_set:
+        month_file_match = re.compile(r'.*[^\d]%d\.[^.]+$' % month_i)
+        file_list = [
+            month_file_path for month_file_path in max_temp_dir_list if
+            month_file_match.match(month_file_path)]
+        if len(file_list) == 0:
+            raise ValueError(
+                "No maximum temperature data found for month %d" % month_i)
+        if len(file_list) > 1:
+            raise ValueError(
+                "Ambiguous set of files found for month %d: %s" %
+                (month_i, file_list))
+        base_align_raster_path_id_map[
+            'max_temp_%d' % month_i] = file_list[0]
 
     # lookup to provide path to soil percent given soil type
     for soil_type in SOIL_TYPE_LIST:
