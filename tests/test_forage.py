@@ -1037,15 +1037,9 @@ class foragetests(unittest.TestCase):
                 SAMPLE_DATA, 'soil', 'silt.tif'),
             'sand_proportion_path': os.path.join(
                 SAMPLE_DATA, 'soil', 'sand.tif'),
-            'monthly_precip_path_pattern': os.path.join(
-                SAMPLE_DATA, 'CHIRPS_div_by_10',
-                'chirps-v2.0.<year>.<month>.tif'),
-            'min_temp_path_pattern': os.path.join(
-                SAMPLE_DATA, 'temp', 'wc2.0_30s_tmin_<month>.tif'),
-            'max_temp_path_pattern': os.path.join(
-                SAMPLE_DATA, 'temp', 'wcs2.0_30s_tmax_<month>.tif'),
-            'monthly_vi_path_pattern': os.path.join(
-                SAMPLE_DATA, 'NDVI', 'ndvi_<year>_<month>.tif'),
+            'precip_dir': os.path.join(SAMPLE_DATA, 'precipitation'),
+            'min_temp_dir': os.path.join(SAMPLE_DATA, 'temperature_min'),
+            'max_temp_dir': os.path.join(SAMPLE_DATA, 'temperature_max'),
             'site_param_table': os.path.join(
                 SAMPLE_DATA, 'site_parameters.csv'),
             'site_param_spatial_index_path': os.path.join(
@@ -1161,6 +1155,9 @@ class foragetests(unittest.TestCase):
                 "Sample input directory not found at %s" % SAMPLE_DATA)
 
         args = foragetests.generate_base_args(self.workspace_dir)
+
+        # workspace directory must be empty
+        shutil.rmtree(PROCESSING_DIR)
         forage.execute(args)
 
     def test_shortwave_radiation(self):
@@ -10401,11 +10398,15 @@ class foragetests(unittest.TestCase):
             'site_index': os.path.join(self.workspace_dir, 'site.tif'),
             'proportion_legume_path': os.path.join(
                 self.workspace_dir, 'proportion_legume.tif'),
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
         }
         create_constant_raster(aligned_inputs['pft_1'], 1)
         create_constant_raster(aligned_inputs['site_index'], 1)
         create_constant_raster(
             aligned_inputs['proportion_legume_path'], proportion_legume)
+        create_constant_raster(
+            aligned_inputs['animal_density'], stocking_density)
         aoi_path = TEST_AOI
         sv_reg = {
             'aglivc_1_path': os.path.join(self.workspace_dir, 'aglivc.tif'),
@@ -10462,12 +10463,9 @@ class foragetests(unittest.TestCase):
             }
         }
         month_reg = {
-            'animal_density': os.path.join(
-                self.workspace_dir, 'animal_density.tif'),
             'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
             'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
         }
-        create_constant_raster(month_reg['animal_density'], stocking_density)
 
         # management threshold does not restrict offtake
         management_threshold = 0.1
@@ -10604,9 +10602,13 @@ class foragetests(unittest.TestCase):
         aligned_inputs = {
             'pft_1': os.path.join(self.workspace_dir, 'pft_1.tif'),
             'animal_index': os.path.join(self.workspace_dir, 'animal.tif'),
+            'animal_density': os.path.join(
+                self.workspace_dir, 'animal_density.tif'),
         }
         create_constant_raster(aligned_inputs['pft_1'], 1)
         create_constant_raster(aligned_inputs['animal_index'], 1)
+        create_constant_raster(
+            aligned_inputs['animal_density'], stocking_density)
         animal_trait_table = {
             1: {
                 'type_int': animal_type,
@@ -10674,14 +10676,11 @@ class foragetests(unittest.TestCase):
             }
         }
         month_reg = {
-            'animal_density': os.path.join(
-                self.workspace_dir, 'animal_density.tif'),
             'flgrem_1': os.path.join(self.workspace_dir, 'flgrem_1.tif'),
             'fdgrem_1': os.path.join(self.workspace_dir, 'fdgrem_1.tif'),
             'diet_sufficiency': os.path.join(
                 self.workspace_dir, 'diet_sufficiency.tif')
         }
-        create_constant_raster(month_reg['animal_density'], stocking_density)
         create_constant_raster(month_reg['flgrem_1'], flgrem)
         create_constant_raster(month_reg['fdgrem_1'], fdgrem)
 
