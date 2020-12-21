@@ -115,78 +115,37 @@ class Forage(model.InVESTModel):
             label=u'Soil pH (Raster)',
             validator=self.validator)
         self.add_input(self.ph_path)
-        self.min_temp_path_pattern = inputs.Text(
-            args_key=u'min_temp_path_pattern',
+        self.precip_dir = inputs.Text(
+            args_key=u'precip_dir',
             helptext=(
-                u"An example file path to monthly average daily minimum "
-                "temperature (degrees C), which must contain the substring "
-                "'<month>'. The model only requires one raster of minimum "
-                "temperature per month, even if the model is run for multiple "
-                "years.  For example, if this value is given as "
-                "'./workspace/min_temp/<month>.tif', Starting Year is 2010, "
-                "Starting Month is 1, and Number of Months is 13, the model "
-                "will expect to find raster files named "
-                "'./workspace/min_temp/01.tif' to "
-                "'./workspace/min_temp/12.tif'.  The '<month>' value in "
-                "input files must be two digits.  The rasters must be in "
-                "geographic coordinates."),
-            label=u'Monthly Minimum Temperature Path Pattern',
+                u"A path to a directory containing monthly precipitation "
+                "rasters. The filename of each raster must end with the year, "
+                "followed by an underscore (\"_\"), followed by the month "
+                "number. For example, precipitation_2016_1.tif for January of "
+                "2016."),
+            label=u'Monthly Precipitation Directory',
             validator=self.validator)
-        self.add_input(self.min_temp_path_pattern)
-        self.max_temp_path_pattern = inputs.Text(
-            args_key=u'max_temp_path_pattern',
+        self.add_input(self.precip_dir)
+        self.min_temp_dir = inputs.Text(
+            args_key=u'min_temp_dir',
             helptext=(
-                u"An example file path to monthly average daily maximum "
-                "temperature (degrees C), which must contain the substring "
-                "'<month>'. The model only requires one raster of maximum "
-                "temperature per month, even if the model is run for multiple "
-                "years.  For example, if this value is given as "
-                "'./workspace/max_temp/<month>.tif', Starting Year is 2010, "
-                "Starting Month is 1, and Number of Months is 13, the model "
-                "will expect to find raster files named "
-                "'./workspace/max_temp/01.tif' to "
-                "'./workspace/max_temp/12.tif'.  The '<month>' value in "
-                "input files must be two digits.  The rasters must be in "
-                "geographic coordinates."),
-            label=u'Monthly Maximum Temperature Path Pattern',
+                u"A path to a directory containing monthly minimum "
+                "temperature rasters. The filename of each raster must end "
+                "with the month number. For example, min_temperature_1.tif "
+                "for January."),
+            label=u'Monthly Minimum Temperature Directory',
             validator=self.validator)
-        self.add_input(self.max_temp_path_pattern)
-        self.monthly_precip_path_pattern = inputs.Text(
-            args_key=u'monthly_precip_path_pattern',
+        self.add_input(self.min_temp_dir)
+        self.max_temp_dir = inputs.Text(
+            args_key=u'max_temp_dir',
             helptext=(
-                u"An example file path to monthly total precipitation rasters "
-                "(cm), which must contain the substrings '<month>' and "
-                "'<year>'. At least 12 months of precipitation must be "
-                "supplied, and precipitation must be supplied for each month "
-                "that the model is run. For example, if this value is given "
-                "as './workspace/precip/<month>_<year>.tif', Starting Year "
-                "is 2010, Starting Month is 1, and Number of Months is 13, "
-                "the model will expect to find raster files named "
-                "'./workspace/precip/01_2010.tif' to "
-                "'./workspace/precip/01_2011.tif'.  The '<month>' value "
-                "in input files must be two digits.  The rasters must be in "
-                "geographic coordinates."),
-            label=u'Monthly Precipitation Path Pattern',
+                u"A path to a directory containing monthly maximum "
+                "temperature rasters. The filename of each raster must end "
+                "with the month number. For example, max_temperature_1.tif "
+                "for January."),
+            label=u'Monthly Maximum Temperature Directory',
             validator=self.validator)
-        self.add_input(self.monthly_precip_path_pattern)
-        self.monthly_vi_path_pattern = inputs.Text(
-            args_key=u'monthly_vi_path_pattern',
-            helptext=(
-                u"An example file path to monthly vegetation index rasters "
-                "such as NDVI, which must contain the substrings '<month>' "
-                "and '<year>'.  One vegetation index raster must be "
-                "supplied for each month that the model is run. For example, "
-                "if this value is given as "
-                "'./workspace/NDVI/<month>_<year>.tif', Starting Year is "
-                "2010, Starting Month is 1, and Number of Months is 13, the "
-                "model will expect to find raster files named "
-                "'./workspace/NDVI/01_2010.tif' to "
-                "'./workspace/NDVI/01_2011.tif'.  The '<month>' value in "
-                "input files must be two digits.  The rasters must be in "
-                "geographic coordinates."),
-            label=u'Monthly Vegetation Index Path Pattern',
-            validator=self.validator)
-        self.add_input(self.monthly_vi_path_pattern)
+        self.add_input(self.max_temp_dir)
         self.site_param_spatial_index_path = inputs.File(
             args_key=u'site_param_spatial_index_path',
             helptext=(
@@ -338,14 +297,12 @@ class Forage(model.InVESTModel):
                 self.sand_proportion_path.value(),
             self.bulk_density_path.args_key: self.bulk_density_path.value(),
             self.ph_path.args_key: self.ph_path.value(),
-            self.min_temp_path_pattern.args_key:
-                self.min_temp_path_pattern.value(),
-            self.max_temp_path_pattern.args_key:
-                self.max_temp_path_pattern.value(),
-            self.monthly_precip_path_pattern.args_key:
-                self.monthly_precip_path_pattern.value(),
-            self.monthly_vi_path_pattern.args_key:
-                self.monthly_vi_path_pattern.value(),
+            self.precip_dir.args_key:
+                self.precip_dir.value(),
+            self.min_temp_dir.args_key:
+                self.min_temp_dir.value(),
+            self.max_temp_dir.args_key:
+                self.max_temp_dir.value(),
             self.site_param_spatial_index_path.args_key:
                 self.site_param_spatial_index_path.value(),
             self.veg_spatial_composition_path_pattern.args_key:

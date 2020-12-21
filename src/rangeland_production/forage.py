@@ -13742,10 +13742,9 @@ def validate(args, limit_to=None):
         'sand_proportion_path',
         'bulk_density_path',
         'ph_path',
-        'min_temp_path_pattern',
-        'max_temp_path_pattern',
-        'monthly_precip_path_pattern',
-        'monthly_vi_path_pattern',
+        'precip_dir',
+        'min_temp_dir',
+        'max_temp_dir',
         'site_param_spatial_index_path',
         'veg_spatial_composition_path_pattern',
         'animal_grazing_areas_path',
@@ -13853,30 +13852,6 @@ def validate(args, limit_to=None):
                 ['workspace_dir'], 'Workspace directory must be empty.'))
 
     # check that path patterns contain required regex matches
-    if not '<month>' in args['monthly_precip_path_pattern']:
-        validation_error_list.append((
-            ['monthly_precip_path_pattern'],
-            'Pattern must contain "<month>".'))
-    if not '<year>' in args['monthly_precip_path_pattern']:
-        validation_error_list.append((
-            ['monthly_precip_path_pattern'],
-            'Pattern must contain "<year>".'))
-    if not '<month>' in args['min_temp_path_pattern']:
-        validation_error_list.append((
-            ['min_temp_path_pattern'],
-            'Pattern must contain "<month>".'))
-    if not '<month>' in args['max_temp_path_pattern']:
-        validation_error_list.append((
-            ['max_temp_path_pattern'],
-            'Pattern must contain "<month>".'))
-    if not '<month>' in args['monthly_vi_path_pattern']:
-        validation_error_list.append((
-            ['monthly_vi_path_pattern'],
-            'Pattern must contain "<month>".'))
-    if not '<year>' in args['monthly_vi_path_pattern']:
-        validation_error_list.append((
-            ['monthly_vi_path_pattern'],
-            'Pattern must contain "<year>".'))
     if not '<PFT>' in args['veg_spatial_composition_path_pattern']:
         validation_error_list.append((
             ['veg_spatial_composition_path_pattern'],
