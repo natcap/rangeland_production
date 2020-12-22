@@ -1591,7 +1591,8 @@ def _check_pft_fractional_cover_sum(aligned_inputs, pft_id_set):
     for offset_map, raster_block in pygeoprocessing.iterblocks(
             (cover_sum_path, 1)):
         valid_mask = (raster_block != _TARGET_NODATA)
-        max_cover = max(max_cover, numpy.amax(raster_block[valid_mask]))
+        if raster_block[valid_mask].size > 0:
+            max_cover = max(max_cover, numpy.amax(raster_block[valid_mask]))
     if max_cover > 1:
         raise ValueError(
             "Fractional cover across plant functional types exceeds 1")
