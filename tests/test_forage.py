@@ -1003,8 +1003,7 @@ class foragetests(unittest.TestCase):
 
     def setUp(self):
         """Create temporary workspace directory."""
-        self.workspace_dir = "C:/Users/ginge/Desktop/temp_test_dir"
-        os.makedirs(self.workspace_dir)
+        self.workspace_dir = tempfile.mkdtemp()
         global PROCESSING_DIR
         PROCESSING_DIR = os.path.join(self.workspace_dir, "temporary_files")
         os.makedirs(PROCESSING_DIR)
