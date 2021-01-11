@@ -10,17 +10,21 @@ import sys
 import collections
 import pprint
 import multiprocessing
+import json
 
 try:
+    from . import __version__
     from . import utils
+    from . import datastack
 except ImportError:
     # When we're in a pyinstaller build, this isn't a module.
+    from rangeland_production import __version__
     from rangeland_production import utils
+    from rangeland_production import datastack
 
 
 DEFAULT_EXIT_CODE = 1
 LOGGER = logging.getLogger(__name__)
-_UIMETA = collections.namedtuple('UIMeta', 'pyname gui aliases')
 
 _PYNAME = 'rangeland_production.forage'
 _GUI_CLASS = 'forage.Forage'
@@ -44,12 +48,10 @@ def main(user_args=None):
         'Rangeland Production Model.'),
         prog='rangeland_production'
     )
-    list_group = parser.add_mutually_exclusive_group()
-    verbosity_group = parser.add_mutually_exclusive_group()
-    import rangeland_production
-
     parser.add_argument('--version', action='version',
-                        version=rangeland_production.__version__)
+                        version=__version__)
+    verbosity_group = parser.add_mutually_exclusive_group()
+
     verbosity_group.add_argument('-v', '--verbose', dest='verbosity', default=0,
                                  action='count', help=(
                                      'Increase verbosity. Affects how much is '
@@ -115,30 +117,29 @@ def main(user_args=None):
     LOGGER.debug(args)
 
     if args.headless:
-        from rangeland_production import datastack
         target_mod = _PYNAME
         model_module = importlib.import_module(name=target_mod)
         LOGGER.info('imported target %s from %s',
                     model_module.__name__, model_module)
 
         paramset = datastack.extract_parameter_set(args.datastack)
+        try:
+            parsed_datastack = datastack.extract_parameter_set(args.datastack)
+        except Exception as error:
+            parser.exit(
+                1, "Error when parsing JSON datastack:\n    " + str(error))
 
-        # prefer CLI option for workspace dir, but use paramset workspace if
-        # the CLI options do not define a workspace.
-        if args.workspace:
-            workspace = os.path.abspath(args.workspace)
-            paramset.args['workspace_dir'] = workspace
+        if not args.workspace:
+            if ('workspace_dir' not in parsed_datastack.args or
+                    parsed_datastack.args['workspace_dir'] in ['', None]):
+                parser.exit(
+                    1, ('Workspace must be defined at the command line '
+                        'or in the datastack file'))
         else:
-            if 'workspace_dir' in paramset.args:
-                workspace = paramset.args['workspace_dir']
-            else:
-                parser.exit(DEFAULT_EXIT_CODE, (
-                    'Workspace not defined. \n'
-                    'Use --workspace to specify or add a '
-                    '"workspace_dir" parameter to your datastack.'))
+            parsed_datastack.args['workspace_dir'] = args.workspace
 
-        with utils.prepare_workspace(workspace,
-                                     name=paramset.model_name,
+        with utils.prepare_workspace(parsed_datastack.args['workspace_dir'],
+                                     name=parsed_datastack.model_name,
                                      logging_level=log_level):
             LOGGER.log(datastack.ARGS_LOG_LEVEL,
                        datastack.format_args_dict(paramset.args,

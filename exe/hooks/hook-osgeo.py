@@ -9,7 +9,7 @@ if is_darwin:
     # glob for gcs.csv instead of passing the env name.
     # import glob
     # datas = collect_system_data_files(
-    #   path=os.path.dirname(glob.glob('**/gcs.csv', recursive=True)[0]),
+    # 	path=os.path.dirname(glob.glob('**/gcs.csv', recursive=True)[0]),
     #     destdir='gdal-data')
     pass
 else:

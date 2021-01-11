@@ -9,7 +9,9 @@ import glob
 current_dir = os.getcwd()  # assume we're building from the project root
 block_cipher = None
 exename = 'rangeland_production'
+conda_env = os.environ['CONDA_PREFIX']
 
+proj_datas = ((os.path.join(conda_env, 'Library/share/proj'), 'proj'))
 
 kwargs = {
     'hookspath': [os.path.join(current_dir, 'exe', 'hooks')],
@@ -22,9 +24,9 @@ kwargs = {
         'distutils',
         'distutils.dist',
         'rtree',  # mac builds aren't picking up rtree by default.
-		'sip',
+        'pkg_resources.py2_warn'
     ],
-    'datas': [('qt.conf', '.')],
+    'datas': [('qt.conf', '.'), proj_datas],
     'cipher': block_cipher,
 }
 
@@ -45,7 +47,10 @@ a.binaries += [
     ('msvcp90.dll', 'C:\\Windows\\System32\\msvcp90.dll', 'BINARY'),
     ('msvcr90.dll', 'C:\\Windows\\System32\\msvcr90.dll', 'BINARY')
 ]
-
+# add rtree dependency dynamic libraries from conda environment
+a.binaries += [
+	(os.path.basename(name), name, 'BINARY') for name in
+	glob.glob(os.path.join(conda_env, 'Library/bin/spatialindex*.dll'))]
 # .exe extension is required if we're on windows.
 exename += '.exe'
 
@@ -61,10 +66,10 @@ exe = EXE(
 
 # Collect Files into Distributable Folder/File
 dist = COLLECT(
-        exe,
-        a.binaries,
-        a.zipfiles,
-        a.datas,
-        name="rangeland_production",  # name of the output folder
-        strip=False,
-        upx=False)
+	exe,
+	a.binaries,
+	a.zipfiles,
+	a.datas,
+	name="rangeland_production",  # name of the output folder
+	strip=False,
+	upx=False)
