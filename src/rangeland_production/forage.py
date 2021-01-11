@@ -616,11 +616,6 @@ def execute(args):
     """
     LOGGER.info("model execute: %s", args)
 
-    # fail early on if workspace directory is not empty
-    if os.path.exists(args['workspace_dir']):
-        if len(os.listdir(args['workspace_dir'])) > 0:
-            raise ValueError('Workspace directory must be empty.')
-
     starting_month = int(args['starting_month'])
     starting_year = int(args['starting_year'])
     n_months = int(args['n_months'])

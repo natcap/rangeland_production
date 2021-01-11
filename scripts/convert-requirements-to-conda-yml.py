@@ -3,14 +3,15 @@
 
 import sys
 import argparse
-import requests
 import pkg_resources
 
+import requests
+
+
 FEEDSTOCK_URL = 'https://github.com/conda-forge/{package}-feedstock'
-YML_TEMPLATE = """name: invest-env
-channels:
+YML_TEMPLATE = """channels:
 - conda-forge
-- default
+- defaults
 dependencies:
 {conda_dependencies}
 {pip_dependencies}
@@ -55,7 +56,8 @@ def build_environment_from_requirements(cli_args):
     requirements_files = args.req
 
     pip_requirements = set([])
-    conda_requirements = set(['python=2.7'])
+    # conda likes it when you list pip if you're using pip.
+    conda_requirements = set(['pip'])
     for requirement_file in requirements_files:
         for line in open(requirement_file):
             line = line.strip()
@@ -85,9 +87,9 @@ def build_environment_from_requirements(cli_args):
     pip_deps_string = '- pip:\n' + '\n'.join(['  - %s' % dep for dep in
                                               sorted(pip_requirements,
                                                      key=lambda x: x.lower())])
-    print YML_TEMPLATE.format(
+    print(YML_TEMPLATE.format(
         conda_dependencies=conda_deps_string,
-        pip_dependencies=pip_deps_string)
+        pip_dependencies=pip_deps_string))
 
 
 if __name__ == '__main__':

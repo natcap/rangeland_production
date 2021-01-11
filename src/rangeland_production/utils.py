@@ -36,6 +36,15 @@ GDAL_ERROR_LEVELS = {
     gdal.CE_Fatal: logging.CRITICAL,
 }
 
+# In GDAL 3.0 spatial references no longer ignore Geographic CRS Axis Order
+# and conform to Lat first, Lon Second. Transforms expect (lat, lon) order
+# as opposed to the GIS friendly (lon, lat). See
+# https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn Axis order
+# issues. SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER) swaps the
+# axis order, which will use Lon,Lat order for Geographic CRS, but otherwise
+# leaves Projected CRS alone
+DEFAULT_OSR_AXIS_MAPPING_STRATEGY = osr.OAMS_TRADITIONAL_GIS_ORDER
+
 
 @contextlib.contextmanager
 def capture_gdal_logging():
